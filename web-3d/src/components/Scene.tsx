@@ -8,7 +8,8 @@
 
 import { EarthLoader } from './earth/EarthLoader'
 import { StarField } from './stars/StarField'
-import { ParticleField } from './particles/ParticleField'
+import { ParticleField, AmbientDust } from './particles/ParticleField'
+import { PulsePoints } from './particles/PulsePoints'
 import { CameraController } from './camera/CameraController'
 import { PostProcessing } from './postprocessing/PostProcessing'
 
@@ -20,6 +21,12 @@ export default function Scene() {
 
       {/* 轨道粒子系统（阶段 8：~3000 轨道粒子） */}
       <ParticleField />
+
+      {/* 漂浮尘埃（阶段 9：~3000 布朗运动尘埃） */}
+      <AmbientDust />
+
+      {/* 地表脉冲点（阶段 9：~200 冰蓝色闪烁点） */}
+      <PulsePoints />
 
       {/* 地球球体 + 纹理 */}
       <EarthLoader />

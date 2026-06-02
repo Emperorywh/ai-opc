@@ -1,26 +1,37 @@
 /**
- * 轨道粒子系统
- * ~3000 轨道粒子沿不同倾角椭圆轨道围绕地球公转
+ * 粒子系统主组件
+ * 包含轨道粒子 + 漂浮尘埃两部分
  *
- * 设计规格 §6.1：
- * - GPU THREE.Points + 自定义 Shader，单次 draw call
- * - 发光小点，冰蓝色到白色渐变，大小随机（1-3px）
- * - 轨道粒子位置计算在 vertex shader 中完成（GPU 端）
- *
- * 阶段 9 将补全漂浮尘埃部分。
+ * 设计规格 §6.1：~3000 轨道粒子，GPU Points + 自定义 Shader
+ * 设计规格 §6.2：~3000 漂浮尘埃，布朗运动 / simplex noise
  */
 import { useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { ORBITAL_PARTICLE_COUNT } from '../../utils/constants'
+import {
+  ORBITAL_PARTICLE_COUNT,
+  AMBIENT_DUST_COUNT,
+} from '../../utils/constants'
 
 import particlesVertexShader from './shaders/particles.vert?raw'
 import particlesFragmentShader from './shaders/particles.frag?raw'
+import dustVertexShader from './shaders/dust.vert?raw'
+import dustFragmentShader from './shaders/dust.frag?raw'
 
+// ── 轨道粒子常量 ──────────────────────────────────────
 /** 轨道半径范围（地球半径 1.0，大气层 1.05，粒子须在更外侧） */
 const ORBIT_RADIUS_MIN = 1.2
 const ORBIT_RADIUS_MAX = 3.0
 
+// ── 漂浮尘埃常量 ──────────────────────────────────────
+/** 尘埃分布球壳内径 */
+const DUST_RADIUS_MIN = 1.3
+/** 尘埃分布球壳外径 */
+const DUST_RADIUS_MAX = 4.0
+
+// ──────────────────────────────────────────────────────
+// 轨道粒子组件（阶段 8）
+// ──────────────────────────────────────────────────────
 export function ParticleField() {
   const { geometry, uniforms } = useMemo(() => {
     const count = ORBITAL_PARTICLE_COUNT
@@ -95,6 +106,73 @@ export function ParticleField() {
       <shaderMaterial
         vertexShader={particlesVertexShader}
         fragmentShader={particlesFragmentShader}
+        uniforms={uniforms}
+        glslVersion={THREE.GLSL3}
+        transparent
+        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+      />
+    </points>
+  )
+}
+
+// ──────────────────────────────────────────────────────
+// 漂浮尘埃组件（阶段 9）
+// ──────────────────────────────────────────────────────
+export function AmbientDust() {
+  const { geometry, uniforms } = useMemo(() => {
+    const count = AMBIENT_DUST_COUNT
+    const geo = new THREE.BufferGeometry()
+
+    const positions = new Float32Array(count * 3)
+    const aSize = new Float32Array(count)
+    const aPhase = new Float32Array(count)
+    const aDriftSpeed = new Float32Array(count)
+
+    for (let i = 0; i < count; i++) {
+      // 球壳内随机位置
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      const r =
+        DUST_RADIUS_MIN +
+        Math.random() * (DUST_RADIUS_MAX - DUST_RADIUS_MIN)
+
+      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta)
+      positions[i * 3 + 1] = r * Math.cos(phi)
+      positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta)
+
+      // 点大小：0.5–1.5 px（比轨道粒子更小）
+      aSize[i] = 0.5 + Math.random() * 1.0
+
+      // 随机相位（让噪声轨迹各不相同）
+      aPhase[i] = Math.random() * 1000.0
+
+      // 漂移速度：0.05–0.2（很慢）
+      aDriftSpeed[i] = 0.05 + Math.random() * 0.15
+    }
+
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geo.setAttribute('aSize', new THREE.BufferAttribute(aSize, 1))
+    geo.setAttribute('aPhase', new THREE.BufferAttribute(aPhase, 1))
+    geo.setAttribute('aDriftSpeed', new THREE.BufferAttribute(aDriftSpeed, 1))
+
+    const uniforms = {
+      uTime: { value: 0 },
+    }
+
+    return { geometry: geo, uniforms }
+  }, [])
+
+  // 逐帧更新时间 uniform（驱动 shader 内的噪声布朗运动）
+  useFrame(({ clock }) => {
+    uniforms.uTime.value = clock.getElapsedTime()
+  })
+
+  return (
+    <points geometry={geometry} frustumCulled={false}>
+      <shaderMaterial
+        vertexShader={dustVertexShader}
+        fragmentShader={dustFragmentShader}
         uniforms={uniforms}
         glslVersion={THREE.GLSL3}
         transparent
