@@ -9,6 +9,7 @@
 import { EarthLoader } from './earth/EarthLoader'
 import { StarField } from './stars/StarField'
 import { CameraController } from './camera/CameraController'
+import { PostProcessing } from './postprocessing/PostProcessing'
 
 export default function Scene() {
   return (
@@ -21,6 +22,9 @@ export default function Scene() {
 
       {/* 相机控制（阶段 6：鼠标拖拽旋转 + 滚轮缩放） */}
       <CameraController />
+
+      {/* 后处理（阶段 7：Bloom） */}
+      <PostProcessing />
     </>
   )
 }

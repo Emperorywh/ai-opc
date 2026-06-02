@@ -656,7 +656,7 @@ export function useSceneState() {
 
 **验证：** 鼠标拖拽可旋转地球，滚轮可缩放，地球持续缓慢自转
 
-### 阶段 7：Bloom 后处理
+### 阶段 7：Bloom 后处理 ✅ 已完成（2026-06-02）
 
 **做什么：** postprocessing 库集成、Bloom 效果配置（让发光元素产生光晕扩散）
 
