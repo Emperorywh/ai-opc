@@ -15,8 +15,8 @@ import {
   EARTH_RADIUS,
   EARTH_SEGMENTS,
   EARTH_TILT,
-  EARTH_ROTATION_SPEED,
 } from '../../utils/constants'
+import { useSceneState } from '../../stores/useSceneState'
 
 import earthVertexShader from './shaders/earth.vert?raw'
 import earthFragmentShader from './shaders/earth.frag?raw'
@@ -33,6 +33,7 @@ const SUN_DIRECTION = new THREE.Vector3(1.0, 0.3, 0.5).normalize()
 
 export function Earth() {
   const meshRef = useRef<THREE.Mesh>(null)
+  const sceneState = useSceneState()
 
   // 加载白天和夜景纹理（drei useTexture 触发 Suspense）
   const [dayMap, nightMap] = useTexture([TEXTURE_DAY_MAP, TEXTURE_NIGHT_MAP])
@@ -58,10 +59,10 @@ export function Earth() {
     [dayMap, nightMap],
   )
 
-  // 地球自转（规格 §5.4：0.02 rad/s）
-  useFrame((_, delta) => {
+  // 地球自转：读取 useSceneState 的自转角度
+  useFrame(() => {
     if (meshRef.current) {
-      meshRef.current.rotation.y += EARTH_ROTATION_SPEED * delta
+      meshRef.current.rotation.y = sceneState.current.earthRotation
     }
   })
 

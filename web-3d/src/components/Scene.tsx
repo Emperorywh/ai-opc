@@ -8,6 +8,7 @@
 
 import { EarthLoader } from './earth/EarthLoader'
 import { StarField } from './stars/StarField'
+import { CameraController } from './camera/CameraController'
 
 export default function Scene() {
   return (
@@ -17,6 +18,9 @@ export default function Scene() {
 
       {/* 地球球体 + 纹理 */}
       <EarthLoader />
+
+      {/* 相机控制（阶段 6：鼠标拖拽旋转 + 滚轮缩放） */}
+      <CameraController />
     </>
   )
 }
