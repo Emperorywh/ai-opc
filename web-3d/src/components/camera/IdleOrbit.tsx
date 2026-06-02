@@ -2,13 +2,13 @@
  * 空闲自动公转组件（阶段 11）
  * 3 秒无输入后相机缓慢自动公转
  *
+ * 阶段 14 改动：
+ * - 移除 setInputMode('idle') 调用，模式切换由 useInputPriority 统一管理
+ * - 仅保留公转动画逻辑
+ *
  * 设计规格 §7.1：
  * - 空闲模式：3 秒无任何输入 → 相机缓慢自动公转
  * - 任意输入 → 立即退出空闲模式
- *
- * 设计规格 §7.2 状态机：
- * - [任意模式] ──3秒无输入──→ [空闲模式]
- * - [空闲模式] ──任何输入──→ [最后活跃的模式]
  *
  * 设计规格 §7.2 注：
  * - 切换时相机状态平滑过渡，不产生跳变
@@ -20,9 +20,7 @@
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { store } from '../../stores/store'
-import { setInputMode } from '../../stores/inputSlice'
 import { getCameraState } from '../../stores/useCameraState'
-import { IDLE_TIMEOUT } from '../../utils/constants'
 
 /** 空闲公转速度（rad/s）——缓慢水平公转，营造电影感 */
 const IDLE_ORBIT_SPEED = 0.08
@@ -39,16 +37,10 @@ export function IdleOrbit() {
 
   useFrame((_, delta) => {
     const { input } = store.getState()
-    const now = Date.now()
-    const timeSinceInput = (now - input.lastInputTime) / 1000
-
-    // ── 空闲检测 ─────────────────────────────────────
-    // 超过 IDLE_TIMEOUT 无输入且当前不是空闲模式 → 切换为空闲
-    if (input.mode !== 'idle' && timeSinceInput > IDLE_TIMEOUT) {
-      store.dispatch(setInputMode('idle'))
-    }
 
     // ── 混合因子平滑过渡 ─────────────────────────────
+    // 阶段 14：不再在此处 dispatch setInputMode('idle')，
+    //          由 useInputPriority 统一管理模式切换
     const isIdle = input.mode === 'idle'
     const target = isIdle ? 1 : 0
     const speed = isIdle ? BLEND_IN_SPEED : BLEND_OUT_SPEED

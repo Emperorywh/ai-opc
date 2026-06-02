@@ -12,6 +12,8 @@ export interface InputState {
   handDetected: boolean
   palmPosition: [number, number] | null
   pinchDistance: number | null
+  /** 上一次活跃的输入模式（用于空闲恢复） */
+  lastActiveMode: Exclude<InputMode, 'idle'>
 }
 
 const initialState: InputState = {
@@ -20,6 +22,7 @@ const initialState: InputState = {
   handDetected: false,
   palmPosition: null,
   pinchDistance: null,
+  lastActiveMode: 'mouse',
 }
 
 const inputSlice = createSlice({
@@ -44,6 +47,9 @@ const inputSlice = createSlice({
     setPinchDistance(state, action: PayloadAction<number | null>) {
       state.pinchDistance = action.payload
     },
+    setLastActiveMode(state, action: PayloadAction<Exclude<InputMode, 'idle'>>) {
+      state.lastActiveMode = action.payload
+    },
   },
 })
 
@@ -53,6 +59,7 @@ export const {
   setHandDetected,
   setPalmPosition,
   setPinchDistance,
+  setLastActiveMode,
 } = inputSlice.actions
 
 export default inputSlice.reducer

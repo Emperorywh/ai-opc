@@ -3,6 +3,7 @@
  * 阶段 6：鼠标拖拽旋转 + 滚轮缩放
  * 阶段 11：Redux 联动（空闲模式打断）
  * 阶段 13：手势模式（双阶段平滑旋转 + 捏合缩放）
+ * 阶段 14：移除 setInputMode 调用，模式切换由 useInputPriority 统一管理
  *
  * 设计规格 §7.1：
  * - 拖拽 → 地球旋转（grab 手感：拖右地球右转）
@@ -27,7 +28,7 @@ import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useCameraState, getCameraState } from '../../stores/useCameraState'
 import { store } from '../../stores/store'
-import { recordInput, setInputMode } from '../../stores/inputSlice'
+import { recordInput } from '../../stores/inputSlice'
 import { useSmoothing } from '../../hooks/useSmoothing'
 import { GESTURE_DAMPING_FACTOR } from '../../utils/constants'
 
@@ -48,14 +49,6 @@ const GESTURE_ROTATION_SENSITIVITY = 4.0
 const GESTURE_PINCH_SENSITIVITY = 15.0
 /** 手势速度衰减系数（手离开后逐渐停止，~0.5s） */
 const GESTURE_VELOCITY_DECAY = 0.92
-
-// ── 工具函数 ────────────────────────────────────────────
-
-/** 记录用户输入并切换为鼠标模式 */
-function markMouseInput() {
-  store.dispatch(recordInput())
-  store.dispatch(setInputMode('mouse'))
-}
 
 // ── 组件 ────────────────────────────────────────────────
 
@@ -132,9 +125,9 @@ export function CameraController() {
         pinch: smoothed.pinchDistance,
       }
 
-      // 记录输入（防止进入空闲模式）+ 设置为手势模式
+      // 记录输入（防止进入空闲模式）
+      // 阶段 14：不再 dispatch setInputMode，由 useInputPriority 统一管理
       store.dispatch(recordInput())
-      store.dispatch(setInputMode('gesture'))
     } else {
       // ── 手离开画面 ───────────────────────────────────
 
@@ -193,8 +186,8 @@ export function CameraController() {
       cameraState.current.velocity.theta = 0
       cameraState.current.velocity.phi = 0
 
-      // 记录用户输入，打断空闲公转
-      markMouseInput()
+      // 阶段 14：仅记录输入，模式切换由 useInputPriority 管理
+      store.dispatch(recordInput())
 
       // 捕获指针——即使鼠标移出 canvas 也持续接收事件
       canvas.setPointerCapture(e.pointerId)
@@ -221,7 +214,7 @@ export function CameraController() {
       recentVelocity.current.phi = dPhi * INERTIA_SCALE
 
       // 持续记录用户输入
-      markMouseInput()
+      store.dispatch(recordInput())
     }
 
     const onPointerUp = (e: PointerEvent) => {
@@ -235,7 +228,7 @@ export function CameraController() {
       cameraState.current.velocity.phi = recentVelocity.current.phi
 
       // 释放时也记录输入时间（松手也是交互）
-      markMouseInput()
+      store.dispatch(recordInput())
     }
 
     const onWheel = (e: WheelEvent) => {
@@ -246,7 +239,7 @@ export function CameraController() {
       cameraState.current.distance *= factor
 
       // 滚轮操作记录输入
-      markMouseInput()
+      store.dispatch(recordInput())
     }
 
     // 绑定原生事件（不与 R3F raycaster 事件冲突）
