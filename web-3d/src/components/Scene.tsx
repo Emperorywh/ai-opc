@@ -11,6 +11,7 @@ import { StarField } from './stars/StarField'
 import { ParticleField, AmbientDust } from './particles/ParticleField'
 import { PulsePoints } from './particles/PulsePoints'
 import { CameraController } from './camera/CameraController'
+import { IdleOrbit } from './camera/IdleOrbit'
 import { PostProcessing } from './postprocessing/PostProcessing'
 
 export default function Scene() {
@@ -31,10 +32,17 @@ export default function Scene() {
       {/* 地球球体 + 纹理 */}
       <EarthLoader />
 
-      {/* 相机控制（阶段 6：鼠标拖拽旋转 + 滚轮缩放） */}
+      {/*
+        空闲自动公转（阶段 11）
+        必须在 CameraController 之前，确保 IdleOrbit 的 useFrame
+        先于 useCameraState 的帧循环执行（theta 先改，后更新相机）
+      */}
+      <IdleOrbit />
+
+      {/* 相机控制（阶段 6：鼠标拖拽旋转 + 滚轮缩放；阶段 11：Redux 联动） */}
       <CameraController />
 
-      {/* 后处理（阶段 7：Bloom） */}
+      {/* 后处理（阶段 7：Bloom；阶段 10：Vignette + Noise） */}
       <PostProcessing />
     </>
   )

@@ -680,7 +680,7 @@ export function useSceneState() {
 
 **验证：** 地球周围有细小的尘埃浮动增加深度感，地表随机位置出现冰蓝色脉冲闪烁
 
-### 阶段 10：Vignette + Noise 后处理
+### 阶段 10：Vignette + Noise 后处理 ✅ 已完成（2026-06-02）
 
 **做什么：** 在后处理链中添加 Vignette（边缘变暗）和 Noise（胶片噪点）
 
@@ -688,15 +688,15 @@ export function useSceneState() {
 
 **验证：** 画面边缘自然变暗，焦点集中在地球；极轻微胶片质感
 
-### 阶段 11：空闲自动公转 + 惯性阻尼
+### 阶段 11：空闲自动公转 + 惯性阻尼 ✅ 已完成（2026-06-02）
 
 **做什么：** 空闲检测（3 秒无输入 → 自动公转）、操作时的惯性和阻尼系统
 
-**产出文件：** `IdleOrbit.tsx`、`CameraController.tsx`（扩展）、`inputSlice.ts`
+**产出文件：** `IdleOrbit.tsx`、`CameraController.tsx`（扩展）、`useCameraState.ts`（重构为共享单例）
 
 **验证：** 停止操作 3 秒后相机自动缓慢公转；拖拽松手后地球惯性滑动并逐渐停下
 
-### 阶段 12：MediaPipe 手势集成
+### 阶段 12：MediaPipe 手势集成 ✅ 已完成（2026-06-02）
 
 **做什么：** MediaPipe Hands 初始化、摄像头权限管理、手部 landmark 检测、静默降级
 
