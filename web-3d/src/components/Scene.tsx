@@ -8,6 +8,7 @@
 
 import { EarthLoader } from './earth/EarthLoader'
 import { StarField } from './stars/StarField'
+import { ParticleField } from './particles/ParticleField'
 import { CameraController } from './camera/CameraController'
 import { PostProcessing } from './postprocessing/PostProcessing'
 
@@ -16,6 +17,9 @@ export default function Scene() {
     <>
       {/* 程序化星空（阶段 5） */}
       <StarField />
+
+      {/* 轨道粒子系统（阶段 8：~3000 轨道粒子） */}
+      <ParticleField />
 
       {/* 地球球体 + 纹理 */}
       <EarthLoader />
