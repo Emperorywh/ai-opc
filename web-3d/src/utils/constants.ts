@@ -49,3 +49,21 @@ export const BLOOM_LUMINANCE_SMOOTHING = 0.3
 export const VIGNETTE_DARKNESS = 0.4
 export const VIGNETTE_OFFSET = 0.5
 export const NOISE_OPACITY = 0.02
+
+// ── 加载秀场（阶段 15~16）──────────────────────────────
+/** 聚合粒子数量 */
+export const LOADING_PARTICLE_COUNT = 5000
+/** 起始散布球壳内径 */
+export const LOADING_SCATTER_RADIUS_MIN = 5.0
+/** 起始散布球壳外径 */
+export const LOADING_SCATTER_RADIUS_MAX = 12.0
+/** 目标球体半径（= 地球半径） */
+export const LOADING_TARGET_RADIUS = 1.0
+/** 聚合动画时长（秒） */
+export const LOADING_DURATION = 3.0
+/** 加载粒子淡出时长（秒）—— texture 阶段 */
+export const LOADING_FADE_OUT_DURATION = 1.5
+/** 纹理显现时长（秒）—— texture 阶段 */
+export const LOADING_TEXTURE_REVEAL_DURATION = 2.0
+/** 系统激活时长（秒）—— activate 阶段 */
+export const LOADING_ACTIVATE_DURATION = 1.0

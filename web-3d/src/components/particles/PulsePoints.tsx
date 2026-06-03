@@ -7,6 +7,10 @@
  * - 亮起 → 衰减 → 消失，周期 0.5–2 秒
  * - BufferAttribute 动态更新位置和亮度
  * - 跟随地球倾斜和自转
+ *
+ * 阶段 17 优化：
+ * - 使用 getSceneState() 读取共享场景状态（不再注册独立 useFrame 帧循环）
+ * - 缓冲区更新优化：position 仅在脉冲重生时标记 needsUpdate
  */
 import { useRef, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
@@ -16,7 +20,7 @@ import {
   EARTH_RADIUS,
   EARTH_TILT,
 } from '../../utils/constants'
-import { useSceneState } from '../../stores/useSceneState'
+import { getSceneState } from '../../stores/useSceneState'
 
 import pulseVertexShader from './shaders/pulse.vert?raw'
 import pulseFragmentShader from './shaders/pulse.frag?raw'
@@ -52,7 +56,6 @@ function randomSpherePosition(): [number, number, number] {
 
 export function PulsePoints() {
   const groupRef = useRef<THREE.Group>(null)
-  const sceneState = useSceneState()
 
   const { geometry, pulses, posAttr, alphaAttr, spreadAttr } = useMemo(() => {
     const count = SURFACE_PULSE_COUNT
@@ -110,10 +113,13 @@ export function PulsePoints() {
 
   // 逐帧：更新脉冲生命周期 + 跟随地球自转
   useFrame((_, delta) => {
-    // 跟随地球自转
+    // 跟随地球自转（使用共享单例，不注册独立帧循环）
     if (groupRef.current) {
-      groupRef.current.rotation.y = sceneState.current.earthRotation
+      groupRef.current.rotation.y = getSceneState().earthRotation
     }
+
+    // 跟踪是否有脉冲重生（位置变化）
+    let positionChanged = false
 
     for (let i = 0; i < pulses.length; i++) {
       const p = pulses[i]
@@ -127,6 +133,7 @@ export function PulsePoints() {
 
         const [x, y, z] = randomSpherePosition()
         posAttr.setXYZ(i, x, y, z)
+        positionChanged = true
       }
 
       // 亮度曲线：快速亮起 → 缓慢衰减
@@ -141,7 +148,11 @@ export function PulsePoints() {
       spreadAttr.setX(i, 0.5 + brightness * 1.0)
     }
 
-    posAttr.needsUpdate = true
+    // 仅在位置实际变化时上传 position 缓冲区
+    if (positionChanged) {
+      posAttr.needsUpdate = true
+    }
+    // alpha 和 spread 每帧都在变（亮度持续变化）
     alphaAttr.needsUpdate = true
     spreadAttr.needsUpdate = true
   })

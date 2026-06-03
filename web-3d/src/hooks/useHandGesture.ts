@@ -199,11 +199,6 @@ export function useHandGesture() {
         store.dispatch(setHandDetected(true))
         store.dispatch(setPalmPosition([palmCenterX, palmCenterY]))
         store.dispatch(setPinchDistance(pinchDist))
-
-        // 阶段 12 验证日志
-        console.log(
-          `[HandGesture] palmCenter: (${palmCenterX.toFixed(3)}, ${palmCenterY.toFixed(3)}), pinchDistance: ${pinchDist.toFixed(3)}`,
-        )
       } else {
         // 手离开画面
         latestResult.current = null

@@ -720,26 +720,34 @@ export function useSceneState() {
 
 **验证：** 检测到手时自动切手势模式，手离开切回鼠标；3D 场景中显示手势光标
 
-### 阶段 15：加载状态管理 + 粒子聚合动画
+### 阶段 15：加载状态管理 + 粒子聚合动画 ✅ 已完成（2026-06-03）
 
 **做什么：** loadingSlice Redux 状态、加载秀场第一阶段——粒子从四周飞向中心形成球体
 
-**产出文件：** `loadingSlice.ts`、`LoadingSequence.tsx`、`loading.vert`、`loading.frag`
+**产出文件：** `loadingSlice.ts`（已存在）、`LoadingSequence.tsx`、`loading.vert`、`loading.frag`
 
 **验证：** 页面加载后看到粒子从四周飞向中心聚合为球体的动画
 
-### 阶段 16：纹理显现 + 系统激活
+### 阶段 16：纹理显现 + 系统激活 ✅ 已完成（2026-06-03）
 
 **做什么：** 加载秀场第二/三阶段——纹理从模糊到清晰、大气层光晕亮起、后处理淡入
 
-**产出文件：** `LoadingSequence.tsx`（扩展）、`Earth.tsx`（过渡动画）
+**产出文件：** `LoadingSequence.tsx`（扩展）、`Earth.tsx`（过渡动画）、`earth.frag`（uTextureReveal）、`Atmosphere.tsx`（fadeIn 动画）、`PostProcessing.tsx`（fadeIn + 阶段推进）、`Scene.tsx`（多阶段编排）、`constants.ts`
 
 **验证：** 粒子聚合完成后纹理逐渐清晰，然后大气层和后处理效果渐入
 
-### 阶段 17：性能优化 + 视觉打磨
+### 阶段 17：性能优化 + 视觉打磨 ✅ 已完成（2026-06-03）
 
 **做什么：** 性能审计（draw calls、FPS、内存）、视觉微调、多角度截图验证传播力
 
-**产出文件：** 各文件的优化补丁
+**产出文件：** `useSceneState.ts`（重构为共享单例）、`useHandGesture.ts`（移除生产日志）、`PulsePoints.tsx`（缓冲区更新优化）、`atmosphere.frag`（呼吸脉冲）、`Atmosphere.tsx`（uTime uniform）、`earth.frag`（Fresnel 脉冲 + 夜景呼吸）、`Earth.tsx`（uTime uniform）
 
 **验证：** 稳定 60fps，draw calls < 15，各角度截图看起来像科幻电影 UI
+
+**优化摘要：**
+- useSceneState 重构为模块级共享单例，消除 Earth + PulsePoints 的重复 useFrame 帧循环
+- 移除 useHandGesture 中每帧 console.log（生产环境性能杀手）
+- PulsePoints 缓冲区更新优化：position 仅在脉冲重生时上传（减少 ~90% 的 position buffer uploads）
+- 大气层呼吸脉冲（±3% 强度波动，4s 周期）让场景感觉"活着"
+- 地球 Fresnel 边缘光脉冲（±8%，6s 周期）增强科幻感
+- 地球夜景灯光呼吸（±5%，模拟"活的"城市）

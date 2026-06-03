@@ -11,6 +11,12 @@ uniform sampler2D uNightMap;
 // ── 光照 Uniform ──────────────────────────────────────
 uniform vec3 uSunDirection; // 世界空间日光方向（归一化）
 
+// ── 加载过渡 Uniform（阶段 16）─────────────────────────
+uniform float uTextureReveal; // 0.0（冰蓝光球）~ 1.0（完整纹理）
+
+// ── 视觉增强 Uniform（阶段 17）─────────────────────────
+uniform float uTime;          // 运行时间（Fresnel 脉冲 + 夜景呼吸）
+
 // ── GLSL3 需要手动声明片段输出变量 ────────────────────
 layout(location = 0) out highp vec4 pc_fragColor;
 
@@ -44,15 +50,33 @@ void main() {
 
   // ── 混合 ───────────────────────────────────────────
   // 夜景面：城市灯光增强发光（×3.0）
-  vec3 surface = mix(nightColor * 3.0, dayColor, dayFactor);
+  vec3 texturedSurface = mix(nightColor * 3.0, dayColor, dayFactor);
 
   // ── Fresnel 边缘发光（冰蓝色）───────────────────────
   vec3 viewDirNorm = normalize(vViewDir);
   float fresnel = pow(1.0 - max(0.0, dot(viewDirNorm, vNormal)), 3.0);
-  surface += vec3(0.3, 0.7, 1.0) * fresnel * 0.6;
+
+  // 阶段 17：Fresnel 脉冲增强——微弱的边缘光呼吸（±8%，周期 ~6 秒）
+  float fresnelPulse = 1.0 + 0.08 * sin(uTime * 1.047);
+  texturedSurface += vec3(0.3, 0.7, 1.0) * fresnel * 0.6 * fresnelPulse;
 
   // ── 程序化大气散射 ────────────────────────────────
-  surface += atmosphereScattering(vWorldNormal, sunDir);
+  texturedSurface += atmosphereScattering(vWorldNormal, sunDir);
+
+  // ── 阶段 17：夜景灯光微弱呼吸 ──────────────────────
+  // 夜面城市灯光有 ±5% 的呼吸，模拟"活的"城市
+  float nightPulse = 1.0 + 0.05 * sin(uTime * 0.8);
+  // 仅在夜面应用（dayFactor < 0.5 时）
+  texturedSurface *= mix(nightPulse, 1.0, smoothstep(0.2, 0.6, dayFactor));
+
+  // ── 纹理显现过渡（阶段 16）────────────────────────
+  // uTextureReveal: 0.0 = 纯冰蓝光球（粒子聚合后的视觉延续）
+  //                 1.0 = 完整纹理表面
+  vec3 baseGlow = vec3(0.2, 0.5, 0.85) * 0.7;
+  // Fresnel 边缘光在过渡期间始终可见，保持轮廓感
+  baseGlow += vec3(0.3, 0.7, 1.0) * fresnel * 0.8;
+
+  vec3 surface = mix(baseGlow, texturedSurface, uTextureReveal);
 
   pc_fragColor = vec4(surface, 1.0);
 }
