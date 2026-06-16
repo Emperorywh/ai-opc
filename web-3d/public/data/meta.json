@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "source": "synthetic",
+  "projection": "equirectangular",
+  "width": 1024,
+  "height": 512,
+  "elevationMin": -5000,
+  "elevationMax": 6500,
+  "seaLevelMeters": 0,
+  "heightExaggeration": 2.5
+}

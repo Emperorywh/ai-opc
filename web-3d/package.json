@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "gen:dem": "node scripts/data-pipeline/0-synthetic-dem.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -34,6 +35,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "simplex-noise": "^4.0.3",
     "subset-font": "^2.5.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
