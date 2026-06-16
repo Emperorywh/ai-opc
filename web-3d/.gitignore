@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# 离线数据 pipeline 原始资产（GB 级 GEBCO tiles 等，不进 git；仅烘焙产物 public/data/* 进 git）
+scripts/data-pipeline/raw/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

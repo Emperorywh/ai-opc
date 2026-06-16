@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "gen:dem": "node scripts/data-pipeline/0-synthetic-dem.mjs",
+    "gen:dem:real": "node scripts/data-pipeline/1-gebco-dem.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -38,6 +39,7 @@
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
+    "geotiff": "^3.0.5",
     "globals": "^17.6.0",
     "simplex-noise": "^4.0.3",
     "subset-font": "^2.5.0",
