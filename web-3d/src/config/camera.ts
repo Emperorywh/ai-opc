@@ -16,6 +16,10 @@ export const cameraConfig = {
   panBounds: { xMin: -1.1, xMax: 1.1, zMin: -0.6, zMax: 0.6 },
   /** 缩放距离区间。 */
   zoom: { min: 1.2, max: 3.5 },
+  /** 垂直视场角（度）。 */
+  fov: 45,
+  /** M1 静态相机距地图中心的距离（落在 zoom.min/max 内）；M3 由 SandboxControls 接管。 */
+  initialDistance: 2.5,
   /** 阻尼平滑系数。 */
   damping: 0.1,
 } as const

@@ -1,15 +1,60 @@
 /**
  * R3F 场景内容根（SPEC §4.1 / §4.3 渲染管线）。
  *
- * Task 01：最小占位（背景色），确保空 Canvas 无 console error。
- * 后续 Task 依次填充：Terrain(04) → Ocean(06) → Labels(14) → Atmosphere(16) → ...
+ * Task 04：挂载 Terrain（GPU 顶点位移 + 基础分层着色）+ 静态倾斜相机 + 光照。
+ * 加载链路：loadTerrainAssets()（Task 03）异步 fetch+parse → 渲染 Terrain。
+ * 后续：Ocean(06) → Labels(14) → Atmosphere(16) → ...
  */
+import { useEffect, useState } from 'react'
+import { loadTerrainAssets } from '../data/assets'
+import type { TerrainAssets } from '../data/types'
+import { StaticCamera } from './camera/StaticCamera'
+import { Terrain } from './terrain/Terrain'
+import { terrainLight } from './terrain/terrainMaterial'
+
 export function Scene() {
+  const [assets, setAssets] = useState<TerrainAssets | null>(null)
+  const [error, setError] = useState<unknown>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    loadTerrainAssets()
+      .then((a) => {
+        if (!cancelled) setAssets(a)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (error) {
+    // M1 仅记录；加载进度页 + 降级在 M5（Task 17）
+    console.error('[Scene] 地形资产加载失败：', error)
+  }
+
   return (
     <>
       <color attach="background" args={['#0e1014']} />
-      {/* TODO(Task 04): <Terrain /> */}
-      {/* TODO(Task 06): <Ocean /> */}
+      <StaticCamera />
+      {/*
+        光照参数与 terrainMaterial 同源（SPEC §2.3）。
+        M1 自定义 ShaderMaterial 自包含光照（不接收 R3F 灯）；
+        此处 R3F 灯为 M2 standard 材质复用 + 视觉一致性预留。
+      */}
+      <hemisphereLight
+        color={terrainLight.hemisphere.sky}
+        groundColor={terrainLight.hemisphere.ground}
+        intensity={terrainLight.hemisphere.intensity}
+      />
+      <directionalLight
+        color={terrainLight.directional.color}
+        intensity={terrainLight.directional.intensity}
+        position={terrainLight.directional.direction}
+      />
+      {assets ? <Terrain assets={assets} /> : null}
     </>
   )
 }
