@@ -15,9 +15,9 @@
 ## 当前指针
 
 - **当前 Milestone**：M1 · 地形沙盘地基
-- **当前 Task**：Task 03 · 投影契约与数据加载层（⬜ 待开始）
-- **MVP 进度**：M1–M5 共 5 个 Milestone，已完成 **0 / 5**（M1 进行中 2/5）
-- **总体进度**：31 个 Task，已完成 **2 / 31**
+- **当前 Task**：Task 04 · GPU 顶点位移地形 + 基础着色（⬜ 待开始）
+- **MVP 进度**：M1–M5 共 5 个 Milestone，已完成 **0 / 5**（M1 进行中 3/5）
+- **总体进度**：31 个 Task，已完成 **3 / 31**
 
 ---
 
@@ -31,7 +31,7 @@
 |---|---|---|:---:|---|---|
 | 01 | M1 | 项目基础设施与目录骨架 | ✅ | c1e5558 | 骨架：依赖+config四件套+store+空Scene |
 | 02 | M1 | 合成 DEM Pipeline（免 GDAL） | ✅ | c4f1a5a | 自写PNG编解码+合成DEM；大陆可辨认；产出 heightmap/normal/meta |
-| 03 | M1 | 投影契约与数据加载层 | ⬜ | — | — |
+| 03 | M1 | 投影契约与数据加载层 | ✅ | 6f5cbcf | project()+高度解码契约(R3 同源)+16-bit PNG 加载(R32F)+CPU 高度表+vitest 20 测全绿 |
 | 04 | M1 | GPU 顶点位移地形 + 基础着色 | ⬜ | — | — |
 | 05 | M1 | M1 闭环验收 | ⬜ | — | — |
 | 06 | M2 | 透明渲染顺序与海洋几何 | ⬜ | — | — |
@@ -82,7 +82,7 @@
 
 | MS | 名称 | Task 完成 | 状态 |
 |---|---|---|---|
-| M1 | 地形沙盘地基 | 2/5 | 🔄 |
+| M1 | 地形沙盘地基 | 3/5 | 🔄 |
 | M2 | 海洋与水彩质感 | 0/3 | ⬜ |
 | M3 | 相机交互与自适应质量 | 0/3 | ⬜ |
 | M4 | 大洲标签与中文字体 | 0/4 | ⬜ |
@@ -101,6 +101,7 @@
 
 > 每个 Task 完成后在此追加 1–2 行踩坑 / 关键决策，供后续会话参考。**倒序**（最新在上）。
 
+- **Task 03（2026-06-16）**：投影契约 `project(lon,lat)→[x,z]` 锁定（SPEC §5.1）：`x=lon/180×(PLANE_WIDTH/2)`、`z=−lat/90×(PLANE_HEIGHT/2)`（向北 −z），含反函数 `unproject`。**高度解码契约（R3 CPU/GPU 同源，Task 04 shader 必须照搬）**：`worldY = h·uHeightScale + uHeightOffset`，其中 `uHeightScale=(elevationMax−elevationMin)×HEIGHT_EXAGGERATION×WORLD_Y_PER_METER`、`uHeightOffset=elevationMin×HEIGHT_EXAGGERATION×WORLD_Y_PER_METER`，经 `computeHeightUniforms(meta)→{scale,offset}` 暴露；新增艺术常量 `WORLD_Y_PER_METER=1e-5`（峰值 6500m→+0.1625、海沟 −5000m→−0.125；`HEIGHT_EXAGGERATION=2.5` 是 Task 04 视觉旋钮）。解码 `elev=min+h·(max−min)` 与 Task 02 烘焙公式严格互逆。**16-bit heightmap 加载（M1 最高风险点，已正面解决）**：浏览器原生 Image/canvas 会把 16-bit PNG 降为 8-bit（256 级≈45m/步，破坏精度）→ 用 **fast-png 8.0.0** 在浏览器侧逐字节解码 16-bit 灰度→`Uint16Array`（与 Task 02 大端烘焙一致，fast-png 已转本机序）；**three 0.184 不支持 R16_UNORM**（半浮点损精度破坏 <1e-4；整数纹理 R16UI 仅 NEAREST 会阶梯）→ 上传为 **R32F**（`FloatType+RedFormat`，LINEAR，`RepeatWrapping`/`ClampToEdgeWrapping`，`NoColorSpace`），float32 完整保留 16-bit 精度。**CPU 高度查询表**=对同一 Uint16 缓冲双线性采样（经度环绕/纬度钳制/像素中心约定同 Task 02）再 `heightToWorldY`，与 shader 同源。⚠️ 踩坑：**three 0.184 不自带类型且项目未装 `@types/three`**（Task 01/02 仅用 R3F 未暴露）→ 加 `@types/three@0.184.1`；**fast-png 8.0.0 无类型定义**→ 加 `src/types/fast-png.d.ts` ambient shim。引入 **vitest 4.1.9**，测试置于 `test/`（src 外，不进 `tsc -b` 构建，vitest 经 esbuild 转译）；20 单测全绿（project 边界/采样、高度解码与 uniform 一致性 <1e-9、双线性采样器、真实 16-bit PNG 无损解码 + 海洋<海平面<喜马拉雅、R32F 纹理属性）。
 - **Task 02（2026-06-16）**：pngjs 的 16-bit 写入路径不可靠（data buffer 未按 16-bit 分配）→ 改**手写 PNG 编解码器**（`scripts/data-pipeline/lib/png-writer.mjs` / `png-reader.mjs`，纯 node `zlib`+`fs`，已移除 pngjs），并用自解码做**整图 16-bit 往返校验**（零像素不一致）。**输出接口（下游 Task 03 加载器 / Task 04 shader 解码须用同公式）**：`raw16 = round((elevMeters − elevationMin)/(elevationMax − elevationMin) × 65535)`；`meta.json` = `{elevationMin:-5000, elevationMax:6500, seaLevelMeters:0, heightExaggeration:2.5, width:1024, height:512, projection:"equirectangular", source:"synthetic"}`。合成 DEM = 手写大陆多边形 mask（`lib/continents.mjs`，6 大洲+格陵兰+主要岛屿；南极洲按纬度特判）裁剪 simplex 噪声（3D 圆柱映射消除经度接缝，固定种子可复现）。陆地占比 ~37%（高于实际 29%，多边形略膨胀，MVP 可接受）。运行 `pnpm gen:dem`（可 `--width/--height`）；heightmap 720KB / normal 326KB，2.3s 完成。⚠️ 顺带修正：Task 01 PROGRESS 原「MVP 进度 1/5」实为 0/5（尚无 Milestone 完成），已校正。
 - **Task 01（2026-06-16）**：`@types/proj4` 已废弃（proj4 自带类型），安装后已移除；其余地理库按需装 `@types/{earcut,topojson-client}`。Vite 模板残留已清理（`App.css` / `src/assets` / `public/icons.svg`），`index.html` 改为中文。`Scene.tsx` 暂为背景色占位（Task 04 起填 Terrain）；config 四件套仅骨架，`project()` 实现留 Task 03。
 - _（更早：无）_
