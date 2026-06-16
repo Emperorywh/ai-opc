@@ -1,5 +1,5 @@
 /**
- * 真实 DEM 数据源（GEBCO 2024）—— 实现 DemSource 契约（与 lib/dem-source.mjs 合成源同接口）。
+ * 真实 DEM 数据源（GEBCO 2026）—— 实现 DemSource 契约（与 lib/dem-source.mjs 合成源同接口）。
  *
  * 契约（与 createSyntheticSource 完全一致，lib/heightmap.mjs.generateDem() 数据源无关、零改动消费）：
  *   DemSource = {
@@ -10,7 +10,7 @@
  *     getElevation(lon, lat): number  // 带符号高程(米)，>0 陆地 <0 海洋
  *   }
  *
- * 数据：GEBCO_2024 Grid（公共域，15″ 全球海洋陆地一体高程，equirectangular WGS84，
+ * 数据：GEBCO_2026 Grid（公共域，15″ 全球海洋陆地一体高程，equirectangular WGS84，
  *   含 bathymetry → 喂 M2 海洋深浅渐变 SPEC §6.2）。下载 8 个 GeoTIFF tiles（各 90°×90°）
  *   放 scripts/data-pipeline/raw/gebco/（.gitignore，不进 git/构建）。
  *
@@ -122,7 +122,7 @@ async function mergeTile(tiffPath, global, W, H) {
 }
 
 /**
- * 创建 GEBCO 2024 真实 DEM 数据源（异步加载 tiles 后返回同步 source）。
+ * 创建 GEBCO 2026 真实 DEM 数据源（异步加载 tiles 后返回同步 source）。
  * @param {{ width?:number, height?:number, tilesDir?:string }} [opts]
  * @returns {Promise<object>} DemSource 契约对象
  */
@@ -134,7 +134,7 @@ export async function createRealDemSource(opts = {}) {
   if (!existsSync(tilesDir)) {
     throw new Error(
       `GEBCO tiles 目录不存在：${tilesDir}\n` +
-        `请从 https://www.gebco.net/data-products/gridded-bathymetry-data 下载 GEBCO_2024 的 8 个 GeoTIFF tiles 放入该目录。`,
+        `请从 https://www.gebco.net/data-products/gridded-bathymetry-data 下载 GEBCO_2026 的 GeoTIFF（8 tiles 或单个全球文件均可）放入该目录。`,
     )
   }
   const tifFiles = readdirSync(tilesDir)
@@ -175,7 +175,7 @@ export async function createRealDemSource(opts = {}) {
   }
 
   return {
-    name: 'gebco-2024',
+    name: 'gebco-2026',
     width,
     height,
     elevationMin: ELEVATION_MIN,

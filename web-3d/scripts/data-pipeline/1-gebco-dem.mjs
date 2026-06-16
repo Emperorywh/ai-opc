@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Task 02b · 真实 DEM Pipeline（GEBCO 2024）—— CLI 入口。
+ * Task 02b · 真实 DEM Pipeline（GEBCO 2026）—— CLI 入口。
  *
  * 运行：  pnpm gen:dem:real
  *   可选参数：--width=4096 --height=2048 --tiles-dir=<path>（默认 scripts/data-pipeline/raw/gebco）
@@ -11,7 +11,7 @@
  * 烘焙流程 lib/heightmap.mjs 数据源无关、零改动复用。保留 gen:dem（合成）作离线 fallback
  * （无数据 / CI 仍可跑、确定可复现）。
  *
- * 前置：需先下载 GEBCO_2024 的 8 个 GeoTIFF tiles 到 raw/gebco/（见 docs/SPEC §12.1）。
+ * 前置：需先下载 GEBCO_2026 的 GeoTIFF（8 tiles 或单个全球文件均可）到 raw/gebco/（见 docs/SPEC §12.1）。
  */
 
 import { dirname, resolve } from 'node:path'
