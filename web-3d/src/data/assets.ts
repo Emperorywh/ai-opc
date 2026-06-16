@@ -1,7 +1,216 @@
 /**
  * 资源加载与解析（SPEC §4.2 / §7，D16 全部打包进构建）。
  *
- * ⚠️ 实现在 Task 03：fetch public/data/*.bin|json → 解析为 typed arrays / 领域对象
- *    （可缓存的纯函数，运行时只读、无后端）。
+ * 职责：把 `public/data/*.png|json` 解析为 typed arrays / 纹理 / 领域对象。
+ * 解码部分（PNG→Uint16、meta 解析、双线性采样）为无副作用纯函数，可在 Node 单测验证；
+ * 仅构建 THREE 纹理一步耦合 three（roadmap「texture/typed array」产出）。
+ *
+ * 高程加载是 M1 最高风险点（SPEC §6.1 / ROADMAP PoC #2）：
+ *   浏览器原生 Image/canvas 路径会把 16-bit PNG 降为 8-bit（256 级 ≈ 45m/步，破坏精度），
+ *   故用 `fast-png` 在浏览器侧逐字节解码 16-bit → Uint16Array（与 Task 02 大端烘焙一致），
+ *   再上传为 R32F 纹理——float32 完整保留 16-bit 精度、支持 LINEAR 滤波、全平台支持
+ *   （three 0.184 不支持 R16_UNORM；半浮点损精度；整数纹理仅 NEAREST。详见 createHeightTexture）。
  */
-export {}
+import * as THREE from 'three'
+import { decode } from 'fast-png'
+import { heightToWorldY, type ElevationMeta } from '../config/projection'
+import type { ElevationData, MetaJson, TerrainAssets } from './types'
+
+/** 运行时资源 URL（Vite 把 public/ 映射到 BASE_URL）。懒求值，避免模块加载期 env 依赖。 */
+function dataUrl(name: string): string {
+  return `${import.meta.env.BASE_URL}data/${name}`
+}
+
+// ---------------------------------------------------------------------------
+// 纯函数：解析（无副作用，可在 Node 单测验证）
+// ---------------------------------------------------------------------------
+
+/** 从任意输入解析并校验 `meta.json`。 */
+export function parseMeta(input: unknown): MetaJson {
+  if (typeof input !== 'object' || input === null) {
+    throw new Error('meta.json 必须是对象')
+  }
+  const m = input as Record<string, unknown>
+  const num = (k: string): number => {
+    const v = m[k]
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      throw new Error(`meta.json 字段 ${k} 必须是有限数`)
+    }
+    return v
+  }
+  const str = (k: string): string => {
+    const v = m[k]
+    if (typeof v !== 'string') throw new Error(`meta.json 字段 ${k} 必须是字符串`)
+    return v
+  }
+  const projection = str('projection')
+  if (projection !== 'equirectangular' && projection !== 'robinson') {
+    throw new Error(`meta.json projection 不支持：${projection}`)
+  }
+  const heightExaggeration = num('heightExaggeration')
+  if (heightExaggeration <= 0) {
+    throw new Error('meta.json heightExaggeration 必须为正')
+  }
+  const meta: MetaJson = {
+    version: num('version'),
+    source: str('source'),
+    projection,
+    width: num('width'),
+    height: num('height'),
+    elevationMin: num('elevationMin'),
+    elevationMax: num('elevationMax'),
+    seaLevelMeters: num('seaLevelMeters'),
+    heightExaggeration,
+  }
+  if (meta.width <= 0 || meta.height <= 0) {
+    throw new Error('meta.json width/height 必须为正')
+  }
+  return meta
+}
+
+/**
+ * 解码 16-bit 灰度 PNG → `ElevationData`（Uint16，与 Task 02 大端烘焙一致）。
+ * fast-png 对 depth=16 返回 Uint16Array（已转本机字节序）。
+ */
+export function decodeHeightmap(pngBytes: ArrayBuffer | Uint8Array): ElevationData {
+  const bytes = pngBytes instanceof Uint8Array ? pngBytes : new Uint8Array(pngBytes)
+  const decoded = decode(bytes)
+  if (decoded.depth !== 16) {
+    throw new Error(`heightmap.png 必须是 16-bit 灰度，实际 depth=${decoded.depth}`)
+  }
+  if (decoded.channels !== 1) {
+    throw new Error(`heightmap.png 必须是单通道灰度，实际 channels=${decoded.channels}`)
+  }
+  if (!(decoded.data instanceof Uint16Array)) {
+    throw new Error('heightmap.png 解码未得到 Uint16Array（fast-png 行为异常）')
+  }
+  if (decoded.data.length !== decoded.width * decoded.height) {
+    throw new Error('heightmap.png 解码尺寸与像素数不符')
+  }
+  return {
+    width: decoded.width,
+    height: decoded.height,
+    // 拷贝一份，解耦对底层 buffer 的外部持有
+    data: new Uint16Array(decoded.data),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// THREE 纹理（仅此步耦合 three）
+// ---------------------------------------------------------------------------
+
+/**
+ * 由 Uint16 高程构建可采样的高度纹理（R32F，LINEAR）。
+ *
+ * three.js 0.184 不支持 R16_UNORM 归一化 16-bit 单通道纹理（全仓库无该映射）；
+ * 半浮点（HalfFloat）仅 ~2048 级，量化 ~5.6m，破坏 M1「CPU/GPU 误差 < 1e-4」；
+ * 整数纹理（R16UI）只支持 NEAREST 滤波，位移呈阶梯。
+ * 故上传为 R32F：源数据仍为紧凑 16-bit PNG，GPU 端 float32 完整保留 16-bit 精度、
+ * LINEAR 可滤波、全平台支持。
+ */
+export function createHeightTexture(elevation: ElevationData): THREE.DataTexture {
+  const { width, height, data } = elevation
+  const float = new Float32Array(width * height)
+  for (let i = 0; i < data.length; i++) float[i] = data[i] / 65535
+  const texture = new THREE.DataTexture(
+    float,
+    width,
+    height,
+    THREE.RedFormat,
+    THREE.FloatType,
+  )
+  texture.minFilter = THREE.LinearFilter
+  texture.magFilter = THREE.LinearFilter
+  // 经度方向可环绕（−180°/+180° 同一经线），纬度方向钳制到极点
+  texture.wrapS = THREE.RepeatWrapping
+  texture.wrapT = THREE.ClampToEdgeWrapping
+  // 高程数据，非颜色，不做 transfer function
+  texture.colorSpace = THREE.NoColorSpace
+  texture.needsUpdate = true
+  return texture
+}
+
+// ---------------------------------------------------------------------------
+// CPU 高度查询表（R3：与 GPU shader 同源）
+// ---------------------------------------------------------------------------
+
+/** 经纬度 → 连续像素采样坐标（与 heightmap 布局一致：t=0 → +90°N，s=0 → −180°）。 */
+function lonLatToSample(
+  lon: number,
+  lat: number,
+  width: number,
+  height: number,
+): { sx: number; sy: number } {
+  const sx = ((lon + 180) / 360) * width
+  const sy = ((90 - lat) / 180) * height
+  return { sx, sy }
+}
+
+/**
+ * 双线性采样归一化高程 h∈[0,1]（像素中心约定，与 Task 02 一致）。
+ * 经度方向环绕、纬度方向钳制。与 GPU LINEAR 采样同一 heightmap 源、同一解码公式 → CPU/GPU 一致（R3）。
+ */
+export function sampleHeight(elevation: ElevationData, lon: number, lat: number): number {
+  const { width: W, height: H, data } = elevation
+  const { sx, sy } = lonLatToSample(lon, lat, W, H)
+  const x0 = Math.floor(sx - 0.5)
+  const y0 = Math.floor(sy - 0.5)
+  const fx = sx - 0.5 - x0
+  const fy = sy - 0.5 - y0
+  const wrap = (i: number): number => ((i % W) + W) % W
+  const clamp = (i: number): number => Math.min(H - 1, Math.max(0, i))
+  const xi0 = wrap(x0)
+  const xi1 = wrap(x0 + 1)
+  const yi0 = clamp(y0)
+  const yi1 = clamp(y0 + 1)
+  const h00 = data[yi0 * W + xi0] / 65535
+  const h10 = data[yi0 * W + xi1] / 65535
+  const h01 = data[yi1 * W + xi0] / 65535
+  const h11 = data[yi1 * W + xi1] / 65535
+  const a = h00 + (h10 - h00) * fx
+  const b = h01 + (h11 - h01) * fx
+  return a + (b - a) * fy
+}
+
+/** (lon,lat) → 世界 Y（CPU 查询，与 shader 同源公式；河流采样 / 标签锚点 / 拾取深度偏移用）。 */
+export function sampleWorldY(
+  elevation: ElevationData,
+  meta: ElevationMeta,
+  lon: number,
+  lat: number,
+): number {
+  return heightToWorldY(sampleHeight(elevation, lon, lat), meta)
+}
+
+// ---------------------------------------------------------------------------
+// 顶层加载（运行时 fetch，浏览器侧）
+// ---------------------------------------------------------------------------
+
+/** 加载并校验 `meta.json`。 */
+export async function loadMeta(): Promise<MetaJson> {
+  const res = await fetch(dataUrl('meta.json'))
+  if (!res.ok) throw new Error(`加载 meta.json 失败：${res.status}`)
+  return parseMeta(await res.json())
+}
+
+/** 加载 8-bit RGB `normal.png` 为线性纹理（细节增强用）。 */
+export async function loadNormalTexture(): Promise<THREE.Texture> {
+  const texture = await new THREE.TextureLoader().loadAsync(dataUrl('normal.png'))
+  texture.colorSpace = THREE.NoColorSpace
+  return texture
+}
+
+/** 加载全部地形资产：meta + 16-bit heightmap（R32F 纹理）+ normal + CPU 高程。 */
+export async function loadTerrainAssets(): Promise<TerrainAssets> {
+  const meta = await loadMeta()
+  const [heightPng, normalTexture] = await Promise.all([
+    fetch(dataUrl('heightmap.png')).then((r) => {
+      if (!r.ok) throw new Error(`加载 heightmap.png 失败：${r.status}`)
+      return r.arrayBuffer()
+    }),
+    loadNormalTexture(),
+  ])
+  const elevation = decodeHeightmap(heightPng)
+  const heightTexture = createHeightTexture(elevation)
+  return { meta, heightTexture, normalTexture, elevation }
+}
