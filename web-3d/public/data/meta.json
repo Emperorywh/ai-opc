@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "source": "synthetic",
+  "source": "gebco-2026",
   "projection": "equirectangular",
-  "width": 1024,
-  "height": 512,
-  "elevationMin": -5000,
-  "elevationMax": 6500,
+  "width": 4096,
+  "height": 2048,
+  "elevationMin": -10000,
+  "elevationMax": 9000,
   "seaLevelMeters": 0,
   "heightExaggeration": 2.5
 }
