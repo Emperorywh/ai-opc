@@ -2,8 +2,9 @@
  * R3F 场景内容根（SPEC §4.1 / §4.3 渲染管线）。
  *
  * Task 04：挂载 Terrain（GPU 顶点位移 + 基础分层着色）+ 静态倾斜相机 + 光照。
- * 加载链路：loadTerrainAssets()（Task 03）异步 fetch+parse → 渲染 Terrain。
- * 后续：Ocean(06) → Labels(14) → Atmosphere(16) → ...
+ * Task 06：挂载 Ocean（透明几何 + §4.3 渲染顺序）。
+ * 加载链路：loadTerrainAssets()（Task 03）异步 fetch+parse → 渲染 Terrain + Ocean。
+ * 后续：Labels(14) → Atmosphere(16) → ...
  */
 import { useEffect, useState } from 'react'
 import { loadTerrainAssets } from '../data/assets'
@@ -11,6 +12,7 @@ import type { TerrainAssets } from '../data/types'
 import { StaticCamera } from './camera/StaticCamera'
 import { Terrain } from './terrain/Terrain'
 import { terrainLight } from './terrain/terrainMaterial'
+import { Ocean } from './ocean/Ocean'
 
 export function Scene() {
   const [assets, setAssets] = useState<TerrainAssets | null>(null)
@@ -54,7 +56,17 @@ export function Scene() {
         intensity={terrainLight.directional.intensity}
         position={terrainLight.directional.direction}
       />
-      {assets ? <Terrain assets={assets} /> : null}
+      {assets ? (
+        <>
+          {/*
+            SPEC §4.3 渲染顺序：Terrain 先绘（不透明写深度）→ Ocean 后绘（透明 depthWrite=false）。
+            Three.js 据 transparent 标志自动后绘透明物体，Ocean renderOrder=1 进一步明确；
+            Ocean depthTest 读 Terrain 已写深度 → 陆地遮挡海洋、海床被半透明海洋覆盖（海洋不穿地形）。
+          */}
+          <Terrain assets={assets} />
+          <Ocean assets={assets} />
+        </>
+      ) : null}
     </>
   )
 }
