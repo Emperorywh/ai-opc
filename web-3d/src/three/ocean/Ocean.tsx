@@ -13,6 +13,8 @@ import { useMemo, useEffect, useRef } from 'react'
 import type { ShaderMaterial } from 'three'
 import { useFrame } from '@react-three/fiber'
 import { PLANE_WIDTH, PLANE_HEIGHT } from '../../config/projection'
+import { qualityConfigs } from '../../config/quality'
+import { useStore } from '../../state/store'
 import type { TerrainAssets } from '../../data/types'
 import {
   OCEAN_SEGMENTS,
@@ -23,7 +25,13 @@ import {
 
 export function Ocean({ assets }: { assets: TerrainAssets }) {
   const seaY = useMemo(() => seaLevelWorldY(assets), [assets])
-  const material = useMemo(() => createOceanMaterial(assets), [assets])
+  // Task 11：波数随质量档（AdaptiveQuality 写 store qualityTier）；材质重建同源 shader、
+  // 仅 uniform 值变（three 复用已编译 program），不动 GLSL（M2 预留 uWaveCount 钩子）。
+  const qualityTier = useStore((s) => s.qualityTier)
+  const material = useMemo(
+    () => createOceanMaterial(assets, { waveCount: qualityConfigs[qualityTier].oceanWaves }),
+    [assets, qualityTier],
+  )
   // 经 ref 持有 material 供 useFrame 每帧更新 uniform（避开 react-hooks/immutability 规则
   // 对 useMemo 返回值直接 mutate 的误报，同 Task 04 camera 处理思路）。
   const matRef = useRef<ShaderMaterial>(material)

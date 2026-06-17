@@ -69,7 +69,17 @@ export const TERRAIN_EFFECTS = {
   detailNormal: 0.3,
 } as const
 
-export type TerrainEffectOpts = Partial<typeof TERRAIN_EFFECTS>
+/**
+ * 水彩效果开关入参（M3 Task 11 由 config/quality 的分档值注入；全 number 可承接分档配置）。
+ * 字段与 TERRAIN_EFFECTS 同键，均为 number（不用字面量类型，以便接收 qualityConfigs 分档值）。
+ */
+export type TerrainEffectOpts = {
+  slopeEmphasis?: number
+  watercolorNoise?: number
+  coastline?: number
+  rimOutline?: number
+  detailNormal?: number
+}
 
 /** 地形配色（源自 palette + S 降 20%，SPEC §2.1「低饱和化统一处理」）。
  *  对应世界 Y 阈值见 fragment shader 注释（y = meters × 2.5 × 1e-5）。 */
