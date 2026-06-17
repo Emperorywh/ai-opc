@@ -1,0 +1,101 @@
+[
+  {
+    "id": "asia",
+    "zhName": "亚洲",
+    "kind": "continent",
+    "continent": "asia",
+    "lon": 95,
+    "lat": 45,
+    "priority": 100
+  },
+  {
+    "id": "europe",
+    "zhName": "欧洲",
+    "kind": "continent",
+    "continent": "europe",
+    "lon": 15,
+    "lat": 52,
+    "priority": 100
+  },
+  {
+    "id": "africa",
+    "zhName": "非洲",
+    "kind": "continent",
+    "continent": "africa",
+    "lon": 20,
+    "lat": 5,
+    "priority": 100
+  },
+  {
+    "id": "north-america",
+    "zhName": "北美洲",
+    "kind": "continent",
+    "continent": "north-america",
+    "lon": -100,
+    "lat": 45,
+    "priority": 100
+  },
+  {
+    "id": "south-america",
+    "zhName": "南美洲",
+    "kind": "continent",
+    "continent": "south-america",
+    "lon": -60,
+    "lat": -15,
+    "priority": 100
+  },
+  {
+    "id": "oceania",
+    "zhName": "大洋洲",
+    "kind": "continent",
+    "continent": "oceania",
+    "lon": 135,
+    "lat": -25,
+    "priority": 100
+  },
+  {
+    "id": "antarctica",
+    "zhName": "南极洲",
+    "kind": "continent",
+    "continent": "antarctica",
+    "lon": 0,
+    "lat": -82,
+    "priority": 100
+  },
+  {
+    "id": "pacific",
+    "zhName": "太平洋",
+    "kind": "ocean",
+    "continent": null,
+    "lon": -160,
+    "lat": 0,
+    "priority": 80
+  },
+  {
+    "id": "atlantic",
+    "zhName": "大西洋",
+    "kind": "ocean",
+    "continent": null,
+    "lon": -30,
+    "lat": 0,
+    "priority": 80
+  },
+  {
+    "id": "indian",
+    "zhName": "印度洋",
+    "kind": "ocean",
+    "continent": null,
+    "lon": 80,
+    "lat": -20,
+    "priority": 80
+  },
+  {
+    "id": "arctic",
+    "zhName": "北冰洋",
+    "kind": "ocean",
+    "continent": null,
+    "lon": 0,
+    "lat": 85,
+    "priority": 80
+  }
+]

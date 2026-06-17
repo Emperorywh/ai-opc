@@ -53,11 +53,16 @@ export type River = {
   name: string
 }
 
-/** 标签（M4 标签数据 pipeline 填充完整字段）。 */
+/**
+ * 标签（Task 13 M4 标签数据 pipeline 落地完整字段）。
+ * 结构对齐 SPEC §6.5：`{id, zhName, kind, continent, lon, lat, priority}`。
+ */
 export type Label = {
   id: string
   zhName: string
   kind: 'continent' | 'ocean' | 'country' | 'city'
+  /** 所属大洲英文 id（大洲标签 = 自身；大洋标签 = null，大洋不属任何大洲）。 */
+  continent: string | null
   lon: number
   lat: number
   priority: number
