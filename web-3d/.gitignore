@@ -15,6 +15,9 @@ dist-ssr
 # 离线数据 pipeline 原始资产（GB 级 GEBCO tiles 等，不进 git；仅烘焙产物 public/data/* 进 git）
 scripts/data-pipeline/raw/
 
+# 字体子集化源字体（~17MB Noto Sans SC 可变字体，不进 git；仅产物 public/fonts/map-zh.woff2 进 git）
+scripts/font-subset/raw/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
