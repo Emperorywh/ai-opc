@@ -7,12 +7,22 @@
  * Task 11：挂载 AdaptiveQuality（FPS 探测分档 → dpr/shader 开关，§4.3 管线首项）。
  * Task 14：挂载 LabelLayer（troika SDF 标签，§6.5）。labels.json 独立加载，失败不阻塞地形。
  * Task 16：挂载 AtmosphereRim（§6.7 fresnel 弧壳辉光，§4.3 管线末项最后绘叠加）。
- * 加载链路：loadTerrainAssets()（Task 03）异步 fetch+parse → 渲染 Terrain + Ocean + LabelLayer。
- * 后续：Loader/WebGL 降级(17) → 署名/MVP 验收(18) → ...
+ * Task 17：地形资产加载编排上报 store loading 切片（分项进度 + heightmap 字节级进度），
+ *   供 Loader（src/ui，Canvas 外 DOM overlay）订阅渲染。资源不走 R3F loader（原生 fetch），
+ *   故此处用 data 层细粒度导出函数自行编排 + fetchWithProgress，不改 src/data。
+ * 后续：署名/MVP 验收(18) → ...
  */
 import { useEffect, useState } from 'react'
-import { loadTerrainAssets, loadLabels } from '../data/assets'
+import {
+  loadMeta,
+  loadNormalTexture,
+  decodeHeightmap,
+  createHeightTexture,
+  loadLabels,
+} from '../data/assets'
 import type { TerrainAssets, Label } from '../data/types'
+import { useStore } from '../state/store'
+import { fetchWithProgress, byteFraction, stageProgress } from '../ui/loading'
 import { AdaptiveQuality } from './effects/AdaptiveQuality'
 import { SandboxControls } from './camera/SandboxControls'
 import { Terrain } from './terrain/Terrain'
@@ -21,20 +31,55 @@ import { Ocean } from './ocean/Ocean'
 import { LabelLayer } from './labels/LabelLayer'
 import { AtmosphereRim } from './atmosphere/AtmosphereRim'
 
+/** heightmap.png 运行时 URL（与 assets.ts dataUrl 同源：BASE_URL + data/）。 */
+const HEIGHTMAP_URL = `${import.meta.env.BASE_URL}data/heightmap.png`
+
+/** 把任意错误归一为字符串（写 store.loadingError 给 Loader 展示）。 */
+function toErrorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
 export function Scene() {
   const [assets, setAssets] = useState<TerrainAssets | null>(null)
   const [labels, setLabels] = useState<Label[] | null>(null)
-  const [error, setError] = useState<unknown>(null)
+  const [, setError] = useState<unknown>(null)
 
+  // Task 17：地形资产加载编排（meta → heightmap 字节进度 + normal 并行 → decode → texture），
+  // 各阶段上报 store.loading*（Loader 订阅）。heightmap 是最大文件，字节级进度驱动 terrain 阶段。
   useEffect(() => {
     let cancelled = false
-    loadTerrainAssets()
-      .then((a) => {
-        if (!cancelled) setAssets(a)
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e)
-      })
+    const run = async () => {
+      const store = useStore.getState()
+      try {
+        store.setLoading('init', stageProgress('init', 0))
+        const meta = await loadMeta()
+        if (cancelled) return
+        store.setLoading('meta', stageProgress('meta', 1))
+        // 并行：heightmap 流式字节进度（驱动 terrain 阶段 0→1）+ normal（TextureLoader 无字节回调，静默并行）。
+        const [heightBytes, normalTexture] = await Promise.all([
+          fetchWithProgress(HEIGHTMAP_URL, (loaded, total) => {
+            if (!cancelled) {
+              store.setLoading('terrain', stageProgress('terrain', byteFraction(loaded, total)))
+            }
+          }),
+          loadNormalTexture(),
+        ])
+        if (cancelled) return
+        const elevation = decodeHeightmap(heightBytes)
+        const heightTexture = createHeightTexture(elevation)
+        store.setLoading('decode', stageProgress('decode', 1))
+        if (cancelled) return
+        setAssets({ meta, heightTexture, normalTexture, elevation })
+        store.setLoading('ready', stageProgress('ready', 1))
+      } catch (e) {
+        if (!cancelled) {
+          setError(e)
+          console.error('[Scene] 地形资产加载失败：', e)
+          store.setLoadingError(toErrorMessage(e))
+        }
+      }
+    }
+    run()
     return () => {
       cancelled = true
     }
@@ -54,11 +99,6 @@ export function Scene() {
       cancelled = true
     }
   }, [])
-
-  if (error) {
-    // M1 仅记录；加载进度页 + 降级在 M5（Task 17）
-    console.error('[Scene] 地形资产加载失败：', error)
-  }
 
   return (
     <>
