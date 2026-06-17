@@ -5,20 +5,23 @@
  * Task 06：挂载 Ocean（透明几何 + §4.3 渲染顺序）。
  * Task 09：静态倾斜相机 → SandboxControls（受限 pan/zoom + 阻尼）。
  * Task 11：挂载 AdaptiveQuality（FPS 探测分档 → dpr/shader 开关，§4.3 管线首项）。
- * 加载链路：loadTerrainAssets()（Task 03）异步 fetch+parse → 渲染 Terrain + Ocean。
- * 后续：Labels(14) → Atmosphere(16) → ...
+ * Task 14：挂载 LabelLayer（troika SDF 标签，§6.5）。labels.json 独立加载，失败不阻塞地形。
+ * 加载链路：loadTerrainAssets()（Task 03）异步 fetch+parse → 渲染 Terrain + Ocean + LabelLayer。
+ * 后续：Labels 碰撞/LOD(15) → Atmosphere(16) → ...
  */
 import { useEffect, useState } from 'react'
-import { loadTerrainAssets } from '../data/assets'
-import type { TerrainAssets } from '../data/types'
+import { loadTerrainAssets, loadLabels } from '../data/assets'
+import type { TerrainAssets, Label } from '../data/types'
 import { AdaptiveQuality } from './effects/AdaptiveQuality'
 import { SandboxControls } from './camera/SandboxControls'
 import { Terrain } from './terrain/Terrain'
 import { terrainLight } from './terrain/terrainMaterial'
 import { Ocean } from './ocean/Ocean'
+import { LabelLayer } from './labels/LabelLayer'
 
 export function Scene() {
   const [assets, setAssets] = useState<TerrainAssets | null>(null)
+  const [labels, setLabels] = useState<Label[] | null>(null)
   const [error, setError] = useState<unknown>(null)
 
   useEffect(() => {
@@ -29,6 +32,21 @@ export function Scene() {
       })
       .catch((e) => {
         if (!cancelled) setError(e)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Task 14：labels.json 独立加载（与地形资产解耦）；加载失败仅记录，不阻塞 Terrain/Ocean。
+  useEffect(() => {
+    let cancelled = false
+    loadLabels()
+      .then((l) => {
+        if (!cancelled) setLabels(l)
+      })
+      .catch((e) => {
+        if (!cancelled) console.error('[Scene] labels.json 加载失败：', e)
       })
     return () => {
       cancelled = true
@@ -68,9 +86,11 @@ export function Scene() {
             SPEC §4.3 渲染顺序：Terrain 先绘（不透明写深度）→ Ocean 后绘（透明 depthWrite=false）。
             Three.js 据 transparent 标志自动后绘透明物体，Ocean renderOrder=1 进一步明确；
             Ocean depthTest 读 Terrain 已写深度 → 陆地遮挡海洋、海床被半透明海洋覆盖（海洋不穿地形）。
+            Task 14：LabelLayer（§4.3 在 Ocean 之后绘制，屏幕空间碰撞后绘制留 Task 15）。
           */}
           <Terrain assets={assets} />
           <Ocean assets={assets} />
+          {labels ? <LabelLayer assets={assets} labels={labels} /> : null}
         </>
       ) : null}
     </>

@@ -14,7 +14,7 @@
 import * as THREE from 'three'
 import { decode } from 'fast-png'
 import { heightToWorldY, type ElevationMeta } from '../config/projection'
-import type { ElevationData, MetaJson, TerrainAssets } from './types'
+import type { ElevationData, Label, MetaJson, TerrainAssets } from './types'
 
 /** 运行时资源 URL（Vite 把 public/ 映射到 BASE_URL）。懒求值，避免模块加载期 env 依赖。 */
 function dataUrl(name: string): string {
@@ -93,6 +93,62 @@ export function decodeHeightmap(pngBytes: ArrayBuffer | Uint8Array): ElevationDa
     // 拷贝一份，解耦对底层 buffer 的外部持有
     data: new Uint16Array(decoded.data),
   }
+}
+
+// ---------------------------------------------------------------------------
+// labels.json 解析（Task 14 前端运行时消费 Task 13 pipeline 产物）
+// ---------------------------------------------------------------------------
+
+/** 合法 kind 值（SPEC §6.5：大洲 / 大洋 / 国家 / 城市）。 */
+const LABEL_KINDS = ['continent', 'ocean', 'country', 'city'] as const
+function isLabelKind(v: unknown): v is Label['kind'] {
+  return typeof v === 'string' && (LABEL_KINDS as readonly string[]).includes(v)
+}
+
+/**
+ * 从 `labels.json` 原始数组解析并校验为 `Label[]`（无副作用纯函数，可在 Node 单测验证）。
+ * 结构对齐 SPEC §6.5 `{id,zhName,kind,continent,lon,lat,priority}`；逐条严格校验类型，
+ * 非法输入抛错（与 `parseMeta` 同风格），避免运行时坏数据静默渲染。
+ */
+export function parseLabels(input: unknown): Label[] {
+  if (!Array.isArray(input)) {
+    throw new Error('labels.json 必须是数组')
+  }
+  return input.map((raw, i) => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new Error(`labels.json[${i}] 必须是对象`)
+    }
+    const r = raw as Record<string, unknown>
+    const strField = (k: string): string => {
+      const v = r[k]
+      if (typeof v !== 'string') throw new Error(`labels.json[${i}].${k} 必须是字符串`)
+      return v
+    }
+    const numField = (k: string): number => {
+      const v = r[k]
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(`labels.json[${i}].${k} 必须是有限数`)
+      }
+      return v
+    }
+    const kind = r['kind']
+    if (!isLabelKind(kind)) {
+      throw new Error(`labels.json[${i}].kind 非法：${String(kind)}`)
+    }
+    const continent = r['continent']
+    if (continent !== null && typeof continent !== 'string') {
+      throw new Error(`labels.json[${i}].continent 必须是字符串或 null`)
+    }
+    return {
+      id: strField('id'),
+      zhName: strField('zhName'),
+      kind,
+      continent,
+      lon: numField('lon'),
+      lat: numField('lat'),
+      priority: numField('priority'),
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +247,13 @@ export async function loadMeta(): Promise<MetaJson> {
   const res = await fetch(dataUrl('meta.json'))
   if (!res.ok) throw new Error(`加载 meta.json 失败：${res.status}`)
   return parseMeta(await res.json())
+}
+
+/** 加载并校验 `labels.json`（Task 13 产出：大洲 + 大洋中文标签）。 */
+export async function loadLabels(): Promise<Label[]> {
+  const res = await fetch(dataUrl('labels.json'))
+  if (!res.ok) throw new Error(`加载 labels.json 失败：${res.status}`)
+  return parseLabels(await res.json())
 }
 
 /** 加载 8-bit RGB `normal.png` 为线性纹理（细节增强用）。 */
