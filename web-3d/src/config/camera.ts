@@ -24,8 +24,10 @@ export const cameraConfig = {
   damping: 0.1,
   /** 拖拽 pan 灵敏度（世界单位/像素，乘以当前距离）。Task 10 触控板可调。 */
   panSensitivity: 0.0015,
-  /** 滚轮 zoom 指数步长系数（distance *= exp(deltaY · 系数)）。 */
+  /** 滚轮 zoom 指数步长系数（distance *= exp(deltaY · 系数)）。鼠标滚轮 / 触控板双指滚动。 */
   wheelZoomFactor: 0.001,
+  /** 触控板双指捏合 zoom 系数（浏览器把 pinch 映射为 ctrlKey=true 的 wheel，deltaY 量级更小，故系数更大）。 */
+  pinchZoomFactor: 0.01,
 } as const
 
 export type CameraConfig = typeof cameraConfig
