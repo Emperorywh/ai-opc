@@ -15,9 +15,9 @@
 ## 当前指针
 
 - **当前 Milestone**：M2 · 海洋与水彩质感
-- **当前 Task**：Task 07 · Gerstner 海洋 shader
+- **当前 Task**：Task 08 · 地形水彩 shader 完善
 - **MVP 进度**：M1–M5 共 5 个 Milestone，已完成 **1 / 5**（✅ M1 地形沙盘地基闭环）
-- **总体进度**：32 个 Task，已完成 **7 / 32**
+- **总体进度**：32 个 Task，已完成 **8 / 32**
 
 ---
 
@@ -36,7 +36,7 @@
 | 04 | M1 | GPU 顶点位移地形 + 基础着色 | ✅ | ef3f8cf | 自定义 ShaderMaterial：R32F heightmap 顶点位移(照搬 Task03 契约)+基础高度分层+Lambert 光照；PlaneGeometry 512×256；静态倾斜相机；25 测全绿 |
 | 05 | M1 | M1 闭环验收 | ✅ | 4b406cb | 42测全绿(build/lint过)；真实DEM回归断言(11新)；dev视觉/console error 待人工 Review |
 | 06 | M2 | 透明渲染顺序与海洋几何 | ✅ | 0d451e2 | Ocean 平面(同地形尺寸)铺海平面 y=metersToWorldY(seaLevel)；MeshBasicMaterial 半透明 oceanShallow(depthWrite=false/DoubleSide)+renderOrder=1；Scene 挂 Ocean(Terrain 先绘写深度→Ocean 后绘关深度写入)；10 新测断言渲染顺序契约/几何/海平面Y；52测全绿 build/lint 过 |
-| 07 | M2 | Gerstner 海洋 shader | ⬜ | — | — |
+| 07 | M2 | Gerstner 海洋 shader | ✅ | a75b91e | oceanMaterial MeshBasic占位→自定义ShaderMaterial：Gerstner波(≤5,顶点位移+GPU Gems解析法线B/T→cross→N,N.y<0翻转)+菲涅尔pow(1-dot(N,V),3)掠射偏亮青绿(vViewDir vertex算,cameraPosition为three vertex-only内建)+深浅渐变(per-pixel同源heightmap水深-terrainY/uMaxDepth,浅#7FC4C0→深#2E6E73,vHeightUv用位移前世界坐标→海岸线稳定)+uTime驱动波相位流动；波数uWaveCount uniform开关(M2默认高档qualityConfigs[high].oceanWaves=5,≤0降正弦,M3改uniform不动shader)；透明渲染顺序契约(Task06#1)不退化；体积感由波振幅提供(海平面y=0不变,R3不破坏)；react-hooks/immutability禁useFrame mutate useMemo material→useRef+useEffect同步ref; oceanDepthFactor/oceanFresnel纯函数同源单测; 75测全绿(52→75)build(56mod 295ms)/lint过;⚠️dev视觉/GLSL编译待人工Review;M2 2/3 |
 | 08 | M2 | 地形水彩 shader 完善 | ⬜ | — | — |
 | 09 | M3 | SandboxControls（受限 pan/zoom） | ⬜ | — | — |
 | 10 | M3 | 输入手势适配 | ⬜ | — | — |
@@ -84,7 +84,7 @@
 | MS | 名称 | Task 完成 | 状态 |
 |---|---|---|---|
 | M1 | 地形沙盘地基 | 6/6 | ✅ | 含 Task 02b 真实 DEM（GEBCO 2026）|
-| M2 | 海洋与水彩质感 | 1/3 | 🔄 |
+| M2 | 海洋与水彩质感 | 2/3 | 🔄 |
 | M3 | 相机交互与自适应质量 | 0/3 | ⬜ |
 | M4 | 大洲标签与中文字体 | 0/4 | ⬜ |
 | M5 | 大气辉光·加载·署名（MVP 闭环） | 0/3 | ⬜ |
@@ -102,6 +102,7 @@
 
 > 每个 Task 完成后在此追加 1–2 行踩坑 / 关键决策，供后续会话参考。**倒序**（最新在上）。
 
+- **Task 07（2026-06-17）**：Gerstner 海洋 shader（M2 第二 Task）。`oceanMaterial.ts` 由 Task 06 `MeshBasicMaterial` 半透明纯色占位升级为**自定义 ShaderMaterial**，落地 SPEC §6.2 / D8 全部四要素：①**Gerstner 波**（≤5 个，顶点位移 + GPU Gems 1 Ch.1 解析法线：累积 Binormal B/Tangent T → `cross(B,T)` → `if(N.y<0)N=-N` 保 +Y 朝上；GLSL1 `const int MAX_WAVES=5` 定长 uniform 数组 + `for+break` 按 `uWaveCount` 截断；水平位移加本地 x/世界 X、本地 y-=offZ/世界 -Z、本地 z+=dispY/世界 Y）；②**菲涅尔** `pow(1-max(dot(N,V),0),3)` 掠射偏亮青绿 `#BFEDE8`（`vViewDir` 在 vertex 算传 fragment——`cameraPosition` 是 three.js **vertex-only** 内建 uniform，fragment 无）；③**深浅渐变** per-pixel：同源 R32F heightmap 采样 → `terrainY=h·scale+offset`（Task 03 契约）→ `depth=clamp(-terrainY/uMaxDepth,0,1)` → `mix(oceanShallow#7FC4C0, oceanDeep#2E6E73)`（`uMaxDepth=metersToWorldY(2500)=0.0625`；`vHeightUv` 用**位移前**世界坐标算 → 海岸线地理固定，不受波浪水平位移影响）；④**流动**：`uTime` uniform 每帧累加驱动波相位 `w·dot(D,p)+speed·uTime`。**波数开关位（SPEC §8/D18，M3 预留）**：`uWaveCount` uniform + `buildGerstnerWaves(count)`，`count<=0` 降级为 1 个 Q=0 正弦波（§6.2.1「低档减为正弦」）；M2 默认高档 `qualityConfigs[defaultQualityTier=high].oceanWaves=5`，**M3 Task 11 AdaptiveQuality 仅改 uniform value 不动 shader**。**透明渲染顺序契约（Task 06 风险验证#1）保持不退化**：`transparent=true/depthWrite=false/depthTest=true(默认)/DoubleSide/renderOrder=1`（ShaderMaterial 接管材质主体但透明属性不变）。**体积感（§6.2.5）由 Gerstner 波峰/波谷振幅自然提供**（海平面 y=seaLevel=0 不变，不破坏 R3 契约；波幅和<0.05、单波<0.01 世界 Y，≪地形起伏±0.16，柔和浪涌不刺穿陆地）。**踩坑（react-hooks/immutability）**：`useFrame` 回调直接 `material.uniforms.uTime.value+=delta` 被 eslint-plugin-react-hooks v7 `react-hooks/immutability` 规则禁止（`material` 是 useMemo 返回值被视为不可变，Task 04 camera 同类）→ 先试 `matRef.current=material`（render 期间更新 ref）又被 `react-hooks/refs` 拦 → 最终 **`useRef(material)`+`useEffect(()=>{matRef.current=material},[material])` 同步 + useFrame 经 `matRef.current` 更新**（refs 是可变容器，规则放行子属性突变）。**纯函数同源单测（项目惯例）**：`oceanDepthFactor`（深浅 clamp）、`oceanFresnel`（pow 同源）导出供 vitest 验证 GLSL 数学；shader 源码正则断言防回归（`uWaveCount`/`dispY`/`pow(1.0 - max(dot`/`clamp(-terrainY`）。`OCEAN_SEGMENTS=256×128`（Task 06 已为 Gerstner 预留，最短波长≈0.12 世界单位→≈15 格/波长平滑）。新增 **23 测**（Gerstner 波参数各档/方向单位化/振幅递减/波幅尺度、深浅渐变 5 点、菲涅尔 4 点、uniform 波数开关/颜色取自 palette/uTime 初始 0/uMaxDepth/heightmap 复用/shader 源码正则），共 **75 测全绿**（52→75），build(56 modules 295ms)/lint 过。⚠️ **dev 视觉（Gerstner 浪涌/菲涅尔微光/深浅渐变实际观感）+ 浏览器 console（GLSL 编译/运行时、uniform 数组上传、解析法线方向）需人工 Review**（agent 无浏览器，Task 04/05/06 惯例）；`docs/screenshots/M2.png` 待 Task 08 水彩完善后归档。**M2：2/3**。
 - **Task 06（2026-06-17）**：透明渲染顺序与海洋几何（M2 首个 Task）。新建 `Ocean.tsx`+`oceanMaterial.ts`：与地形同尺寸(PLANE_WIDTH×PLANE_HEIGHT)平面铺海平面 `y=metersToWorldY(seaLevelMeters)`(=0)，`rotation[-90° X]` 同 Terrain。**SPEC §4.3 透明渲染顺序修正点落地**：Terrain 不透明先绘写深度 → Ocean 透明后绘关深度写入；**关键机制 Ocean `depthTest=true`(MeshBasicMaterial 默认)读 Terrain 已写深度 → 陆地(y>0)遮挡海洋、海床(y<0)被半透明海洋覆盖（海洋不穿地形）**；`renderOrder=1` 保险（Three.js 本已按 transparent 标志自动后绘透明物体）。Task 06 范围切割：`MeshBasicMaterial` 半透明纯色(`oceanShallow #7FC4C0` opacity0.7 DoubleSide)占位，半透明叠加在 terrainMaterial 海床占色(y<0 分支)之上；**Gerstner/菲涅尔/深浅渐变/流动 → Task 07 oceanMaterial.ts**；海平面 y=精确 seaLevel(=0)，Task 07 按 §6.2.5 略低调体积感。**模块拆分（踩坑）**：Ocean.tsx 同时导出组件+常量触发 `react-refresh/only-export-components` lint error → 照 terrain 同构(`Terrain.tsx` 组件 + `terrainMaterial.ts` 常量/函数)拆为 `Ocean.tsx`(只导出组件) + `oceanMaterial.ts`(常量/函数，注释标 Task 07 扩展为 Gerstner 自定义 shader)。`OCEAN_SEGMENTS=256×128`(为 Task 07 Gerstner 顶点位移预留密度，Task 06 平面无位移)。10 新测(`ocean.test.ts`)：几何顶点数/尺寸、渲染顺序契约(transparent/depthWrite/renderOrder/opacity/MeshBasicMaterial 落地 depthTest=true/颜色=palette)、海平面 Y(Task03 契约同源 <1e-9)；共 **52 测全绿**(42→52)，build(54 modules 279ms)/lint 过。⚠️ dev 视觉(海洋是否真不穿地形、半透明纵深观感)**需人工 Review**(agent 无浏览器，Task 04/05 惯例)；`docs/screenshots/M2.png` 待 Task 08 水彩完善后归档。**M2 启动：1/3**。
 - **Task 05（2026-06-17）**：M1 闭环验收。**修复 Task 02b 遗留**：真实 GEBCO 产物(4096×2048)替换合成 DEM 后，`test/assets.test.ts` 的 meta 解析测试仍硬编码旧合成值(1024×512/-5000/6500) → 改为 **round-trip**（解析值 = 真实 meta 原值，数据源无关，Task 02b 可插拔契约兑现）。**新增「真实 GEBCO DEM 回归」11 测**：6 陆地 + 4 海洋代表点高程符号正确（陆地用明确内陆点避开海岸双线性跨海——纽约 -74,40.7 落 -0.5m 近海已弃用，换北美中部 -98,41）；全图极值断言 `maxM>7000 & minM<-9000`，基于 elevationMin/Max **硬上下界物理严格区分真实 vs 合成**（合成 min-5000/max6500 物理上触不到）。**⚠️ 关键数据发现**：GEBCO 4096×2048 降采样(~9.8km/px)后珠峰区最高点仅 **7628m**（非 8848），是邻域平均的分辨率损失、**非数据错误**；minM=-10000（海沟 clamp 到 elevationMin，raw16=0）。**验收**：42 测全绿(31→42，修1+增11)、`pnpm build` 通过(52 modules, 322ms)、lint 无错。M1 五条验收全覆盖：顶点数/最大高差(terrain.test)、project()(13测)、CPU/GPU 误差<1e-4(实<1e-9)、真实+合成 DEM 大陆轮廓可辨认(多点回归)、dev 无 console error **需人工 Review**(Task 04 已立惯例，agent 环境无浏览器)。palette 完整接入/S 降饱和留 M2 Task 08，相机/光照 Task 04 已定不动。⚠️ `docs/screenshots/M1.png` 截图待人工 `pnpm dev` 归档。**M1 闭环完成 → M1 ✅(6/6)，MVP 1/5**。
 - **Task 02b 闭环确认（2026-06-17）**：Task 02b 此前标 🔄「代码就绪待下载」，**实际闭环已由人工完成并提交**（94f8988 代码 + f6bf8a6 版本同步 2024→2026 + 94cce3c 烘焙产物）：`public/data/` heightmap.png 11.7MB / normal.png 12.1MB（合成版 738KB/333KB），meta.json `source:gebco-2026` 4096×2048 min-10000/max9000。Task 05 跑测试时发现 PROGRESS 落后实际进度（产物已替换、测试 fixture 未同步）→ 本次补记 ✅ 并修测试。**渲染层零改动再次验证**：Terrain/terrainMaterial/projection 全从 meta 读 min/max/尺寸，真实 DEM 替换无需改渲染代码（R1/R3 兑现）。
