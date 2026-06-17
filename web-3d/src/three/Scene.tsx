@@ -1,15 +1,16 @@
 /**
  * R3F 场景内容根（SPEC §4.1 / §4.3 渲染管线）。
  *
- * Task 04：挂载 Terrain（GPU 顶点位移 + 基础分层着色）+ 静态倾斜相机 + 光照。
+ * Task 04：挂载 Terrain（GPU 顶点位移 + 基础分层着色）+ 光照。
  * Task 06：挂载 Ocean（透明几何 + §4.3 渲染顺序）。
+ * Task 09：静态倾斜相机 → SandboxControls（受限 pan/zoom + 阻尼）。
  * 加载链路：loadTerrainAssets()（Task 03）异步 fetch+parse → 渲染 Terrain + Ocean。
  * 后续：Labels(14) → Atmosphere(16) → ...
  */
 import { useEffect, useState } from 'react'
 import { loadTerrainAssets } from '../data/assets'
 import type { TerrainAssets } from '../data/types'
-import { StaticCamera } from './camera/StaticCamera'
+import { SandboxControls } from './camera/SandboxControls'
 import { Terrain } from './terrain/Terrain'
 import { terrainLight } from './terrain/terrainMaterial'
 import { Ocean } from './ocean/Ocean'
@@ -40,7 +41,7 @@ export function Scene() {
   return (
     <>
       <color attach="background" args={['#0e1014']} />
-      <StaticCamera />
+      <SandboxControls />
       {/*
         光照参数与 terrainMaterial 同源（SPEC §2.3）。
         M1 自定义 ShaderMaterial 自包含光照（不接收 R3F 灯）；
