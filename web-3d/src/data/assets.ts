@@ -14,7 +14,8 @@
 import * as THREE from 'three'
 import { decode } from 'fast-png'
 import { heightToWorldY, type ElevationMeta } from '../config/projection'
-import type { ElevationData, Label, MetaJson, TerrainAssets } from './types'
+import type { BoundaryData, ElevationData, Label, MetaJson, TerrainAssets } from './types'
+import { decodeBoundaries } from './boundaries'
 
 /** 运行时资源 URL（Vite 把 public/ 映射到 BASE_URL）。懒求值，避免模块加载期 env 依赖。 */
 function dataUrl(name: string): string {
@@ -254,6 +255,17 @@ export async function loadLabels(): Promise<Label[]> {
   const res = await fetch(dataUrl('labels.json'))
   if (!res.ok) throw new Error(`加载 labels.json 失败：${res.status}`)
   return parseLabels(await res.json())
+}
+
+/**
+ * 加载并解码 `boundaries.bin`（Task 19 pipeline 产出：国家填充三角化 + 描边线段，紧凑二进制）。
+ * 解码侧见 `./boundaries`（与 pipeline 单一格式契约）；失败抛错由 Scene catch（与 loadLabels 同模式，
+ * 独立 fetch 不阻塞地形）。返回 typed arrays 供 BufferGeometry 直接上传 GPU。
+ */
+export async function loadBoundaries(): Promise<BoundaryData> {
+  const res = await fetch(dataUrl('boundaries.bin'))
+  if (!res.ok) throw new Error(`加载 boundaries.bin 失败：${res.status}`)
+  return decodeBoundaries(await res.arrayBuffer())
 }
 
 /** 加载 8-bit RGB `normal.png` 为线性纹理（细节增强用）。 */

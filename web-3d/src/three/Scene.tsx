@@ -10,7 +10,8 @@
  * Task 17：地形资产加载编排上报 store loading 切片（分项进度 + heightmap 字节级进度），
  *   供 Loader（src/ui，Canvas 外 DOM overlay）订阅渲染。资源不走 R3F loader（原生 fetch），
  *   故此处用 data 层细粒度导出函数自行编排 + fetchWithProgress，不改 src/data。
- * 后续：署名/MVP 验收(18) → ...
+ * Task 20：挂载 CountryMeshes + BorderLines（§6.3 国家填充面 + 描边）。boundaries.bin 独立加载
+ *   （与 labels 同模式，失败不阻塞地形）；需 assets（贴地高度采样）就绪后才渲染。
  */
 import { useEffect, useState } from 'react'
 import {
@@ -19,8 +20,9 @@ import {
   decodeHeightmap,
   createHeightTexture,
   loadLabels,
+  loadBoundaries,
 } from '../data/assets'
-import type { TerrainAssets, Label } from '../data/types'
+import type { TerrainAssets, Label, BoundaryData } from '../data/types'
 import { useStore } from '../state/store'
 import { fetchWithProgress, byteFraction, stageProgress } from '../ui/loading'
 import { AdaptiveQuality } from './effects/AdaptiveQuality'
@@ -30,6 +32,8 @@ import { terrainLight } from './terrain/terrainMaterial'
 import { Ocean } from './ocean/Ocean'
 import { LabelLayer } from './labels/LabelLayer'
 import { AtmosphereRim } from './atmosphere/AtmosphereRim'
+import { CountryMeshes } from './borders/CountryMeshes'
+import { BorderLines } from './borders/BorderLines'
 
 /** heightmap.png 运行时 URL（与 assets.ts dataUrl 同源：BASE_URL + data/）。 */
 const HEIGHTMAP_URL = `${import.meta.env.BASE_URL}data/heightmap.png`
@@ -42,6 +46,7 @@ function toErrorMessage(e: unknown): string {
 export function Scene() {
   const [assets, setAssets] = useState<TerrainAssets | null>(null)
   const [labels, setLabels] = useState<Label[] | null>(null)
+  const [boundaries, setBoundaries] = useState<BoundaryData | null>(null)
   const [, setError] = useState<unknown>(null)
 
   // Task 17：地形资产加载编排（meta → heightmap 字节进度 + normal 并行 → decode → texture），
@@ -100,6 +105,22 @@ export function Scene() {
     }
   }, [])
 
+  // Task 20：boundaries.bin 独立加载（与地形资产 / labels 解耦）；失败不阻塞地形。
+  // 渲染需 assets（贴地高度采样）就绪 → 仅 assets && boundaries 都就绪时挂载。
+  useEffect(() => {
+    let cancelled = false
+    loadBoundaries()
+      .then((b) => {
+        if (!cancelled) setBoundaries(b)
+      })
+      .catch((e) => {
+        if (!cancelled) console.error('[Scene] boundaries.bin 加载失败：', e)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <>
       <color attach="background" args={['#0e1014']} />
@@ -133,6 +154,16 @@ export function Scene() {
           <Terrain assets={assets} />
           <Ocean assets={assets} />
           {labels ? <LabelLayer assets={assets} labels={labels} /> : null}
+          {/*
+            SPEC §6.3 / §4.3：国家填充面（renderOrder=2）+ 描边（=3），透明 depthWrite=false 读
+            Terrain 深度（山体遮挡后方轮廓）。需 assets（贴地高度采样）+ boundaries 双就绪。
+          */}
+          {boundaries ? (
+            <>
+              <CountryMeshes assets={assets} boundaries={boundaries} />
+              <BorderLines assets={assets} boundaries={boundaries} />
+            </>
+          ) : null}
         </>
       ) : null}
       {/*
