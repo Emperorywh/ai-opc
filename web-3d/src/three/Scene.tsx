@@ -6,8 +6,9 @@
  * Task 09：静态倾斜相机 → SandboxControls（受限 pan/zoom + 阻尼）。
  * Task 11：挂载 AdaptiveQuality（FPS 探测分档 → dpr/shader 开关，§4.3 管线首项）。
  * Task 14：挂载 LabelLayer（troika SDF 标签，§6.5）。labels.json 独立加载，失败不阻塞地形。
+ * Task 16：挂载 AtmosphereRim（§6.7 fresnel 弧壳辉光，§4.3 管线末项最后绘叠加）。
  * 加载链路：loadTerrainAssets()（Task 03）异步 fetch+parse → 渲染 Terrain + Ocean + LabelLayer。
- * 后续：Labels 碰撞/LOD(15) → Atmosphere(16) → ...
+ * 后续：Loader/WebGL 降级(17) → 署名/MVP 验收(18) → ...
  */
 import { useEffect, useState } from 'react'
 import { loadTerrainAssets, loadLabels } from '../data/assets'
@@ -18,6 +19,7 @@ import { Terrain } from './terrain/Terrain'
 import { terrainLight } from './terrain/terrainMaterial'
 import { Ocean } from './ocean/Ocean'
 import { LabelLayer } from './labels/LabelLayer'
+import { AtmosphereRim } from './atmosphere/AtmosphereRim'
 
 export function Scene() {
   const [assets, setAssets] = useState<TerrainAssets | null>(null)
@@ -93,6 +95,12 @@ export function Scene() {
           {labels ? <LabelLayer assets={assets} labels={labels} /> : null}
         </>
       ) : null}
+      {/*
+        SPEC §6.7 + §4.3 渲染管线末项：AtmosphereRim（fresnel 扁椭圆弧壳，additive 辉光）。
+        不依赖 assets（装饰层），数据加载前后皆可渲染；renderOrder 高于 Ocean/LabelLayer 最后绘叠加。
+        质量联动：订阅 store qualityTier，低档不渲染（§8「低档关辉光」）。
+      */}
+      <AtmosphereRim />
     </>
   )
 }
