@@ -18,7 +18,7 @@ import { project, metersToWorldY, type ElevationMeta } from '../../config/projec
 import { palette, desaturateHex } from '../../config/palette'
 import { sampleWorldY } from '../../data/assets'
 import type { ElevationData } from '../../data/types'
-import type { BoundaryData } from '../../data/types'
+import type { BoundaryData, DisputedData } from '../../data/types'
 
 // ---------------------------------------------------------------------------
 // 高度采样（贴地 / 贴海面 + ε 浮起）
@@ -59,6 +59,73 @@ export function buildBoundaryPositions(
     positions[i * 3 + 2] = z
   }
   return positions
+}
+
+/**
+ * 把争议折线（DisputedData，line strip）展开为 lineSegments 顶点 + `lineDistance` attribute。
+ *
+ * 每条 line strip（n 顶点 → n−1 段）展开成**成对独立顶点**（(n−1)×2 顶点），供 lineSegments
+ * （gl.LINES）绘制。关键：**手动构建 lineDistance attribute 让累积弧长沿 strip 连续**——
+ * LineDashedMaterial fragment shader 据插值 `vLineDistance` 取 mod(dashSize+gapSize) 切虚实；
+ * 若用 `geometry.computeLineDistances()`（lineSegments 实现对每段重置 0→segLen），虚线会逐段
+ * 断裂、疏密不均。手动累积保证虚线沿整条争议线均匀连续。每条 line 的 lineDistance 从 0 重置
+ * （争议线相距甚远，跨线 phase 不连续无碍）。
+ *
+ *   x,z = project(lon, lat)                       // R2 投影，与边界/地形/标签同源
+ *   y   = max(sampleWorldY, seaLevelWorldY) + ε    // 贴地，与 buildBoundaryPositions 同源
+ *
+ * 纯函数（输入 data + assets，输出 typed arrays）；可在 Node 单测（合成 elevation）。
+ *
+ * @returns positions(Float32Array xyz) + lineDistances(Float32Array)，逐顶点一一对应
+ */
+export function buildDisputedSegments(
+  data: DisputedData,
+  elevation: ElevationData,
+  meta: ElevationMeta,
+): { positions: Float32Array; lineDistances: Float32Array } {
+  const seaY = metersToWorldY(meta.seaLevelMeters)
+
+  // 先投影每条 line 的顶点（暂存），并累计输出顶点数（每段 2 顶点）。
+  const projected: Array<{ x: number; y: number; z: number }[]> = []
+  let outVertexCount = 0
+  for (const line of data.lines) {
+    if (line.vertexCount < 2) continue
+    const pts: { x: number; y: number; z: number }[] = []
+    for (let i = 0; i < line.vertexCount; i++) {
+      const lon = data.vertices[(line.vertexOffset + i) * 2]
+      const lat = data.vertices[(line.vertexOffset + i) * 2 + 1]
+      const [x, z] = project(lon, lat)
+      const groundY = sampleWorldY(elevation, meta, lon, lat)
+      pts.push({ x, y: Math.max(groundY, seaY) + BOUNDARY_Y_OFFSET, z })
+    }
+    projected.push(pts)
+    outVertexCount += (pts.length - 1) * 2
+  }
+
+  const positions = new Float32Array(outVertexCount * 3)
+  const lineDistances = new Float32Array(outVertexCount)
+  let o = 0
+  for (const pts of projected) {
+    let acc = 0
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i]
+      const b = pts[i + 1]
+      const segLen = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z)
+      // 段起点 lineDistance = acc（a 的累积弧长）；段终点 = acc + segLen（b 的累积）。
+      positions[o * 3] = a.x
+      positions[o * 3 + 1] = a.y
+      positions[o * 3 + 2] = a.z
+      lineDistances[o] = acc
+      o++
+      positions[o * 3] = b.x
+      positions[o * 3 + 1] = b.y
+      positions[o * 3 + 2] = b.z
+      lineDistances[o] = acc + segLen
+      o++
+      acc += segLen
+    }
+  }
+  return { positions, lineDistances }
 }
 
 // ---------------------------------------------------------------------------
@@ -116,3 +183,32 @@ export const BORDER_LINE_MATERIAL_OPTS = {
 
 /** 描边渲染顺序（填充=2 → 描边=3，线绘于填充之上；均 < AtmosphereRim=10）。 */
 export const BORDER_LINE_RENDER_ORDER = 3
+
+// ---------------------------------------------------------------------------
+// 争议虚线材质（SPEC §6.3 / §2.4：LineDashedMaterial 暖灰虚线，Task 21 / D10）
+// ---------------------------------------------------------------------------
+
+/** 争议虚线色（SPEC §2.1 palette.disputed 暖灰）。 */
+export const DISPUTED_LINE_COLOR = palette.disputed
+/** 争议虚线不透明度（半透明柔和；虚线断续本身已降低视觉权重，故略高于实线描边 0.55）。 */
+export const DISPUTED_LINE_OPACITY = 0.6
+/**
+ * 虚线段长 / 间隔（世界单位，与顶点空间一致；dashSize=实线段，gapSize=空白段）。
+ * LineDashedMaterial 沿累积 lineDistance 取 mod(dashSize+gapSize) 切虚实。MVP 占位值；
+ * 真实观感（疏密 / 与 zoom 联动 / 真实 NE 争议线尺度）交 Review。
+ */
+export const DISPUTED_DASH_SIZE = 0.012
+export const DISPUTED_GAP_SIZE = 0.008
+
+/**
+ * 争议虚线材质透明属性（与描边同契约：transparent + depthWrite=false 读 Terrain 深度，山体遮挡
+ * 后方争议线）。LineDashedMaterial 需 geometry 带 `lineDistance` attribute（见 buildDisputedSegments
+ * 手动构建，非 computeLineDistances）。导出 plain object 供单测断言渲染顺序契约。
+ */
+export const DISPUTED_LINE_MATERIAL_OPTS = {
+  transparent: true,
+  depthWrite: false,
+} as const
+
+/** 争议虚线渲染顺序（SPEC §4.3：描边=3 → 争议虚线=4，最上层边界表达；< AtmosphereRim=10）。 */
+export const DISPUTED_RENDER_ORDER = 4

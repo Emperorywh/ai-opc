@@ -12,6 +12,8 @@
  *   故此处用 data 层细粒度导出函数自行编排 + fetchWithProgress，不改 src/data。
  * Task 20：挂载 CountryMeshes + BorderLines（§6.3 国家填充面 + 描边）。boundaries.bin 独立加载
  *   （与 labels 同模式，失败不阻塞地形）；需 assets（贴地高度采样）就绪后才渲染。
+ * Task 21：挂载 DisputedLines（§6.3 / D10 争议虚线）。disputed.bin 独立加载（与 boundaries 解耦），
+ *   需 assets 就绪后渲染（贴地采样）。
  */
 import { useEffect, useState } from 'react'
 import {
@@ -21,8 +23,9 @@ import {
   createHeightTexture,
   loadLabels,
   loadBoundaries,
+  loadDisputed,
 } from '../data/assets'
-import type { TerrainAssets, Label, BoundaryData } from '../data/types'
+import type { TerrainAssets, Label, BoundaryData, DisputedData } from '../data/types'
 import { useStore } from '../state/store'
 import { fetchWithProgress, byteFraction, stageProgress } from '../ui/loading'
 import { AdaptiveQuality } from './effects/AdaptiveQuality'
@@ -34,6 +37,7 @@ import { LabelLayer } from './labels/LabelLayer'
 import { AtmosphereRim } from './atmosphere/AtmosphereRim'
 import { CountryMeshes } from './borders/CountryMeshes'
 import { BorderLines } from './borders/BorderLines'
+import { DisputedLines } from './borders/DisputedLines'
 
 /** heightmap.png 运行时 URL（与 assets.ts dataUrl 同源：BASE_URL + data/）。 */
 const HEIGHTMAP_URL = `${import.meta.env.BASE_URL}data/heightmap.png`
@@ -47,6 +51,7 @@ export function Scene() {
   const [assets, setAssets] = useState<TerrainAssets | null>(null)
   const [labels, setLabels] = useState<Label[] | null>(null)
   const [boundaries, setBoundaries] = useState<BoundaryData | null>(null)
+  const [disputed, setDisputed] = useState<DisputedData | null>(null)
   const [, setError] = useState<unknown>(null)
 
   // Task 17：地形资产加载编排（meta → heightmap 字节进度 + normal 并行 → decode → texture），
@@ -121,6 +126,22 @@ export function Scene() {
     }
   }, [])
 
+  // Task 21：disputed.bin 独立加载（与 boundaries 解耦）；失败不阻塞地形 / 国家边界。
+  // 渲染需 assets（贴地高度采样）就绪 → 仅 assets && disputed 都就绪时挂载。
+  useEffect(() => {
+    let cancelled = false
+    loadDisputed()
+      .then((d) => {
+        if (!cancelled) setDisputed(d)
+      })
+      .catch((e) => {
+        if (!cancelled) console.error('[Scene] disputed.bin 加载失败：', e)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <>
       <color attach="background" args={['#0e1014']} />
@@ -164,6 +185,12 @@ export function Scene() {
               <BorderLines assets={assets} boundaries={boundaries} />
             </>
           ) : null}
+          {/*
+            SPEC §6.3 / §4.3：争议虚线（renderOrder=4，描边=3 之上最上层边界表达），透明
+            depthWrite=false 读 Terrain 深度。需 assets（贴地高度采样）+ disputed 双就绪；
+            与 boundaries 独立加载，互不阻塞。
+          */}
+          {disputed ? <DisputedLines assets={assets} disputed={disputed} /> : null}
         </>
       ) : null}
       {/*

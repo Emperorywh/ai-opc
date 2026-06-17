@@ -36,9 +36,15 @@
  *     28 borderIndexOffset u32
  *     32 borderIndexCount u32
  *
- * 争议边界 disputed.bin 的解码留 Task 21（DisputedLines 渲染时随格式契约补 decodeDisputed）。
+ *
+ * disputed.bin 布局（Little-Endian，与 pipeline 逐字节一致）见下方 `decodeDisputed`。
  */
-import type { BoundaryCountry, BoundaryData } from './types'
+import type {
+  BoundaryCountry,
+  BoundaryData,
+  DisputedData,
+  DisputedLine,
+} from './types'
 
 /** 文件魔数 / 版本（与 pipeline 同步；变更须同步两处）。 */
 export const BOUNDARIES_MAGIC = 'BDRT'
@@ -50,6 +56,22 @@ export const BOUNDARIES_LAYOUT = {
   CONTINENT_NAME: 16,
   ISO_A3: 4,
   COUNTRY_RECORD: 36,
+} as const
+
+/** disputed.bin 魔数 / 版本（与 pipeline 同步；变更须同步两处 + round-trip 单测）。 */
+export const DISPUTED_MAGIC = 'DSPT'
+export const DISPUTED_VERSION = 1
+
+/**
+ * disputed.bin 布局常量（字节，与 pipeline `LAYOUT.DISPUTED_*` 逐字节一致）。
+ *   HEADER (16B)：magic(4) + version(u32) + vertexCount(u32) + lineCount(u32)
+ *   VERTICES：vertexCount × 2 × f32 (lon, lat 交错)
+ *   LINES：lineCount × 24B → vertexOffset(u32) + vertexCount(u32) + id(16B UTF-8 零填充)
+ */
+export const DISPUTED_LAYOUT = {
+  HEADER: 16,
+  LINE_RECORD: 24,
+  LINE_ID: 16,
 } as const
 
 /**
@@ -141,6 +163,58 @@ export function decodeBoundaries(input: ArrayBuffer | Uint8Array): BoundaryData 
   }
 
   return { vertices, fillIndices, borderIndices, continents, countries }
+}
+
+// ---------------------------------------------------------------------------
+// disputed.bin 解码（Task 21，与 pipeline decodeDisputed 等价）
+// ---------------------------------------------------------------------------
+
+/**
+ * 解码 `disputed.bin` → 结构化 `DisputedData`（与 pipeline `decodeDisputed` 等价）。
+ *
+ * 严格校验 magic/version；非法抛错（运行时坏数据不静默渲染）。顶点存地理 lon,lat（与
+ * boundaries.bin 同源），渲染层用 `project()` 投影（Task 21 `buildDisputedSegments`）。
+ * 每条 `lines[]` 为一条 line strip（争议虚线顶点序列）。
+ *
+ * @param input disputed.bin 原始字节（ArrayBuffer 或 Uint8Array / 其 view）
+ */
+export function decodeDisputed(input: ArrayBuffer | Uint8Array): DisputedData {
+  const buf =
+    input instanceof Uint8Array
+      ? input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength)
+      : input
+  const dv = new DataView(buf)
+  let p = 0
+
+  const magic = readAscii(dv, p, 4)
+  if (magic !== DISPUTED_MAGIC) throw new Error(`disputed.bin 魔数不匹配：${magic}`)
+  p += 4
+  const version = dv.getUint32(p, true)
+  if (version !== DISPUTED_VERSION) throw new Error(`disputed.bin 版本不支持：${version}`)
+  p += 4
+  const vertexCount = dv.getUint32(p, true)
+  p += 4
+  const lineCount = dv.getUint32(p, true)
+  p += 4
+
+  // VERTICES（Float32 lon,lat 交错，全局共享池）
+  const vertices = new Float32Array(vertexCount * 2)
+  for (let i = 0; i < vertices.length; i++) {
+    vertices[i] = dv.getFloat32(p, true)
+    p += 4
+  }
+
+  // LINES（每条 line strip：vertexOffset / vertexCount / id）
+  const lines: DisputedLine[] = []
+  for (let i = 0; i < lineCount; i++) {
+    const vertexOffset = dv.getUint32(p, true)
+    const lineVertexCount = dv.getUint32(p + 4, true)
+    const id = readUtf8Fixed(dv, p + 8, DISPUTED_LAYOUT.LINE_ID)
+    p += DISPUTED_LAYOUT.LINE_RECORD
+    lines.push({ vertexOffset, vertexCount: lineVertexCount, id })
+  }
+
+  return { vertices, lines }
 }
 
 // ---------------------------------------------------------------------------

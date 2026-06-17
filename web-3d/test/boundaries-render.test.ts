@@ -12,17 +12,22 @@
  */
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
-import { packBoundaries } from '../scripts/data-pipeline/lib/boundary-pack.mjs'
-import { SYNTHETIC_COUNTRIES } from '../scripts/data-pipeline/lib/boundaries-data.mjs'
+import { packBoundaries, packDisputed } from '../scripts/data-pipeline/lib/boundary-pack.mjs'
+import { SYNTHETIC_COUNTRIES, SYNTHETIC_DISPUTED } from '../scripts/data-pipeline/lib/boundaries-data.mjs'
 import { uniqueContinents } from '../scripts/data-pipeline/lib/boundary-source.mjs'
 import {
   decodeBoundaries,
+  decodeDisputed,
   BOUNDARIES_MAGIC,
   BOUNDARIES_VERSION,
   BOUNDARIES_LAYOUT,
+  DISPUTED_MAGIC,
+  DISPUTED_VERSION,
+  DISPUTED_LAYOUT,
 } from '../src/data/boundaries'
 import {
   buildBoundaryPositions,
+  buildDisputedSegments,
   BOUNDARY_Y_OFFSET,
   COUNTRY_FILL_COLOR,
   COUNTRY_FILL_OPACITY,
@@ -33,6 +38,12 @@ import {
   BORDER_LINE_WIDTH,
   BORDER_LINE_MATERIAL_OPTS,
   BORDER_LINE_RENDER_ORDER,
+  DISPUTED_LINE_COLOR,
+  DISPUTED_LINE_OPACITY,
+  DISPUTED_DASH_SIZE,
+  DISPUTED_GAP_SIZE,
+  DISPUTED_LINE_MATERIAL_OPTS,
+  DISPUTED_RENDER_ORDER,
 } from '../src/three/borders/boundaryGeometry'
 import {
   project,
@@ -45,7 +56,15 @@ import {
 import { sampleWorldY } from '../src/data/assets'
 import { palette } from '../src/config/palette'
 import { OCEAN_RENDER_ORDER } from '../src/three/ocean/oceanMaterial'
-import type { BoundaryData, ElevationData } from '../src/data/types'
+import type { BoundaryData, DisputedData, ElevationData } from '../src/data/types'
+import {
+  BOUNDARY_VARIANTS,
+  DEFAULT_BOUNDARY_VARIANT,
+  CURRENT_BOUNDARY_VARIANT,
+  getBoundaryVariant,
+  availableVariants,
+  type BoundaryVariantId,
+} from '../src/config/boundaryVariant'
 
 // ---------------------------------------------------------------------------
 // 辅助
@@ -306,6 +325,238 @@ describe('索引结构（填充三角形 / 描边线段对）', () => {
     for (let i = 0; i < dec.borderIndices.length; i++) {
       expect(dec.borderIndices[i]).toBeGreaterThanOrEqual(0)
       expect(dec.borderIndices[i]).toBeLessThan(n)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 21 · 争议虚线：前端 decodeDisputed ↔ pipeline packDisputed 等价
+// ---------------------------------------------------------------------------
+
+describe('前端 decodeDisputed（与 pipeline packDisputed 等价）', () => {
+  function packSyntheticDisputed() {
+    return packDisputed(SYNTHETIC_DISPUTED, { simplify: 0 })
+  }
+  function decodeSyntheticDisputed(): DisputedData {
+    return decodeDisputed(packSyntheticDisputed().bytes)
+  }
+
+  it('pipeline 打包字节 → 前端解码：顶点 / 线条数与 pipeline stats 一致', () => {
+    const { bytes, stats } = packSyntheticDisputed()
+    const dec = decodeDisputed(bytes)
+    expect(dec.vertices.length).toBe(stats.vertexCount * 2)
+    expect(dec.lines.length).toBe(stats.lineCount)
+  })
+
+  it('解码成功隐含 magic/version 校验通过', () => {
+    const dec = decodeSyntheticDisputed()
+    expect(DISPUTED_MAGIC).toBe('DSPT')
+    expect(DISPUTED_VERSION).toBe(1)
+    expect(dec.lines).toHaveLength(3) // kashmir / crimea / western-sahara
+  })
+
+  it('line 记录 id 正确（克什米尔 / 克里米亚 / 西撒哈拉）', () => {
+    const dec = decodeSyntheticDisputed()
+    expect(dec.lines.map((l) => l.id)).toEqual(['kashmir', 'crimea', 'western-sahara'])
+  })
+
+  it('每条 line 范围合法：顶点在全局池内 / vertexCount≥2', () => {
+    const dec = decodeSyntheticDisputed()
+    const vertexCount = dec.vertices.length / 2
+    for (const l of dec.lines) {
+      expect(l.vertexOffset + l.vertexCount).toBeLessThanOrEqual(vertexCount)
+      expect(l.vertexCount).toBeGreaterThanOrEqual(2)
+    }
+  })
+
+  it('顶点 lon,lat ∈ [-180,180]×[-90,90]', () => {
+    const dec = decodeSyntheticDisputed()
+    for (let i = 0; i < dec.vertices.length; i += 2) {
+      expect(dec.vertices[i]).toBeGreaterThanOrEqual(-180)
+      expect(dec.vertices[i]).toBeLessThanOrEqual(180)
+      expect(dec.vertices[i + 1]).toBeGreaterThanOrEqual(-90)
+      expect(dec.vertices[i + 1]).toBeLessThanOrEqual(90)
+    }
+  })
+
+  it('错误魔数抛错（坏数据不静默渲染）', () => {
+    const { bytes } = packSyntheticDisputed()
+    const bad = bytes.slice()
+    bad[0] = 88
+    expect(() => decodeDisputed(bad)).toThrow(/魔数/)
+  })
+
+  it('布局常量与 pipeline LAYOUT.DISPUTED_* 逐字节一致', () => {
+    expect(DISPUTED_LAYOUT.HEADER).toBe(16)
+    expect(DISPUTED_LAYOUT.LINE_RECORD).toBe(24)
+    expect(DISPUTED_LAYOUT.LINE_ID).toBe(16)
+  })
+
+  it('文件大小 = HEADER + vertices + lines（逐字节校验）', () => {
+    const { bytes, stats } = packSyntheticDisputed()
+    const expected =
+      DISPUTED_LAYOUT.HEADER +
+      stats.vertexCount * 2 * 4 +
+      stats.lineCount * DISPUTED_LAYOUT.LINE_RECORD
+    expect(bytes.length).toBe(expected)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 21 · buildDisputedSegments（折线 → lineSegments 顶点 + lineDistance）
+// ---------------------------------------------------------------------------
+
+describe('buildDisputedSegments（折线 → lineSegments 顶点 + lineDistance）', () => {
+  function decodeSyntheticDisputed(): DisputedData {
+    return decodeDisputed(packDisputed(SYNTHETIC_DISPUTED, { simplify: 0 }).bytes)
+  }
+
+  it('输出顶点数 = Σ(line.vertexCount−1)×2（每段 2 顶点，仅 vertexCount≥2 的线）', () => {
+    const dec = decodeSyntheticDisputed()
+    const elev = flatElevation(4, 2, 32768)
+    const { positions, lineDistances } = buildDisputedSegments(dec, elev, meta())
+    const expectedSegVerts = dec.lines
+      .filter((l) => l.vertexCount >= 2)
+      .reduce((sum, l) => sum + (l.vertexCount - 1) * 2, 0)
+    expect(positions.length).toBe(expectedSegVerts * 3)
+    expect(lineDistances.length).toBe(expectedSegVerts)
+  })
+
+  it('x,z 落 PLANE（与 project() 同源 R2）', () => {
+    const dec = decodeSyntheticDisputed()
+    const elev = flatElevation(4, 2, 32768)
+    const { positions } = buildDisputedSegments(dec, elev, meta())
+    for (let i = 0; i < positions.length / 3; i++) {
+      expect(positions[i * 3]).toBeGreaterThanOrEqual(-PLANE_WIDTH / 2 - 1e-6)
+      expect(positions[i * 3]).toBeLessThanOrEqual(PLANE_WIDTH / 2 + 1e-6)
+      expect(positions[i * 3 + 2]).toBeGreaterThanOrEqual(-PLANE_HEIGHT / 2 - 1e-6)
+      expect(positions[i * 3 + 2]).toBeLessThanOrEqual(PLANE_HEIGHT / 2 + 1e-6)
+    }
+  })
+
+  it('y 始终 ≥ 海面 + ε（防 z-fighting 浮起，贴地）', () => {
+    const dec = decodeSyntheticDisputed()
+    const elev = flatElevation(4, 2, 32768)
+    const m = meta({ elevationMin: 0, elevationMax: 1000, seaLevelMeters: 0 })
+    const seaY = metersToWorldY(m.seaLevelMeters)
+    const { positions } = buildDisputedSegments(dec, elev, m)
+    for (let i = 0; i < positions.length / 3; i++) {
+      expect(positions[i * 3 + 1]).toBeGreaterThanOrEqual(seaY + BOUNDARY_Y_OFFSET - 1e-9)
+    }
+  })
+
+  it('海底顶点 y 钳到海面 + ε（陆地/海面取较高者）', () => {
+    const dec = decodeSyntheticDisputed()
+    const elev = flatElevation(4, 2, 0)
+    const m = meta({ elevationMin: -5000, elevationMax: 1000, seaLevelMeters: 0 })
+    const seaY = metersToWorldY(m.seaLevelMeters)
+    const { positions } = buildDisputedSegments(dec, elev, m)
+    for (let i = 0; i < positions.length / 3; i++) {
+      expect(positions[i * 3 + 1]).toBeCloseTo(seaY + BOUNDARY_Y_OFFSET, 6)
+    }
+  })
+
+  it('lineDistance 沿每条线单调递增、段间连续（段终点 = 下段起点 → 虚线连续不逐段断裂）', () => {
+    const dec = decodeSyntheticDisputed()
+    const elev = flatElevation(4, 2, 32768)
+    const { lineDistances } = buildDisputedSegments(dec, elev, meta())
+    let idx = 0
+    for (const line of dec.lines) {
+      if (line.vertexCount < 2) continue
+      const segs = line.vertexCount - 1
+      for (let s = 0; s < segs; s++) {
+        const start = lineDistances[idx + s * 2]
+        const end = lineDistances[idx + s * 2 + 1]
+        expect(end).toBeGreaterThanOrEqual(start) // 段内单调（段长≥0）
+        if (s < segs - 1) {
+          // 下一段起点 = 当前段终点（累积连续，computeLineDistances 做不到）
+          expect(lineDistances[idx + (s + 1) * 2]).toBeCloseTo(end, 6)
+        }
+      }
+      idx += segs * 2
+    }
+  })
+
+  it('每条线 lineDistance 从 0 重置（跨线 phase 独立）', () => {
+    const dec = decodeSyntheticDisputed()
+    const elev = flatElevation(4, 2, 32768)
+    const { lineDistances } = buildDisputedSegments(dec, elev, meta())
+    let idx = 0
+    for (const line of dec.lines) {
+      if (line.vertexCount < 2) continue
+      expect(lineDistances[idx]).toBe(0)
+      idx += (line.vertexCount - 1) * 2
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 21 · 争议虚线材质 / 渲染序常量契约（SPEC §6.3 / §4.3 / §2.4）
+// ---------------------------------------------------------------------------
+
+describe('争议虚线材质 / 渲染序常量契约', () => {
+  it('色 = palette.disputed 暖灰（合法 hex）', () => {
+    expect(DISPUTED_LINE_COLOR).toBe(palette.disputed)
+    expect(() => new THREE.Color(DISPUTED_LINE_COLOR)).not.toThrow()
+  })
+
+  it('不透明度半透明（0 < opacity < 1）', () => {
+    expect(DISPUTED_LINE_OPACITY).toBeGreaterThan(0)
+    expect(DISPUTED_LINE_OPACITY).toBeLessThan(1)
+  })
+
+  it('虚线段长 / 间隔 > 0', () => {
+    expect(DISPUTED_DASH_SIZE).toBeGreaterThan(0)
+    expect(DISPUTED_GAP_SIZE).toBeGreaterThan(0)
+  })
+
+  it('材质：transparent + depthWrite=false（后绘读 Terrain 深度，与描边同契约）', () => {
+    expect(DISPUTED_LINE_MATERIAL_OPTS.transparent).toBe(true)
+    expect(DISPUTED_LINE_MATERIAL_OPTS.depthWrite).toBe(false)
+  })
+
+  it('渲染序：争议虚线 > 描边（=3）、< AtmosphereRim（=10 末项）', () => {
+    expect(DISPUTED_RENDER_ORDER).toBeGreaterThan(BORDER_LINE_RENDER_ORDER)
+    expect(DISPUTED_RENDER_ORDER).toBeLessThan(10)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 21 · boundaryVariant 接口（D10 可替换数据源）
+// ---------------------------------------------------------------------------
+
+describe('boundaryVariant 接口（D10 可替换数据源）', () => {
+  it('MVP 默认 / 当前变体 = ne（Natural Earth，教育中立）', () => {
+    expect(DEFAULT_BOUNDARY_VARIANT).toBe('ne')
+    expect(CURRENT_BOUNDARY_VARIANT).toBe('ne')
+  })
+
+  it('ne 变体可用（available=true）+ 数据源为 NE disputed_areas', () => {
+    const ne = getBoundaryVariant('ne')
+    expect(ne.available).toBe(true)
+    expect(ne.disputedSource).toContain('disputed')
+  })
+
+  it('预留变体（china / international）available=false（占位，未接入）', () => {
+    expect(getBoundaryVariant('china').available).toBe(false)
+    expect(getBoundaryVariant('international').available).toBe(false)
+  })
+
+  it('availableVariants() MVP 仅 ne', () => {
+    const avail = availableVariants()
+    expect(avail).toHaveLength(1)
+    expect(avail[0].id).toBe('ne')
+  })
+
+  it('未知 id 回退默认 ne（配置容错，不抛错）', () => {
+    expect(getBoundaryVariant('unknown' as BoundaryVariantId).id).toBe('ne')
+  })
+
+  it('接口可扩展：BOUNDARY_VARIANTS 覆盖所有 BoundaryVariantId', () => {
+    const ids: BoundaryVariantId[] = ['ne', 'china', 'international']
+    for (const id of ids) {
+      expect(BOUNDARY_VARIANTS[id]).toBeDefined()
+      expect(BOUNDARY_VARIANTS[id].id).toBe(id)
     }
   })
 })
