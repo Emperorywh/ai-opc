@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "gen:dem": "node scripts/data-pipeline/0-synthetic-dem.mjs",
     "gen:dem:real": "node scripts/data-pipeline/1-gebco-dem.mjs",
+    "gen:boundaries": "node scripts/data-pipeline/2-boundaries.mjs",
     "gen:labels": "node scripts/data-pipeline/4-labels-zh.mjs",
     "gen:font:fetch": "node scripts/font-subset/fetch-source.mjs",
     "gen:font": "node scripts/font-subset/subset.mjs",
