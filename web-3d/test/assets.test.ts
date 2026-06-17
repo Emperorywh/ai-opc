@@ -15,13 +15,16 @@ const PUBLIC_DATA = resolve('public/data')
 const realMetaRaw = JSON.parse(readFileSync(resolve(PUBLIC_DATA, 'meta.json'), 'utf8'))
 
 describe('parseMeta', () => {
-  it('解析真实 meta.json 通过校验', () => {
+  it('解析真实 meta.json 通过校验（round-trip：解析值 = 真实 meta 原值，数据源无关）', () => {
     const m = parseMeta(realMetaRaw)
-    expect(m.width).toBe(1024)
-    expect(m.height).toBe(512)
+    // 不写死具体数值：真实 meta 从合成(1024×512/-5000~6500) 换成 GEBCO(4096×2048/-10000~9000)
+    // 后，本测试无需改动 —— parseMeta 只需忠实还原真实文件即可（Task 02b 可插拔数据源契约）。
+    expect(m.width).toBe(realMetaRaw.width)
+    expect(m.height).toBe(realMetaRaw.height)
     expect(m.projection).toBe('equirectangular')
-    expect(m.elevationMin).toBe(-5000)
-    expect(m.elevationMax).toBe(6500)
+    expect(m.elevationMin).toBe(realMetaRaw.elevationMin)
+    expect(m.elevationMax).toBe(realMetaRaw.elevationMax)
+    expect(m.source).toBe(realMetaRaw.source)
     expect(m.heightExaggeration).toBe(2.5)
   })
 
@@ -135,5 +138,55 @@ describe('createHeightTexture（R32F 构建，node 安全）', () => {
     expect(img.data[0]).toBeCloseTo(0, 6) // raw 0 → 0
     expect(img.data[4]).toBeCloseTo(1, 6) // raw 65535 → 1
     expect(img.data.length).toBe(8)
+  })
+})
+
+describe('真实 GEBCO DEM 大陆轮廓回归（Task 02b 闭环 · M1 验收第 4 条）', () => {
+  // 整块共享一次解码（11.7MB PNG），避免每个 it 重复 decode。
+  const elev = decodeHeightmap(readFileSync(resolve(PUBLIC_DATA, 'heightmap.png')))
+  const meta = parseMeta(realMetaRaw) as ElevationMeta
+  const sea = meta.seaLevelMeters
+
+  // 已知陆地代表点：高程应高于海平面（七大洲各取一点 + 南极冰盖）
+  const land: ReadonlyArray<readonly [string, number, number]> = [
+    ['北京', 116.4, 39.9],
+    ['北美中部', -98, 41], // 内陆大平原，避开海岸双线性跨海（纽约 -74,40.7 落在 -0.5m 近海）
+    ['亚马逊', -62, -4],
+    ['撒哈拉', 10, 23],
+    ['澳洲中部', 134, -25],
+    ['南极点', 0, -89],
+  ]
+  for (const [name, lon, lat] of land) {
+    it(`陆地·${name} (${lon}, ${lat}) 高于海平面`, () => {
+      expect(heightToMeters(sampleHeight(elev, lon, lat), meta)).toBeGreaterThan(sea)
+    })
+  }
+
+  // 已知海洋代表点：高程应低于海平面（四大洋各取一点）
+  const ocean: ReadonlyArray<readonly [string, number, number]> = [
+    ['太平洋中部', -160, 0],
+    ['大西洋中部', -30, 0],
+    ['印度洋', 80, -20],
+    ['北冰洋', 0, 85],
+  ]
+  for (const [name, lon, lat] of ocean) {
+    it(`海洋·${name} (${lon}, ${lat}) 低于海平面`, () => {
+      expect(heightToMeters(sampleHeight(elev, lon, lat), meta)).toBeLessThan(sea)
+    })
+  }
+
+  it('真实地形显著起伏 —— 区分真实 GEBCO 与合成噪声（基于 elevationMin/Max 硬上下界，物理严格）', () => {
+    // 合成 DEM(Task 02)：elevationMin=-5000/max=6500 是烘焙硬上下界 → maxM≤6500、minM≥-5000，本断言必失败。
+    // 真实 GEBCO(4096×2048)：maxM≈7628（珠峰区降采样至 ~9.8km/px 被邻域平均，<真实 8848m，分辨率损失属预期；
+    //   不是数据错误）、minM=-10000（深海沟 clamp 到 elevationMin）→ 通过。构成「真实 DEM 已接入」回归保护。
+    let maxM = -Infinity
+    let minM = Infinity
+    for (let i = 0; i < elev.data.length; i++) {
+      const m = heightToMeters(elev.data[i] / 65535, meta)
+      if (m > maxM) maxM = m
+      if (m < minM) minM = m
+    }
+    expect(maxM).toBeGreaterThan(7000)
+    expect(minM).toBeLessThan(-9000)
   })
 })
