@@ -1,35 +1,39 @@
 /**
- * 海洋 mesh（SPEC §6.2 / §4.3，Task 06：透明几何 + 渲染顺序）。
+ * 海洋 mesh（SPEC §6.2 / §4.3）。
  *
- * Task 06 范围：一张与地形同尺寸的透明平面，铺在海平面
- *   `y = metersToWorldY(seaLevelMeters)`，验证 SPEC §4.3 透明渲染顺序——
- *   Terrain 先绘写深度、Ocean 后绘关深度写入，使海洋不穿透陆地
- *   （陆地顶点 y>0 高于海面 → Ocean 片元 depth test 失败被丢弃；海床 y<0 区域 →
- *   Ocean 通过深度测试绘制半透明海洋）。
+ * Task 06：透明平面 + §4.3 透明渲染顺序（Terrain 先绘写深度、Ocean 后绘关深度写入）。
+ * Task 07：oceanMaterial 升级为 Gerstner 海洋 shader（波 + 菲涅尔 + 深浅渐变 + 流动）。
  *
- * ⚠️ 不包含（→ Task 07 oceanMaterial.ts）：Gerstner 波顶点位移、菲涅尔柔和反射、
- *    heightmap 水深深浅渐变、时间驱动流动。Task 06 用半透明纯色（oceanShallow）占位，
- *    半透明叠加在 terrainMaterial 的海床占色（y<0 分支）之上。
+ * 平面与地形同尺寸（PLANE_WIDTH×PLANE_HEIGHT），铺海平面 y=seaLevelWorldY(assets)；
+ * rotation[-90° X] 同 Terrain。uTime 每帧累加驱动 Gerstner 波相位流动（§6.2.4）。
  *
  * 材质/几何常量与 seaLevelWorldY 见 ./oceanMaterial（非组件模块，满足 react-refresh 规则）。
  */
-import { useMemo } from 'react'
-import * as THREE from 'three'
+import { useMemo, useEffect, useRef } from 'react'
+import type { ShaderMaterial } from 'three'
+import { useFrame } from '@react-three/fiber'
 import { PLANE_WIDTH, PLANE_HEIGHT } from '../../config/projection'
 import type { TerrainAssets } from '../../data/types'
 import {
   OCEAN_SEGMENTS,
-  OCEAN_MATERIAL_PROPS,
   OCEAN_RENDER_ORDER,
   seaLevelWorldY,
+  createOceanMaterial,
 } from './oceanMaterial'
 
 export function Ocean({ assets }: { assets: TerrainAssets }) {
   const seaY = useMemo(() => seaLevelWorldY(assets), [assets])
-  const material = useMemo(
-    () => new THREE.MeshBasicMaterial({ ...OCEAN_MATERIAL_PROPS }),
-    [],
-  )
+  const material = useMemo(() => createOceanMaterial(assets), [assets])
+  // 经 ref 持有 material 供 useFrame 每帧更新 uniform（避开 react-hooks/immutability 规则
+  // 对 useMemo 返回值直接 mutate 的误报，同 Task 04 camera 处理思路）。
+  const matRef = useRef<ShaderMaterial>(material)
+  useEffect(() => {
+    matRef.current = material
+  }, [material])
+  // SPEC §6.2.4：时间驱动流动（Gerstner 波相位随 uTime 滚动）
+  useFrame((_, delta) => {
+    matRef.current.uniforms.uTime.value += delta
+  })
   return (
     <mesh
       rotation={[-Math.PI / 2, 0, 0]}
