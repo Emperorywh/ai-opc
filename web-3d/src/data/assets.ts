@@ -13,7 +13,13 @@
  */
 import * as THREE from 'three'
 import { decode } from 'fast-png'
-import { heightToWorldY, type ElevationMeta } from '../config/projection'
+import {
+  project,
+  PLANE_WIDTH,
+  PLANE_HEIGHT,
+  heightToWorldY,
+  type ElevationMeta,
+} from '../config/projection'
 import type {
   BoundaryData,
   DisputedData,
@@ -198,25 +204,38 @@ export function createHeightTexture(elevation: ElevationData): THREE.DataTexture
 // CPU 高度查询表（R3：与 GPU shader 同源）
 // ---------------------------------------------------------------------------
 
-/** 经纬度 → 连续像素采样坐标（与 heightmap 布局一致：t=0 → +90°N，s=0 → −180°）。 */
-function lonLatToSample(
-  lon: number,
-  lat: number,
+/**
+ * 世界平面坐标 → 连续像素采样坐标（与 heightmap 布局一致：v=0 顶行=北，u=0 左列=西）。
+ *
+ * 与 Task 04 vertex shader 的 `heightUv = (worldX/PLANE_WIDTH + 0.5, 0.5 + worldZ/PLANE_HEIGHT)`
+ * **严格同源**（R3 CPU/GPU 一致）。Robinson 重烘焙后 heightmap 像素均匀对应 worldXY，
+ * 故 CPU 采样也走 worldXY→UV（而非经纬度→像素 —— 后者假设 equirect 网格，Robinson 下错位）。
+ */
+function worldToSample(
+  worldX: number,
+  worldZ: number,
   width: number,
   height: number,
 ): { sx: number; sy: number } {
-  const sx = ((lon + 180) / 360) * width
-  const sy = ((90 - lat) / 180) * height
+  const sx = (worldX / PLANE_WIDTH + 0.5) * width
+  const sy = (0.5 + worldZ / PLANE_HEIGHT) * height
   return { sx, sy }
 }
 
 /**
  * 双线性采样归一化高程 h∈[0,1]（像素中心约定，与 Task 02 一致）。
  * 经度方向环绕、纬度方向钳制。与 GPU LINEAR 采样同一 heightmap 源、同一解码公式 → CPU/GPU 一致（R3）。
+ *
+ * 以**世界平面坐标**为输入（worldXY→UV，与 shader 同源），投影无关 —— Robinson 或 equirect
+ * 下皆正确。供需要直接定位 worldXY 的场景（如河流贴地采样 / 拾取深度偏移）。
  */
-export function sampleHeight(elevation: ElevationData, lon: number, lat: number): number {
+export function sampleHeightAtWorld(
+  elevation: ElevationData,
+  worldX: number,
+  worldZ: number,
+): number {
   const { width: W, height: H, data } = elevation
-  const { sx, sy } = lonLatToSample(lon, lat, W, H)
+  const { sx, sy } = worldToSample(worldX, worldZ, W, H)
   const x0 = Math.floor(sx - 0.5)
   const y0 = Math.floor(sy - 0.5)
   const fx = sx - 0.5 - x0
@@ -234,6 +253,16 @@ export function sampleHeight(elevation: ElevationData, lon: number, lat: number)
   const a = h00 + (h10 - h00) * fx
   const b = h01 + (h11 - h01) * fx
   return a + (b - a) * fy
+}
+
+/**
+ * 经纬度 → 归一化高程 h∈[0,1]。先经 `project(lon,lat)` 投影到 worldXY 再采样（R2 单一投影契约），
+ * 与地形顶点 / 边界 / 标签同源对齐。equirect 下 project 退化为线性，与原「经纬度→像素」逐字节等价；
+ * Robinson 下经 project 走 worldXY→UV，自动与重烘焙的 Robinson heightmap 对齐。
+ */
+export function sampleHeight(elevation: ElevationData, lon: number, lat: number): number {
+  const [x, z] = project(lon, lat)
+  return sampleHeightAtWorld(elevation, x, z)
 }
 
 /** (lon,lat) → 世界 Y（CPU 查询，与 shader 同源公式；河流采样 / 标签锚点 / 拾取深度偏移用）。 */

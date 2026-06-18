@@ -4,23 +4,32 @@
  * 所有子系统（地形顶点、边界、河流、标签锚点）必须经同一投影函数
  * `project(lon, lat) → [x, z]` 投影到工作坐标系，杜绝错位返工。
  *
- * 工作坐标系（SPEC §5.1）：平面宽 2.0（X，经度方向）× 纵 1.0（Z，纬度方向），
- * 对应 equirectangular 的 2:1 经纬比。高度 Y 独立。
- *   x = lon / 180          // lon ∈ [-180,180] → x ∈ [-1,1]
- *   z = -lat / 90 * 0.5    // lat ∈ [-90,90]   → z ∈ [-0.5,0.5]（向北 -z）
- *   y = heightExaggerated  // 真实高度 × HEIGHT_EXAGGERATION
+ * 工作坐标系（SPEC §5.1）：平面宽 2.0（X，经度方向）× 纵 1.0（Z，纬度方向）。高度 Y 独立。
  *
- * MVP（Phase 1）用 Equirectangular；Phase 2 升级 Robinson（SPEC §5.2 / D4）。
- * 切换投影只需改本文件 + 重跑 pipeline，渲染层零改动（R2）。
+ * 投影分阶段（SPEC §5.2 / D4）：
+ *   - MVP（Phase 1）：Equirectangular —— DEM 1:1 直接作 heightmap，快速跑通。
+ *   - Phase 2（M9，当前）：Robinson —— 离线一次性重投影 DEM + 矢量，消除极区拉伸，
+ *     获得「国家地理图鉴」美感。
  *
- * `project()` 与高度解码契约由 Task 03 实现（见下）；本文件为全局对齐单一契约。
+ * **Robinson 归一化**：proj4 的 robin 投影输出米制坐标（±MAX_X / ±MAX_Y），
+ * 归一化到与 equirect 完全相同的输出范围 `x ∈ [-1,1] / z ∈ [-0.5,0.5]`。
+ * 这样 PLANE 几何 / shader 的 worldXY→UV 映射 / 所有依赖 project 输出范围的代码**零改动**
+ * （兑现 M9「渲染层 diff 为空」验收）。Robinson 矩形真实比例 1.9717:1 拉伸到 PLANE 2:1，
+ * 横向 ~1.4% 拉伸，美学可忽略。
+ *
+ * **proj4 同源**：前端 `project()` 与 pipeline 重烘焙（scripts/data-pipeline/lib/robinson.mjs）
+ * 用同一 proj4 robin 定义 + 同一组归一化常数 → 像素网格严格对齐。proj4 在 M9 引入
+ * （SPEC §3 line115 计划；Task 19 备注「proj4 重投影推迟 M9」）。
+ *
+ * `project()` 与高度解码契约由 Task 03 实现；Robinson 切换由 Task 26 实现。
  */
+import proj4 from 'proj4'
 
 /** 支持的投影类型（MVP = equirectangular，Phase 2 = robinson）。 */
 export type ProjectionName = 'equirectangular' | 'robinson'
 
-/** 当前启用投影（MVP 阶段固定 equirectangular）。 */
-export const PROJECTION: ProjectionName = 'equirectangular'
+/** 当前启用投影（Phase 2 起固定 robinson）。 */
+export const PROJECTION: ProjectionName = 'robinson'
 
 /** 工作平面尺寸（SPEC §5.1）。宽（X，经度方向）× 纵（Z，纬度方向）。 */
 export const PLANE_WIDTH = 2.0
@@ -30,27 +39,60 @@ export const PLANE_HEIGHT = 1.0
 export const HEIGHT_EXAGGERATION = 2.5
 
 // ===========================================================================
-// 投影函数（SPEC §5.1）—— Task 03 实现
+// Robinson 投影定义（proj4，WGS84 椭球，lon_0=0）—— 与 pipeline 同源
+// ===========================================================================
+
+/** proj4 Robinson 定义串（lon_0=0，单位米）。前端与 pipeline 共用此串保证同源。 */
+export const ROBINSON_DEF = '+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs'
+
+/** 预编译 proj4 Proj 对象（避免每次调用重复解析定义串）。 */
+const WGS84_PROJ = new proj4.Proj('EPSG:4326')
+const ROBINSON_PROJ = new proj4.Proj(ROBINSON_DEF)
+
+/**
+ * Robinson 投影 X / Y 最大值（米）—— 归一化常数。
+ *
+ *   ROBINSON_MAX_X = robinson(180, 0).x   // 经度 ±180 → x ∈ ±MAX_X（赤道最宽）
+ *   ROBINSON_MAX_Y = robinson(0, 90).y    // 纬度 ±90 → y ∈ ±MAX_Y（极点最高/低）
+ *
+ * proj4 在 WGS84 椭球下为确定常数（≈ 17005833 / 8625155），前端与 pipeline 各自从
+ * proj4 计算同一表达式 → 值严格一致（不硬编码，规避 proj4 版本/椭球差异风险）。
+ */
+export const ROBINSON_MAX_X = proj4(WGS84_PROJ, ROBINSON_PROJ, [180, 0])[0]
+export const ROBINSON_MAX_Y = proj4(WGS84_PROJ, ROBINSON_PROJ, [0, 90])[1]
+
+// ===========================================================================
+// 投影函数（SPEC §5.1）
 // ===========================================================================
 
 /**
- * 经纬度 → 工作平面坐标（SPEC §5.1）。
+ * 经纬度 → 工作平面坐标（SPEC §5.1，Robinson 投影，Task 26）。
  *
- *   lon ∈ [-180,180] → x ∈ [-1, 1]（经度方向，PLANE_WIDTH 的一半）
- *   lat ∈ [-90, 90]  → z ∈ [-0.5, 0.5]（纬度方向；向北为 -z）
+ *   lon ∈ [-180,180] → x ∈ [-1, 1]（经度方向；归一化 robinson.x / MAX_X × PLANE_WIDTH/2）
+ *   lat ∈ [-90, 90]  → z ∈ [-0.5, 0.5]（纬度方向；向北为 -z；归一化 -robinson.y / MAX_Y × PLANE_HEIGHT/2）
+ *
+ * 输出范围与 equirect 完全相同 → 渲染层零改动。Robinson 非线性：高纬经线收敛
+ * （lat=89 时 lon=180 → x≈0.54，equirect 恒 1.0），消除极区横向拉伸。
  *
  * 所有子系统（地形顶点 / 边界 / 河流 / 标签锚点）必须经此函数投影，确保对齐（R2）。
  */
 export function project(lon: number, lat: number): readonly [number, number] {
-  const x = (lon / 180) * (PLANE_WIDTH / 2)
-  const z = (-lat / 90) * (PLANE_HEIGHT / 2)
+  const [rx, ry] = proj4(WGS84_PROJ, ROBINSON_PROJ, [lon, lat])
+  const x = (rx / ROBINSON_MAX_X) * (PLANE_WIDTH / 2)
+  const z = (-ry / ROBINSON_MAX_Y) * (PLANE_HEIGHT / 2)
   return [x, z]
 }
 
-/** 工作平面坐标 → 经纬度（`project` 反函数；供拾取等用）。 */
+/**
+ * 工作平面坐标 → 经纬度（`project` 反函数；供拾取 / DEM 重烘焙反采样等用）。
+ *
+ * Robinson 反投影由 proj4 数值求解（精确，round-trip 误差 ≪ 1e-6）。投影矩形内部
+ * 全覆盖无空洞（Robinson 伪圆柱全球填满矩形）。
+ */
 export function unproject(x: number, z: number): readonly [number, number] {
-  const lon = (x / (PLANE_WIDTH / 2)) * 180
-  const lat = (z / (PLANE_HEIGHT / 2)) * -90
+  const rx = (x / (PLANE_WIDTH / 2)) * ROBINSON_MAX_X
+  const ry = (-z / (PLANE_HEIGHT / 2)) * ROBINSON_MAX_Y
+  const [lon, lat] = proj4(ROBINSON_PROJ, WGS84_PROJ, [rx, ry])
   return [lon, lat]
 }
 

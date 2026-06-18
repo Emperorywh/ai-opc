@@ -1,7 +1,7 @@
 {
   "version": 1,
   "source": "gebco-2026",
-  "projection": "equirectangular",
+  "projection": "robinson",
   "width": 4096,
   "height": 2048,
   "elevationMin": -10000,

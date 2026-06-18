@@ -7,8 +7,10 @@ import {
   decodeHeightmap,
   createHeightTexture,
   sampleHeight,
+  sampleHeightAtWorld,
   sampleWorldY,
 } from '../src/data/assets'
+import { project } from '../src/config/projection'
 import { heightToMeters, heightToWorldY, type ElevationMeta } from '../src/config/projection'
 
 const PUBLIC_DATA = resolve('public/data')
@@ -21,7 +23,7 @@ describe('parseMeta', () => {
     // 后，本测试无需改动 —— parseMeta 只需忠实还原真实文件即可（Task 02b 可插拔数据源契约）。
     expect(m.width).toBe(realMetaRaw.width)
     expect(m.height).toBe(realMetaRaw.height)
-    expect(m.projection).toBe('equirectangular')
+    expect(m.projection).toBe(realMetaRaw.projection)
     expect(m.elevationMin).toBe(realMetaRaw.elevationMin)
     expect(m.elevationMax).toBe(realMetaRaw.elevationMax)
     expect(m.source).toBe(realMetaRaw.source)
@@ -69,7 +71,7 @@ describe('decodeHeightmap（真实 16-bit PNG，无损校验）', () => {
   })
 })
 
-describe('sampleHeight（合成小缓冲，确定性）', () => {
+describe('sampleHeightAtWorld（合成小缓冲，投影无关 · worldXY→UV 与 shader 同源）', () => {
   // 2×2 缓冲：col0=0、col1=65535（两行相同）→ h ∈ {0,1}
   const elev = {
     width: 2,
@@ -77,28 +79,59 @@ describe('sampleHeight（合成小缓冲，确定性）', () => {
     data: new Uint16Array([0, 65535, 0, 65535]),
   }
 
-  it('像素中心返回该像素的归一化值', () => {
-    // 2×2：像素 (0,0) 中心 lon=-90, lat=45；(1,0) 中心 lon=90, lat=45
-    expect(sampleHeight(elev, -90, 45)).toBeCloseTo(0, 5)
-    expect(sampleHeight(elev, 90, 45)).toBeCloseTo(1, 5)
+  it('像素中心返回该像素的归一化值（worldXY → 像素中心）', () => {
+    // 2×2 像素中心：worldX ∈ {-0.5, 0.5}（PLANE_WIDTH=2，每像素跨 1），worldZ ∈ {-0.25, 0.25}
+    expect(sampleHeightAtWorld(elev, -0.5, -0.25)).toBeCloseTo(0, 5) // 像素 (0,0)
+    expect(sampleHeightAtWorld(elev, 0.5, -0.25)).toBeCloseTo(1, 5) // 像素 (1,0)
   })
 
-  it('经度环绕：−180° 与 +180° 同值', () => {
-    const a = sampleHeight(elev, -180, 0)
-    const b = sampleHeight(elev, 180, 0)
-    expect(a).toBeCloseTo(b, 5)
+  it('经度方向环绕：worldX=-1 与 worldX=+1 同值（像素网格左右边缘环绕）', () => {
+    expect(sampleHeightAtWorld(elev, -1, 0)).toBeCloseTo(sampleHeightAtWorld(elev, 1, 0), 5)
   })
 
   it('采样值始终在 [0,1]', () => {
     const pts: Array<[number, number]> = [
+      [-0.5, -0.25],
+      [0.5, -0.25],
+      [-0.5, 0.25],
+      [0.5, 0.25],
+      [0, 0],
+      [0.99, -0.49],
+    ]
+    for (const [wx, wz] of pts) {
+      const h = sampleHeightAtWorld(elev, wx, wz)
+      expect(h).toBeGreaterThanOrEqual(0)
+      expect(h).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+describe('sampleHeight（经 project 衔接 sampleHeightAtWorld · R2/R3 同源）', () => {
+  const elev = {
+    width: 2,
+    height: 2,
+    data: new Uint16Array([0, 65535, 0, 65535]),
+  }
+
+  it('sampleHeight(lon,lat) === sampleHeightAtWorld(...project(lon,lat))', () => {
+    for (const [lon, lat] of [
+      [0, 0],
+      [116.4, 39.9],
+      [-70, -15],
+      [90, 60],
+    ]) {
+      const [x, z] = project(lon, lat)
+      expect(sampleHeight(elev, lon, lat)).toBeCloseTo(sampleHeightAtWorld(elev, x, z), 9)
+    }
+  })
+
+  it('采样值始终在 [0,1]', () => {
+    for (const [lon, lat] of [
       [-90, 45],
       [90, 45],
-      [-90, -45],
-      [90, -45],
       [0, 0],
       [179, 89],
-    ]
-    for (const [lon, lat] of pts) {
+    ]) {
       const h = sampleHeight(elev, lon, lat)
       expect(h).toBeGreaterThanOrEqual(0)
       expect(h).toBeLessThanOrEqual(1)
@@ -177,8 +210,9 @@ describe('真实 GEBCO DEM 大陆轮廓回归（Task 02b 闭环 · M1 验收第 
 
   it('真实地形显著起伏 —— 区分真实 GEBCO 与合成噪声（基于 elevationMin/Max 硬上下界，物理严格）', () => {
     // 合成 DEM(Task 02)：elevationMin=-5000/max=6500 是烘焙硬上下界 → maxM≤6500、minM≥-5000，本断言必失败。
-    // 真实 GEBCO(4096×2048)：maxM≈7628（珠峰区降采样至 ~9.8km/px 被邻域平均，<真实 8848m，分辨率损失属预期；
-    //   不是数据错误）、minM=-10000（深海沟 clamp 到 elevationMin）→ 通过。构成「真实 DEM 已接入」回归保护。
+    // 真实 GEBCO equirect(4096×2048)：maxM≈7628（珠峰区降采样至 ~9.8km/px 被邻域平均，<真实 8848m）。
+    // Task 26 Robinson 重烘焙对 equirect DEM 双线性重采样，峰值再平滑至 ~6917m（重采样固有效应，非数据错误），
+    //   但仍 > 合成 6500 上限；minM≈-9988（深海沟 clamp 到 elevationMin）→ 通过。「真实 DEM 已接入」回归保护。
     let maxM = -Infinity
     let minM = Infinity
     for (let i = 0; i < elev.data.length; i++) {
@@ -186,7 +220,7 @@ describe('真实 GEBCO DEM 大陆轮廓回归（Task 02b 闭环 · M1 验收第 
       if (m > maxM) maxM = m
       if (m < minM) minM = m
     }
-    expect(maxM).toBeGreaterThan(7000)
+    expect(maxM).toBeGreaterThan(6500) // 合成硬上限 6500；真实 Robinson 重采样 ~6917
     expect(minM).toBeLessThan(-9000)
   })
 })
