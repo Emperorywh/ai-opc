@@ -14,12 +14,12 @@
 
 ## 当前指针
 
-- **当前 Milestone**：M11 · 触屏输入与视觉增强（Phase 3 进行中）
-- **当前 Task**：Task 30 · 触屏输入接入
+- **当前 Milestone**：M12 · 四叉树流式 LOD（Phase 4 可选，未启动）
+- **当前 Task**：Task 31 · 四叉树流式 LOD
 - **MVP 进度**：M1–M5 共 5 个 Milestone，已完成 **5 / 5**（✅ M1 地形沙盘 · ✅ M2 海洋与水彩质感 · ✅ M3 相机交互与自适应质量 · ✅ M4 大洲标签与中文字体 · ✅ M5 大气辉光·加载·署名）→ **Phase 1 MVP 代码闭环达成**（⚠️ 60fps / 4K / 截图集 M5.png / `git tag v0.1-mvp` 待人工 Review 后再打 tag）
 - **Phase 2 进度**：M6–M9 共 4 个 Milestone，已完成 **4 / 4**（✅ M6 国家边界与描边 · ✅ M7 GPU 颜色拾取与交互高亮 · ✅ M8 数据标注面板与国家标签 · ✅ M9 Robinson 投影升级 2/2）→ **Phase 2 全部闭环**
-- **Phase 3 进度**：M10–M11 共 2 个 Milestone，已完成 **1 / 2**（✅ M10 河流系统 2/2 · ⬜ M11 触屏输入与视觉增强 0/1）
-- **总体进度**：32 个 Task，已完成 **30 / 32**
+- **Phase 3 进度**：M10–M11 共 2 个 Milestone，已完成 **2 / 2**（✅ M10 河流系统 2/2 · ✅ M11 触屏输入与视觉增强 1/1）→ **Phase 3 全部闭环**
+- **总体进度**：32 个 Task，已完成 **31 / 32**
 
 ---
 
@@ -71,7 +71,7 @@
 |---|---|---|:---:|---|---|
 | 28 | M10 | 河流数据 pipeline | ✅ | 1698108 | 合成六河→DP简化→Robinson投影→Robinson heightmap采样高度+ε(R3同源sampleWorldY)→miter带状几何(累积弧长UV)→rivers.bin(78顶点/66三角/2660B)；前端rivers.ts decodeRivers(TS复刻)+assets.ts loadRivers+types.ts River/RiverData；山脉源头贴地抽样长江青藏5225m/黄河4566m/亚马逊安第斯4461m证明不穿山不悬空；前后端decoder同源round-trip单测；670测全绿build731mod/lint过 |
 | 29 | M10 | 流动发光河流 shader | ✅ | a03f9c6 | riverMaterial.ts（独立非组件模块 与 oceanMaterial/boundaryGeometry/highlight 同构）落地 SPEC §6.4 流动发光 shader：ShaderMaterial 沿 u 弧长方向流动光带脉冲（phase=fract(u·freq−t·speed)+smoothstep 三角脉冲 uTime 驱动）+ 青蓝 emissive 近似（脉冲亮色 mix 基色 palette.river+level 亮度增益 不引全局 Bloom §13）+ 边缘软过渡（smoothstep \|v\| 中心满/边缘零）+ raw 手动 sRGB gamma；抗 z-fighting 双保险（SPEC §6.4.4 pipeline ε+材质 polygonOffset 负值推近）；透明渲染顺序契约（transparent/depthWrite=false/DoubleSide/depthTest 读 Terrain 深度 山遮挡后方河流）+ RIVER_RENDER_ORDER=5（边界层之上发光带可见 < AtmosphereRim=10）；纯函数 riverFlowPulse/riverEdgeMask/riverLevelBoost 与 GLSL 同源 + buildRiverLevelAttribute 每顶点 level（与 buildCountryIdAttribute 同源 大河 level=3 更亮 兑现 types「pipeline 决定带宽/Task29 决定亮度」）；shader 开关 uPulseStrength（低档=0 静态带省片元 smoothstep Rivers.tsx 订阅 qualityTier 传 value 不动 GLSL 同 ocean uWaveCount 未改 quality.ts 守 Task29 边界）；Rivers.tsx（CountryMeshes+Ocean 范式）单合并 mesh（pipeline 烘焙 position/uv/index 直接 BufferGeometry 一次 draw call GPU-ready）+ level attr + matRef 持有材质 useFrame 累加 uTime（避 react-hooks/immutability）+ geometry/material dispose 防泄漏；Scene.tsx loadRivers 异步独立加载（与 boundaries/disputed/labels 同模式 失败不阻塞）+ assets 块 Ocean 后挂载（贴地透明读 Terrain 已写深度）；37 新测（flowPulse 峰值/谷/周期/时不变流动/负相位 + edgeMask 中心满/边缘零/edgeSoft/对称/clamp + levelBoost 比例/clamp/防除零 + buildRiverLevelAttribute 对齐/同河一致/异河不同 + createRiverMaterial 契约/uniforms 初值/pulseStrength 开关/polygonOffset 双保险/vertex+fragment shader 源码 + RENDER_ORDER=5）共 707 测全绿（670→707）build 733mod（731→733 +riverMaterial+Rivers）/lint过；⚠️dev 流动观感/发光强度/光带疏密/边缘软化/M10.png 截图/4K60fps 留 Review（agent 无浏览器 同 Task27 用可编程断言代理）；M10 2/2 ✅ Phase3 河流系统闭环 |
-| 30 | M11 | 触屏输入接入 | ⬜ | — | — |
+| 30 | M11 | 触屏输入接入 | ✅ | 0503a05 | createTouchAdapter stub→双指 pinch 状态机（touch事件算两指距离比→onZoom 张开<1推近/捏合>1拉远）；触屏三项分工无重复（单指pan/tap点击已由mouse-trackpad的pointer pan+usePointerPick的pointer选中覆盖，本适配器只补pinch——浏览器不合成wheel须自算）；useCameraInput默认同时attach mouse-trackpad+touch并存（无需设备检测避免混合设备误判，外部传adapter只用那一个向后兼容）；touch-action:none在attach内设/detach还原（不改App.tsx守边界）；纯函数touchPinchDistance/pinchZoomFactor与onZoom语义同源；16新测共723全绿build733mod/lint过；⚠️dev真实触屏pinch手感/方向直觉/与单指pan共存/双指时pointer误判select风险留Review；M11 1/1✅ Phase3全部闭环 |
 
 ### Phase 4 — 可选演进（M12）
 
@@ -95,7 +95,7 @@
 | M8 | 数据标注面板与国家标签 | 2/2 | ✅ |
 | M9 | 投影升级 Robinson | 2/2 | ✅ |
 | M10 | 河流系统 | 1/2 | 🔄 |
-| M11 | 触屏输入与视觉增强 | 0/1 | ⬜ |
+| M11 | 触屏输入与视觉增强 | 1/1 | ✅ |
 | M12 | 四叉树流式 LOD（可选） | 0/1 | ⬜ |
 
 ---
@@ -103,6 +103,8 @@
 ## 近期注意事项（Lessons Learned）
 
 > 每个 Task 完成后在此追加 1–2 行踩坑 / 关键决策，供后续会话参考。**倒序**（最新在上）。
+
+- **Task 30（M11 触屏双指 pinch）**：触屏三项手势中**单指 pan / tap 点击已在 Task 10/23 由 pointer 事件覆盖**（pointerType=touch 单指拖拽→pan、tap 合成 pointerdown/up→选国家），唯一缺失是**双指 pinch zoom**（浏览器不合成 wheel，默认缩放页面）→ createTouchAdapter 只补 pinch（touch 事件算两指距离比→onZoom）。**关键决策**：mouse-trackpad + touch **并存 attach** 同一 canvas（非设备检测二选一）——避免混合设备（Surface/触屏笔记本）`maxTouchPoints` 误判导致鼠标 pan/wheel 失效，且单指 touch 让位 pointer pan 无重复。**踩坑**：①`adapter ?? [...]` 推断为 `InputAdapter | InputAdapter[]` 联合类型 → 改三元 `adapter ? [adapter] : [...]` 确保 `InputAdapter[]`（vitest esbuild 不查类型，仅 `tsc -b` 报）。②`touch-action:none` 必须在 canvas 上设（attach 内设 / detach 还原），否则浏览器抢占双指 pinch-zoom 页面缩放盖过自处理；`passive:false` + `preventDefault` 双保险。**遗留风险**：双指 pinch 时两指各触发 pointerdown/up，若 pinch 后手指几乎回到 down 位可能被 usePointerPick 误判 select（边缘情况，留 Review）。
 
 - **Task 29（2026-06-18）**：流动发光河流 shader（**M10 收尾，Phase 3 河流系统闭环**）。落地 ROADMAP Task 29 / SPEC §6.4.3-4（流动发光 shader + 抗 z-fighting）+ §2.1 palette.river。**核心：消费 Task 28 rivers.bin 已烘焙带状几何（position/uv/index + 每河 level），前端零几何逻辑——仅 BufferGeometry + riverMaterial 流动发光 shader**。**关键决策①（消费烘焙几何，前端零几何逻辑）**：与边界「存 lon,lat 前端 runtime project」不同，河流「存已投影 worldXY+y+ε 烘焙就绪」（Task 28 决策①）→ Rivers.tsx 把 vertices/uvs/indices 直接喂 BufferAttribute，一次 draw call（单合并 mesh，同 CountryMeshes GPU-ready），前端不再 project/不再采样高度/不再算带状几何。**关键决策②（流动光带数学：沿 u 弧长 fract + smoothstep 三角脉冲）**：`phase=fract(u·freq−t·speed)`，脉冲在 phase=0.5 峰值 1 / 两端 0，smoothstep 软化光带边缘；time 增大→等相面 u 增大→光带沿河流向（源头→河口）移动（uTime 每帧累加，同 Ocean §6.2.4）。**关键决策③（emissive 近似非全局 Bloom，§13 默认不做）**：脉冲亮色 #B6F0FF mix 进基色 palette.river #6FD0E8 + level 亮度增益 `col+=col·lvl`（提亮不引后处理），与 atmosphere fresnel shell 同「无 Bloom 的发光」哲学。**关键决策④（level attribute 让大河更亮，兑现 types「Task29 决定渲染亮度」）**：`buildRiverLevelAttribute` 每顶点 level（与 `buildCountryIdAttribute` 同源遍历，0-based vertexOffset/vertexCount）；shader `clamp(level/maxLevel,0,1)·boost` 大河 level=3 最亮、小河 level=1 较暗，长江/亚马逊醒目。**关键决策⑤（低档关脉冲 uPulseStrength=0，未改 quality.ts 守边界）**：shader 自带 uPulseStrength uniform（开关位预留同 ocean uWaveCount 模式），Rivers.tsx 订阅 store qualityTier 内联 `qualityTier==='low'?0:1` 传值——低档退化为静态青蓝带省片元 smoothstep，不动 GLSL；quality.ts 不在 Task29 允许边界故不改（河流特效自包含，低档判断内联与全局分档策略一致）。**关键决策⑥（抗 z-fighting 双保险 SPEC §6.4.4）**：pipeline 已 +ε（RIVER_Y_OFFSET 0.005 贴地浮起，Task 28）+ 材质 `polygonOffset` 负值推近相机——双保险确保河流贴地不被地形遮挡/闪烁（透明 depthWrite=false 物体 polygonOffset 仍偏移 depthTest 比较值）。**透明渲染顺序契约**：transparent+depthWrite=false+DoubleSide+depthTest 读 Terrain 已写深度（山遮挡后方河流），RIVER_RENDER_ORDER=5（边界层 4 之上发光带可见，< AtmosphereRim 10）。**文件**：①`src/three/rivers/riverMaterial.ts`（新，独立非组件模块，与 oceanMaterial/boundaryGeometry/highlight 同构——导出常量 RIVER_*/纯函数/工厂 createRiverMaterial + GLSL；RIVER_MATERIAL_OPTS plain object 供单测）②`src/three/rivers/Rivers.tsx`（新，CountryMeshes+Ocean 范式——useMemo BufferGeometry+material / matRef+useFrame uTime 累加避 react-hooks/immutability / dispose）③`src/three/Scene.tsx`（改，loadRivers 异步独立加载同 boundaries/disputed/labels 模式 + assets 块 Ocean 后挂载）④`test/rivers-render.test.ts`（新 37 测）+删 `.gitkeep`。**既有契约不退化**：projection/assets/rivers.ts/二进制格式/地形海洋边界 shader 全不动；渲染顺序/光照/store 不动；quality.ts 不动。**边界严守**：仅 src/three/rivers/** + src/three/Scene.tsx（挂载点，同 Task20/21/24/28 历史模式，仅新增 import+异步加载+条件渲染）+ test；未动地形/海洋 shader 主体 / 未动 src/ui / 未动 quality.ts。**无踩坑**（matRef+useFrame 同步 uTime 模式复用 Ocean Task07 已验证；raw ShaderMaterial 自动注入 position/uv/projectionMatrix/modelViewMatrix，vertex 仅声明自定义 `attribute float level`；polygonOffset 在 ShaderMaterial 为材质属性非 shader 源码）。**模块数 731→733**（+riverMaterial+Rivers）；bundle gzip 412.20→413.36KB（+~1KB 河流 shader 极轻）。**验收**：主要河流可见且发光流动（流动光带+青蓝 emissive+level 亮度，shader 源码正则守）✅ ｜ 贴地不穿山（Task28 已验 ε+polygonOffset 双保险不退化）✅ ｜ 60fps 不受影响（低档关脉冲+河流几何小 78顶点/66三角+shader 简单）✅ ｜ build(733mod 454ms)/lint 过 ✅ ｜ **707 测全绿（670→707 +37 rivers-render）** ✅。⚠️ **dev 留人工 Review**（agent 无浏览器，同 Task27/28 用可编程断言代理）：① 流动观感（光带沿河流向移动方向/疏密 freq=10/速度 speed=0.6 是否自然）② 发光强度（emissive 近似提亮程度/pulseStrength/glow 色 #B6F0FF 是否过亮或不足）③ 边缘软化（edgeSoft=0.45 带状边缘软过渡无硬切）④ level 亮度区分（大河 level=3 是否醒目）⑤ 真实 NE 河流（Task28 重生成后数千河流的流动观感+性能）⑥ M10.png 截图归档（DoD，agent 无浏览器）⑦ 浏览器 console（GLSL 编译/uv attribute/polygonOffset/无 error）⑧ 4K 60fps。**M10：2/2 ✅（Phase 3 河流系统闭环）**。下一 Task：Task 30 触屏输入接入（M11，🟢 低风险——InputAdapter 触屏实现 单指 pan/双指捏合/点击，复用 Task10 抽象层；可选 POI 标签/视觉增强预留 shader 钩子）。
 
