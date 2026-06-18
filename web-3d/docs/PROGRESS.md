@@ -14,18 +14,18 @@
 
 ## 当前指针
 
-- **当前 Milestone**：M12 · 四叉树流式 LOD（Phase 4 可选，未启动）
-- **当前 Task**：Task 31 · 四叉树流式 LOD
+- **当前 Milestone**：—（无；M12 四叉树流式 LOD 为 Phase 4 可选项，2026-06-18 评审 **⏸ 暂不启动**）
+- **当前 Task**：—（必做 Task 01–30 全部 ✅；Task 31（M12 可选）⏸ 暂不启动，详见下方「近期注意事项」）
 - **MVP 进度**：M1–M5 共 5 个 Milestone，已完成 **5 / 5**（✅ M1 地形沙盘 · ✅ M2 海洋与水彩质感 · ✅ M3 相机交互与自适应质量 · ✅ M4 大洲标签与中文字体 · ✅ M5 大气辉光·加载·署名）→ **Phase 1 MVP 代码闭环达成**（⚠️ 60fps / 4K / 截图集 M5.png / `git tag v0.1-mvp` 待人工 Review 后再打 tag）
 - **Phase 2 进度**：M6–M9 共 4 个 Milestone，已完成 **4 / 4**（✅ M6 国家边界与描边 · ✅ M7 GPU 颜色拾取与交互高亮 · ✅ M8 数据标注面板与国家标签 · ✅ M9 Robinson 投影升级 2/2）→ **Phase 2 全部闭环**
 - **Phase 3 进度**：M10–M11 共 2 个 Milestone，已完成 **2 / 2**（✅ M10 河流系统 2/2 · ✅ M11 触屏输入与视觉增强 1/1）→ **Phase 3 全部闭环**
-- **总体进度**：32 个 Task，已完成 **31 / 32**
+- **总体进度**：32 个 Task，已完成 **31 / 32**（Task 31 即 M12 可选，⏸ 暂不启动——启动条件「缩放细节需求被证明必要」未满足）；**必做闭环全部完成**（MVP M1–M5 + Phase 2 M6–M9 + Phase 3 M10–M11），**项目视为交付**
 
 ---
 
 ## Task 状态表
 
-图例：⬜ pending ｜ 🔄 in_progress ｜ ✅ done ｜ ⚠️ blocked
+图例：⬜ pending ｜ 🔄 in_progress ｜ ✅ done ｜ ⚠️ blocked ｜ ⏸ deferred（可选·暂不启动）
 
 ### Phase 1 — MVP（M1–M5）
 
@@ -77,7 +77,7 @@
 
 | Task | MS | 标题 | 状态 | Commit | 备注 |
 |---|---|---|:---:|---|---|
-| 31 | M12 | 四叉树流式 LOD | ⬜ | — | — |
+| 31 | M12 | 四叉树流式 LOD | ⏸ | — | 可选 · 暂不启动（2026-06-18 评审；启动条件「缩放细节需求被证明必要」未满足。重启时先拆 31a/b/c + 补 ROADMAP M12 详设，经确认后再动手） |
 
 ---
 
@@ -94,15 +94,17 @@
 | M7 | GPU 颜色拾取与交互高亮 | 2/2 | ✅ |
 | M8 | 数据标注面板与国家标签 | 2/2 | ✅ |
 | M9 | 投影升级 Robinson | 2/2 | ✅ |
-| M10 | 河流系统 | 1/2 | 🔄 |
+| M10 | 河流系统 | 2/2 | ✅ |
 | M11 | 触屏输入与视觉增强 | 1/1 | ✅ |
-| M12 | 四叉树流式 LOD（可选） | 0/1 | ⬜ |
+| M12 | 四叉树流式 LOD（可选·暂不启动） | 0/1 | ⏸ |
 
 ---
 
 ## 近期注意事项（Lessons Learned）
 
 > 每个 Task 完成后在此追加 1–2 行踩坑 / 关键决策，供后续会话参考。**倒序**（最新在上）。
+
+- **Task 31（2026-06-18，M12 启动评审 · 决策=⏸ 暂不启动）**：本次新会话加载上下文，PROGRESS 指针指向 Task 31（M12 四叉树流式 LOD，⬜）即「第一个非 ✅ 的 Task」。**发现三处阻断，未直接动手**：①M12 是 Phase 4「可选演进」，ROADMAP:559/651 + SPEC:281 四处明确「仅在缩放细节需求被证明必要时启动」「非 MVP 必需」「最复杂（skirts/morphing）」「世界级数据规模」，当前无该需求证据；②Task 31 标注「8h+（多 Task 拆）」超单 Task 铁律（2–8h / 单 commit），且 Phase 4 清单表（ROADMAP:617）**无「产出物 / 验收」两列**——无验收标准，须先拆 31a/b/c + 补 ROADMAP M12 详设（范围 / 不包含 / 边界 / 风险验证 / 验收 / DoD）；③允许边界 `src/three/terrain/**` 深度改造 + `public/data/**` 瓦片化触及 heightmap 采样契约(R3) / shader heightUv / `project()`(R2) 等共享契约，属架构级「须确认」。**评审决定走 A：跳过 M12 收尾**——必做闭环（MVP M1–M5 + Phase 2 M6–M9 + Phase 3 M10–M11）全部完成，项目视为交付。**附带修正**：Milestone 完成度表 M10「1/2 🔄」→「2/2 ✅」（回填 Task 29 时遗漏该行；git log 确认 Task 28=1698108 / 29=a03f9c6 均已提交，顶部「Phase 3 M10 2/2 ✅ / 总体 31/32」为准则）。**重启 M12 条件**：未来出现明确的高分辨率 DEM 瓦片需求或缩放细节自适应需求时再启动——届时先规划（拆 Task + 补 ROADMAP M12 详设，经确认），勿直接动手。本次**无代码改动**（仅 `docs/PROGRESS.md`）。
 
 - **Task 30（M11 触屏双指 pinch）**：触屏三项手势中**单指 pan / tap 点击已在 Task 10/23 由 pointer 事件覆盖**（pointerType=touch 单指拖拽→pan、tap 合成 pointerdown/up→选国家），唯一缺失是**双指 pinch zoom**（浏览器不合成 wheel，默认缩放页面）→ createTouchAdapter 只补 pinch（touch 事件算两指距离比→onZoom）。**关键决策**：mouse-trackpad + touch **并存 attach** 同一 canvas（非设备检测二选一）——避免混合设备（Surface/触屏笔记本）`maxTouchPoints` 误判导致鼠标 pan/wheel 失效，且单指 touch 让位 pointer pan 无重复。**踩坑**：①`adapter ?? [...]` 推断为 `InputAdapter | InputAdapter[]` 联合类型 → 改三元 `adapter ? [adapter] : [...]` 确保 `InputAdapter[]`（vitest esbuild 不查类型，仅 `tsc -b` 报）。②`touch-action:none` 必须在 canvas 上设（attach 内设 / detach 还原），否则浏览器抢占双指 pinch-zoom 页面缩放盖过自处理；`passive:false` + `preventDefault` 双保险。**遗留风险**：双指 pinch 时两指各触发 pointerdown/up，若 pinch 后手指几乎回到 down 位可能被 usePointerPick 误判 select（边缘情况，留 Review）。
 
