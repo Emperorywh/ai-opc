@@ -14,6 +14,8 @@
  *   （与 labels 同模式，失败不阻塞地形）；需 assets（贴地高度采样）就绪后才渲染。
  * Task 21：挂载 DisputedLines（§6.3 / D10 争议虚线）。disputed.bin 独立加载（与 boundaries 解耦），
  *   需 assets 就绪后渲染（贴地采样）。
+ * Task 24：挂载 CountryCard（§6.7 / D19 数据标注面板，drei Html 国家信息卡片），需 assets+boundaries
+ *   双就绪（国家质心屏幕投影 + 贴地高度采样）。
  */
 import { useEffect, useState } from 'react'
 import {
@@ -38,6 +40,7 @@ import { AtmosphereRim } from './atmosphere/AtmosphereRim'
 import { CountryMeshes } from './borders/CountryMeshes'
 import { BorderLines } from './borders/BorderLines'
 import { DisputedLines } from './borders/DisputedLines'
+import { CountryCard } from './labels/CountryCard'
 import { usePointerPick } from '../hooks/usePointerPick'
 
 /** heightmap.png 运行时 URL（与 assets.ts dataUrl 同源：BASE_URL + data/）。 */
@@ -188,6 +191,11 @@ export function Scene() {
             <>
               <CountryMeshes assets={assets} boundaries={boundaries} />
               <BorderLines assets={assets} boundaries={boundaries} />
+              {/*
+                Task 24（§6.7 / D19）：数据标注面板（drei Html 卡片，中文国名+大洲，国家质心屏幕投影）。
+                click 选中（store.selectedId）触发；需 assets+boundaries 双就绪。
+              */}
+              <CountryCard assets={assets} boundaries={boundaries} />
             </>
           ) : null}
           {/*
