@@ -38,6 +38,7 @@ import { AtmosphereRim } from './atmosphere/AtmosphereRim'
 import { CountryMeshes } from './borders/CountryMeshes'
 import { BorderLines } from './borders/BorderLines'
 import { DisputedLines } from './borders/DisputedLines'
+import { usePointerPick } from '../hooks/usePointerPick'
 
 /** heightmap.png 运行时 URL（与 assets.ts dataUrl 同源：BASE_URL + data/）。 */
 const HEIGHTMAP_URL = `${import.meta.env.BASE_URL}data/heightmap.png`
@@ -141,6 +142,10 @@ export function Scene() {
       cancelled = true
     }
   }, [])
+
+  // Task 23：指针拾取（pointermove→setHovered / click→setSelected），绑 R3F canvas DOM。
+  // 经 getPickingApi 读 CountryMeshes 注册的拾取能力；boundaries 未就绪时 pick 返回 null 无副作用。
+  usePointerPick()
 
   return (
     <>
