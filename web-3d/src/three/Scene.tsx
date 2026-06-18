@@ -26,8 +26,9 @@ import {
   loadLabels,
   loadBoundaries,
   loadDisputed,
+  loadRivers,
 } from '../data/assets'
-import type { TerrainAssets, Label, BoundaryData, DisputedData } from '../data/types'
+import type { TerrainAssets, Label, BoundaryData, DisputedData, RiverData } from '../data/types'
 import { useStore } from '../state/store'
 import { fetchWithProgress, byteFraction, stageProgress } from '../ui/loading'
 import { AdaptiveQuality } from './effects/AdaptiveQuality'
@@ -40,6 +41,7 @@ import { AtmosphereRim } from './atmosphere/AtmosphereRim'
 import { CountryMeshes } from './borders/CountryMeshes'
 import { BorderLines } from './borders/BorderLines'
 import { DisputedLines } from './borders/DisputedLines'
+import { Rivers } from './rivers/Rivers'
 import { CountryCard } from './labels/CountryCard'
 import { usePointerPick } from '../hooks/usePointerPick'
 
@@ -56,6 +58,7 @@ export function Scene() {
   const [labels, setLabels] = useState<Label[] | null>(null)
   const [boundaries, setBoundaries] = useState<BoundaryData | null>(null)
   const [disputed, setDisputed] = useState<DisputedData | null>(null)
+  const [rivers, setRivers] = useState<RiverData | null>(null)
   const [, setError] = useState<unknown>(null)
 
   // Task 17：地形资产加载编排（meta → heightmap 字节进度 + normal 并行 → decode → texture），
@@ -146,6 +149,23 @@ export function Scene() {
     }
   }, [])
 
+  // Task 29：rivers.bin 独立加载（与 boundaries/disputed/labels 同模式，失败不阻塞地形）。
+  // pipeline 已烘焙带状几何（已投影 worldXY + heightmap 采样高度 + ε），渲染需 Terrain 先绘写
+  // 深度 → 仅 assets 就绪时挂载（Rivers 置 assets 块内读 Terrain 深度）；rivers 自包含高度不依赖 assets 采样。
+  useEffect(() => {
+    let cancelled = false
+    loadRivers()
+      .then((r) => {
+        if (!cancelled) setRivers(r)
+      })
+      .catch((e) => {
+        if (!cancelled) console.error('[Scene] rivers.bin 加载失败：', e)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Task 23：指针拾取（pointermove→setHovered / click→setSelected），绑 R3F canvas DOM。
   // 经 getPickingApi 读 CountryMeshes 注册的拾取能力；boundaries 未就绪时 pick 返回 null 无副作用。
   usePointerPick()
@@ -182,6 +202,12 @@ export function Scene() {
           */}
           <Terrain assets={assets} />
           <Ocean assets={assets} />
+          {/*
+            Task 29（§6.4 流动发光河流）：贴地透明读 Terrain 深度（山遮挡后方河流），renderOrder=
+            RIVER_RENDER_ORDER（边界层之上，发光带可见）。rivers.bin 独立加载（同 boundaries 模式），
+            pipeline 已烘焙带状几何 + 高度采样 + ε；Rivers 仅 BufferGeometry + 流动发光 shader。
+          */}
+          {rivers ? <Rivers rivers={rivers} /> : null}
           {labels ? <LabelLayer assets={assets} labels={labels} /> : null}
           {/*
             SPEC §6.3 / §4.3：国家填充面（renderOrder=2）+ 描边（=3），透明 depthWrite=false 读
