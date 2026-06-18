@@ -103,10 +103,41 @@ export type DisputedLine = {
   id: string
 }
 
-/** 河流（M10 河流数据 pipeline 填充完整字段）。 */
+/** 河流（M10 河流数据 pipeline 填充完整字段；`RiverData.rivers` 元素）。 */
 export type River = {
+  /** 拾取稳定 id（= rivers.bin 河流记录序号 0..n-1）。 */
   id: number
+  /** 河流名（中文；合成数据 / 真实 NE properties.name）。 */
   name: string
+  /** 流量级别 1/2/3（小/中/大；pipeline 决定带宽，Task 29 决定渲染粗细/亮度）。 */
+  level: number
+  /** 该河流带状顶点在 `RiverData.vertices` 中的起始（顶点单位）。 */
+  vertexOffset: number
+  /** 该河流带状顶点数。 */
+  vertexCount: number
+  /** 该河流三角形索引在 `RiverData.indices` 中的起始（index 单位）。 */
+  indexOffset: number
+  /** 该河流三角形索引数。 */
+  indexCount: number
+}
+
+/**
+ * 解码后的河流数据（Task 28 pipeline 产物 `rivers.bin`，Task 29 渲染层消费）。
+ *
+ * **与边界不同**：rivers.bin 存**已投影 worldXY + heightmap 采样高度**（pipeline 烘焙带状几何），
+ * 故 `vertices` 直接喂 `BufferAttribute.position`、`uvs` 喂 uv、`indices` 喂 `setIndex`——前端不再
+ * `project()` / 不再采样高度（pipeline 内部用 `projectRobinson` + `sampleHeightAtWorld` 与前端同源，
+ * 详见 `src/data/rivers.ts` 顶部对齐说明）。河流「直接用 Robinson 烘焙无需重投影」（Task 27 备注）。
+ */
+export type RiverData = {
+  /** 带状顶点 [x,y,z,...]（worldXY + 高度 + ε，pipeline 已投影 + 贴地采样）。 */
+  vertices: Float32Array
+  /** 带状 uv [u,v,...]（u=累积弧长 XZ 平面世界单位，v∈{-1,+1} 左/右边缘）。 */
+  uvs: Float32Array
+  /** 带状三角形全局顶点索引。 */
+  indices: Uint32Array
+  /** 河流记录（属性 + 每河顶点/索引范围）。 */
+  rivers: River[]
 }
 
 /**

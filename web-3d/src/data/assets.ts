@@ -26,9 +26,11 @@ import type {
   ElevationData,
   Label,
   MetaJson,
+  RiverData,
   TerrainAssets,
 } from './types'
 import { decodeBoundaries, decodeDisputed } from './boundaries'
+import { decodeRivers } from './rivers'
 
 /** 运行时资源 URL（Vite 把 public/ 映射到 BASE_URL）。懒求值，避免模块加载期 env 依赖。 */
 function dataUrl(name: string): string {
@@ -314,6 +316,21 @@ export async function loadDisputed(): Promise<DisputedData> {
   const res = await fetch(dataUrl('disputed.bin'))
   if (!res.ok) throw new Error(`加载 disputed.bin 失败：${res.status}`)
   return decodeDisputed(await res.arrayBuffer())
+}
+
+/**
+ * 加载并解码 `rivers.bin`（Task 28 pipeline 产出：主要河流带状几何，紧凑二进制）。
+ *
+ * 解码侧 `decodeRivers` 见 `./rivers`（与 pipeline 单一格式契约）；失败抛错由 Scene catch
+ * （与 loadBoundaries/loadDisputed 同模式，独立 fetch 不阻塞地形 / 边界）。返回 typed arrays 供
+ * Task 29 Rivers 渲染层 BufferGeometry 直接上传 GPU——pipeline 已烘焙带状几何（已投影 worldXY +
+ * heightmap 采样高度 + ε + 累积弧长 uv），前端**不再 project() / 不再采样高度**（详见
+ * `./rivers` 顶部对齐说明）。
+ */
+export async function loadRivers(): Promise<RiverData> {
+  const res = await fetch(dataUrl('rivers.bin'))
+  if (!res.ok) throw new Error(`加载 rivers.bin 失败：${res.status}`)
+  return decodeRivers(await res.arrayBuffer())
 }
 
 /** 加载 8-bit RGB `normal.png` 为线性纹理（细节增强用）。 */
