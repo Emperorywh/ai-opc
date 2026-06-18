@@ -8,8 +8,9 @@
  * 适配器职责切分：
  *  - `createMouseTrackpadAdapter`：鼠标 + 触控板统一（pointer 拖拽 pan + wheel 缩放）。
  *    pointer 事件天然覆盖触屏单指 pan（pointerType=touch），故触屏基础平移无需另接。
- *  - `createTouchAdapter`：多点触控（双指 pinch zoom / tap 点击），SPEC §9 明确 Phase 2
- *    （Task 30）接入；此处仅预留 stub，保证抽象完整、未来替换不动控制器。
+ *  - `createTouchAdapter`：双指 pinch zoom（touch 事件算两指距离比 → onZoom，Task 30）。
+ *    单指 pan / tap 点击已由 mouse-trackpad 的 pointer pan 与 usePointerPick 的 pointer
+ *    选中覆盖，本适配器只补 pinch —— useCameraInput 默认两者并存，桌面 + 触屏全支持。
  */
 import { cameraConfig, type CameraConfig } from '../../config/camera'
 
@@ -120,20 +121,86 @@ export function createMouseTrackpadAdapter(cfg: CameraConfig = cameraConfig): In
   }
 }
 
+/** 触屏触摸点结构子集（clientX/clientY，兼容真实 Touch 与测试 plain 对象）。 */
+type TouchPoint = { clientX: number; clientY: number }
+
 /**
- * 触屏适配器（SPEC §9：预留，Phase 2 / Task 30 接入）。
+ * 两指间欧氏距离（屏幕像素）—— pinch zoom 的输入量。
+ * 取 touches[0]/[1]，无论哪两指，距离比的符号与绝对值都不依赖指序。
+ */
+export function touchPinchDistance(a: TouchPoint, b: TouchPoint): number {
+  return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)
+}
+
+/**
+ * pinch 距离比 → zoom 乘子（SPEC §9 双指捏合缩放，Task 30）。
  *
- * MVP 不实现真实多点触控（单指 pan 已由 mouse-trackpad 的 pointer 事件覆盖；
- * 双指 pinch zoom / tap 点击需 touchstart/move/end 多点状态机）。
- * 仅占位返回 no-op attach，保证 InputAdapter 抽象完整 —— 未来实现替换此处，
- * 控制器（SandboxControls）零改动。
+ *   factor = lastDist / currDist
+ *   - 张开（currDist > lastDist）→ factor < 1 → onZoom 推近（内容放大）
+ *   - 捏合（currDist < lastDist）→ factor > 1 → onZoom 拉远（内容缩小）
+ *
+ * 与 `CameraInputHandlers.onZoom`「>1 拉远 / <1 推近」语义同源，亦与 wheel 的
+ * `exp(deltaY · k)`（deltaY>0 拉远）方向一致。防除零：currDist≤0 返回 1（不变）。
+ */
+export function pinchZoomFactor(currDist: number, lastDist: number): number {
+  if (currDist <= 0) return 1
+  return lastDist / currDist
+}
+
+/**
+ * 触屏适配器（SPEC §9：双指 pinch zoom，Task 30）。
+ *
+ * 触屏三项手势的职责分工（与 mouse-trackpad / usePointerPick 协同，无重复触发）：
+ *  - 单指 pan：由 mouse-trackpad 的 pointer 事件覆盖（pointerType=touch 单指拖拽）。
+ *    本适配器**忽略单指**（仅追踪是否进入双指），避免与 pointer pan 重复移动目标点。
+ *  - 双指 pinch zoom：浏览器不把触屏 pinch 合成为 wheel（默认缩放整个页面），必须用
+ *    touch 事件自己算两指距离比 → onZoom。本适配器唯一职责。
+ *  - 点击选国家：由 usePointerPick 的 pointer 事件覆盖（触屏 tap 合成 pointerdown/up）。
+ *
+ * `touch-action: none` 在 attach 时设到元素上（detach 还原），声明式告诉浏览器本元素的
+ * 所有触摸手势由代码全权处理 —— 否则浏览器会抢占双指做页面缩放、单指做滚动惯性，
+ * 盖过我们的处理。useCameraInput 默认把本适配器与 mouse-trackpad 同时 attach 到 canvas。
  */
 export function createTouchAdapter(): InputAdapter {
   return {
     kind: 'touch',
-    attach() {
-      // Phase 2（Task 30）：touchstart/move/end 单指 pan + 双指 pinch zoom + tap 点击选国家。
-      return () => {}
+    attach(el, handlers) {
+      // 当前 pinch 的上一帧两指距离；null = 非双指态（单指/无指），不产出 zoom。
+      let pinchDist: number | null = null
+
+      const onTouchStart = (e: TouchEvent) => {
+        pinchDist =
+          e.touches.length >= 2
+            ? touchPinchDistance(e.touches[0], e.touches[1])
+            : null // 单指：让位 mouse-trackpad 的 pointer pan
+      }
+      const onTouchMove = (e: TouchEvent) => {
+        if (e.touches.length < 2 || pinchDist === null) return
+        const curr = touchPinchDistance(e.touches[0], e.touches[1])
+        handlers.onZoom(pinchZoomFactor(curr, pinchDist))
+        pinchDist = curr
+        e.preventDefault() // 阻止浏览器页面 pinch-zoom（双指时）
+      }
+      const onTouchEnd = (e: TouchEvent) => {
+        if (e.touches.length < 2) pinchDist = null
+      }
+
+      // passive:false 以便 onTouchMove 能 preventDefault；touch-action:none 双保险。
+      el.addEventListener('touchstart', onTouchStart, { passive: false })
+      el.addEventListener('touchmove', onTouchMove, { passive: false })
+      el.addEventListener('touchend', onTouchEnd)
+      el.addEventListener('touchcancel', onTouchEnd)
+
+      const prevTouchAction = el.style.touchAction
+      el.style.touchAction = 'none'
+
+      return () => {
+        el.removeEventListener('touchstart', onTouchStart)
+        el.removeEventListener('touchmove', onTouchMove)
+        el.removeEventListener('touchend', onTouchEnd)
+        el.removeEventListener('touchcancel', onTouchEnd)
+        el.style.touchAction = prevTouchAction
+      }
     },
   }
 }

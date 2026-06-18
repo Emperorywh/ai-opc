@@ -15,6 +15,8 @@ import {
   wheelToZoomFactor,
   createMouseTrackpadAdapter,
   createTouchAdapter,
+  touchPinchDistance,
+  pinchZoomFactor,
 } from '../src/three/camera/inputAdapter'
 
 // ---- fake element（node 环境无 DOM，仅复刻 adapter 用到的方法）----
@@ -37,6 +39,8 @@ function fakeElement() {
     },
     setPointerCapture: vi.fn(),
     releasePointerCapture: vi.fn(),
+    // createTouchAdapter 读写 el.style.touchAction（attach 设 none / detach 还原）。
+    style: { touchAction: '' },
     listenerCount(type: string) {
       return listeners.get(type)?.size ?? 0
     },
@@ -49,6 +53,13 @@ type FakeWheel = {
   deltaY: number
   deltaMode: number
   ctrlKey: boolean
+  preventDefault: () => void
+}
+
+// 触屏事件结构子集（touches 为数组，兼容 TouchList 的 length + 索引访问；adapter 仅读 clientX/Y）。
+type FakeTouchPoint = { clientX: number; clientY: number }
+type FakeTouchEv = {
+  touches: FakeTouchPoint[]
   preventDefault: () => void
 }
 
@@ -266,24 +277,186 @@ describe('createMouseTrackpadAdapter', () => {
   })
 })
 
-describe('createTouchAdapter（SPEC §9 预留，Phase 2 / Task 30 接入）', () => {
+describe('touchPinchDistance（两指欧氏距离）', () => {
+  it('已知两点距离（3-4-5）', () => {
+    expect(touchPinchDistance({ clientX: 0, clientY: 0 }, { clientX: 3, clientY: 4 })).toBe(5)
+  })
+  it('同点距离 0', () => {
+    expect(touchPinchDistance({ clientX: 5, clientY: 5 }, { clientX: 5, clientY: 5 })).toBe(0)
+  })
+  it('指序无关（a/b 对称）', () => {
+    const p1 = { clientX: 10, clientY: 20 }
+    const p2 = { clientX: 30, clientY: 40 }
+    expect(touchPinchDistance(p1, p2)).toBeCloseTo(touchPinchDistance(p2, p1))
+  })
+})
+
+describe('pinchZoomFactor（距离比 → zoom 乘子，与 onZoom 语义同源）', () => {
+  it('张开（curr>last）→ factor<1 推近（放大）', () => {
+    expect(pinchZoomFactor(200, 100)).toBeCloseTo(0.5)
+  })
+  it('捏合（curr<last）→ factor>1 拉远（缩小）', () => {
+    expect(pinchZoomFactor(100, 200)).toBeCloseTo(2)
+  })
+  it('不变（curr=last）→ factor=1', () => {
+    expect(pinchZoomFactor(150, 150)).toBe(1)
+  })
+  it('防除零（curr=0）→ factor=1', () => {
+    expect(pinchZoomFactor(0, 100)).toBe(1)
+  })
+  it('防除零（curr<0）→ factor=1', () => {
+    expect(pinchZoomFactor(-5, 100)).toBe(1)
+  })
+})
+
+describe('createTouchAdapter（双指 pinch zoom，Task 30 / SPEC §9）', () => {
   it('kind = touch', () => {
     expect(createTouchAdapter().kind).toBe('touch')
   })
-  it('attach 返回 detach 函数（no-op 占位）', () => {
-    const detach = createTouchAdapter().attach({} as HTMLElement, {
+  it('attach 返回 detach 函数', () => {
+    const el = fakeElement()
+    const detach = createTouchAdapter().attach(el as unknown as HTMLElement, {
       onPan: () => {},
       onZoom: () => {},
     })
     expect(typeof detach).toBe('function')
     expect(() => detach()).not.toThrow()
   })
-  it('预留 stub 不消费 handlers（未实现触控逻辑，handlers 不被调用）', () => {
+  it('单指 touchmove 不触发 onZoom/onPan（让位 mouse-trackpad 的 pointer pan）', () => {
+    const el = fakeElement()
     const onPan = vi.fn()
     const onZoom = vi.fn()
-    const detach = createTouchAdapter().attach({} as HTMLElement, { onPan, onZoom })
-    expect(onPan).not.toHaveBeenCalled()
+    createTouchAdapter().attach(el as unknown as HTMLElement, { onPan, onZoom })
+    el.dispatch('touchstart', { touches: [{ clientX: 0, clientY: 0 }], preventDefault: () => {} } as FakeTouchEv)
+    el.dispatch('touchmove', { touches: [{ clientX: 50, clientY: 50 }], preventDefault: () => {} } as FakeTouchEv)
     expect(onZoom).not.toHaveBeenCalled()
+    expect(onPan).not.toHaveBeenCalled()
+  })
+  it('双指张开（距离增大）→ onZoom factor<1（推近放大）', () => {
+    const el = fakeElement()
+    const onZoom = vi.fn()
+    createTouchAdapter().attach(el as unknown as HTMLElement, { onPan: () => {}, onZoom })
+    // 初始两指距离 100
+    el.dispatch('touchstart', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 100, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv)
+    // 张开到距离 200 → factor = lastDist/currDist = 100/200 = 0.5
+    el.dispatch('touchmove', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 200, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv)
+    expect(onZoom).toHaveBeenCalledTimes(1)
+    expect(onZoom).toHaveBeenCalledWith(0.5)
+  })
+  it('双指捏合（距离减小）→ onZoom factor>1（拉远缩小）', () => {
+    const el = fakeElement()
+    const onZoom = vi.fn()
+    createTouchAdapter().attach(el as unknown as HTMLElement, { onPan: () => {}, onZoom })
+    el.dispatch('touchstart', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 200, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv)
+    // 捏合到距离 100 → factor = 200/100 = 2
+    el.dispatch('touchmove', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 100, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv)
+    expect(onZoom).toHaveBeenCalledWith(2)
+  })
+  it('双指 touchmove 调 preventDefault（阻止浏览器页面 pinch-zoom）', () => {
+    const el = fakeElement()
+    const preventDefault = vi.fn()
+    createTouchAdapter().attach(el as unknown as HTMLElement, { onPan: () => {}, onZoom: () => {} })
+    el.dispatch('touchstart', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 100, clientY: 0 }],
+      preventDefault,
+    } as FakeTouchEv)
+    el.dispatch('touchmove', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 150, clientY: 0 }],
+      preventDefault,
+    } as FakeTouchEv)
+    expect(preventDefault).toHaveBeenCalled()
+  })
+  it('累积 pinch：多次 touchmove 各自上报相对上一帧的距离比', () => {
+    const el = fakeElement()
+    const onZoom = vi.fn()
+    createTouchAdapter().attach(el as unknown as HTMLElement, { onPan: () => {}, onZoom })
+    el.dispatch('touchstart', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 100, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv)
+    // 100 → 150 → 300（每帧相对上一帧 currDist）
+    el.dispatch('touchmove', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 150, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv) // factor = 100/150
+    el.dispatch('touchmove', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 300, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv) // factor = 150/300
+    expect(onZoom).toHaveBeenCalledTimes(2)
+    expect(onZoom).toHaveBeenNthCalledWith(1, 100 / 150)
+    expect(onZoom).toHaveBeenNthCalledWith(2, 150 / 300)
+  })
+  it('touchend 剩余 <2 指 → 重置，后续 touchmove 不误触发', () => {
+    const el = fakeElement()
+    const onZoom = vi.fn()
+    createTouchAdapter().attach(el as unknown as HTMLElement, { onPan: () => {}, onZoom })
+    el.dispatch('touchstart', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 100, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv)
+    // 抬起一指（剩 1 指）→ pinchDist 重置为 null
+    el.dispatch('touchend', {
+      touches: [{ clientX: 50, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv)
+    // 即便 touches 仍是 2 个，pinchDist 已 null，onTouchMove 早返
+    el.dispatch('touchmove', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 200, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv)
+    expect(onZoom).not.toHaveBeenCalled()
+  })
+  it('attach 设 touch-action:none，detach 还原原值', () => {
+    const el = fakeElement()
+    el.style.touchAction = 'pan-x' // 模拟元素既有值
+    const detach = createTouchAdapter().attach(el as unknown as HTMLElement, {
+      onPan: () => {},
+      onZoom: () => {},
+    })
+    expect(el.style.touchAction).toBe('none')
     detach()
+    expect(el.style.touchAction).toBe('pan-x')
+  })
+  it('detach 后 touch 事件不再触发 onZoom', () => {
+    const el = fakeElement()
+    const onZoom = vi.fn()
+    const detach = createTouchAdapter().attach(el as unknown as HTMLElement, { onPan: () => {}, onZoom })
+    detach()
+    el.dispatch('touchstart', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 100, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv)
+    el.dispatch('touchmove', {
+      touches: [{ clientX: 0, clientY: 0 }, { clientX: 200, clientY: 0 }],
+      preventDefault: () => {},
+    } as FakeTouchEv)
+    expect(onZoom).not.toHaveBeenCalled()
+  })
+  it('detach 移除所有 touch 监听（计数归零）', () => {
+    const el = fakeElement()
+    const detach = createTouchAdapter().attach(el as unknown as HTMLElement, {
+      onPan: () => {},
+      onZoom: () => {},
+    })
+    expect(el.listenerCount('touchstart')).toBe(1)
+    expect(el.listenerCount('touchmove')).toBe(1)
+    expect(el.listenerCount('touchend')).toBe(1)
+    expect(el.listenerCount('touchcancel')).toBe(1)
+    detach()
+    expect(el.listenerCount('touchstart')).toBe(0)
+    expect(el.listenerCount('touchmove')).toBe(0)
   })
 })
