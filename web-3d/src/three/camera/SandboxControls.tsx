@@ -54,11 +54,11 @@ export function SandboxControls() {
     goal.current.targetZ = tz
   }, [])
   const onRotate = useCallback((dx: number, dy: number) => {
-    // 左键 / 触屏单指拖拽 = 旋转朝向（拖向哪、看向哪）。
-    // dx>0 右拖 → 视角右扫（yaw 增）；dy>0 下拖 → 视角下压（pitch 减，更水平看）。
+    // 左键 / 触屏单指拖拽 = 旋转朝向（拖地图方向：拖向哪、地图往哪翻）。
+    // dx>0 右拖 → 地图右移（yaw 减）；dy>0 下拖 → 地图下翻（pitch 增、相机抬高俯视）。
     const s = cameraConfig.rotateSensitivity
-    goal.current.yaw += dx * s
-    goal.current.pitch = clampPitch(goal.current.pitch - dy * s)
+    goal.current.yaw -= dx * s
+    goal.current.pitch = clampPitch(goal.current.pitch + dy * s)
   }, [])
   const onZoom = useCallback((factor: number) => {
     // factor>1 拉远、<1 推近（wheelToZoomFactor 产出）。
