@@ -25,7 +25,7 @@ if (!existsSync(RAW_FONT)) {
 
 const codepoints = collectCodepoints();
 const charset = buildCharsetString();
-console.log(`• charset：${codepoints.length} 字形（七大洲 + 四大洋中文名 + ASCII + 标点）`);
+console.log(`• charset：${codepoints.length} 字形（七大洲 + 四大洋 + 代表性国家中文名 + ASCII + 标点）`);
 
 const source = readFileSync(RAW_FONT);
 console.log(`• 源字体：NotoSansSC[wght].ttf（${(source.length / 1024 / 1024).toFixed(1)}MB，可变字体）`);

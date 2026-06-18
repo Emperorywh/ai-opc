@@ -5,13 +5,15 @@
  * Task 17：WebGL 能力检测（SPEC §13.5 / §10）——不支持时降级 WebGLFallback（静态预览 + 提示）；
  * 支持时渲染 Canvas 并叠加 Loader（DOM overlay，订阅 store loading 切片，Task 17）。
  * Task 18：叠加 Hud（常驻数据署名 + 许可弹窗，DOM overlay，z-index 与 Loader 解耦；
- * 加载期被 Loader 全屏遮蔽，ready 后显现）。Legend / 国家拾取面板留 M8。
+ * 加载期被 Loader 全屏遮蔽，ready 后显现）。
+ * Task 25：叠加 Legend（地物配色图例，右上角可折叠，§6.7）。
  */
 import { useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { cameraConfig } from './config/camera'
 import { Scene } from './three/Scene'
 import { Hud } from './ui/Hud'
+import { Legend } from './ui/Legend'
 import { Loader } from './ui/Loader'
 import { WebGLFallback } from './ui/WebGLFallback'
 import { detectWebGL } from './ui/webgl'
@@ -30,6 +32,8 @@ export default function App() {
       <Loader />
       {/* SPEC §6.7 / §12：常驻数据署名 + 许可弹窗（Task 18）。z-index 与 Loader 解耦，加载期被遮蔽。 */}
       <Hud />
+      {/* SPEC §6.7：地物配色图例（Task 25）。右上角可折叠，与 Hud 同层 z30，加载期被遮蔽。 */}
+      <Legend />
     </div>
   )
 }

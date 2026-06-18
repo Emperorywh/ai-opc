@@ -97,5 +97,59 @@
     "lon": 0,
     "lat": 85,
     "priority": 80
+  },
+  {
+    "id": "chn",
+    "zhName": "中国",
+    "kind": "country",
+    "continent": "asia",
+    "lon": 104,
+    "lat": 35.5,
+    "priority": 60
+  },
+  {
+    "id": "usa",
+    "zhName": "美国",
+    "kind": "country",
+    "continent": "north-america",
+    "lon": -96,
+    "lat": 37,
+    "priority": 60
+  },
+  {
+    "id": "fra",
+    "zhName": "法国",
+    "kind": "country",
+    "continent": "europe",
+    "lon": 1.5,
+    "lat": 46.5,
+    "priority": 60
+  },
+  {
+    "id": "bra",
+    "zhName": "巴西",
+    "kind": "country",
+    "continent": "south-america",
+    "lon": -54,
+    "lat": -14,
+    "priority": 60
+  },
+  {
+    "id": "aus",
+    "zhName": "澳大利亚",
+    "kind": "country",
+    "continent": "oceania",
+    "lon": 133.5,
+    "lat": -25.5,
+    "priority": 60
+  },
+  {
+    "id": "egy",
+    "zhName": "埃及",
+    "kind": "country",
+    "continent": "africa",
+    "lon": 30,
+    "lat": 27,
+    "priority": 60
   }
 ]

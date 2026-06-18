@@ -24,6 +24,9 @@ export const CONTINENT_NAMES = [
 // 四大洋中文名（SPEC §6.5；标准四大洋）
 export const OCEAN_NAMES = ['太平洋', '大西洋', '印度洋', '北冰洋'];
 
+// 代表性国家中文名（M8 Task 25：与 labels-data.mjs COUNTRY_LABELS 同源；子集化覆盖国家标签字形）
+export const COUNTRY_NAMES = ['中国', '美国', '法国', '巴西', '澳大利亚', '埃及'];
+
 // 兜底字符集：ASCII 字母数字 + 常用中英标点/符号。
 // M4 大洲大洋标签纯中文，但保留 ASCII/标点作为「无缺字」保险——标签 priority 数字、可能的英文缩写、
 // 坐标度数（°）、复合名分隔符（·）等。体积影响极小（数十字形）。
@@ -37,12 +40,12 @@ export const BASE_CHARS =
 /**
  * 收集 names 与 extra 中所有 code point，去重并升序排序。
  *
- * @param {string[]} [names] 中文名列表（默认七大洲+四大洋）
+ * @param {string[]} [names] 中文名列表（默认七大洲+四大洋+代表性国家）
  * @param {string} [extra] 额外字符（默认 BASE_CHARS）
  * @returns {number[]} 升序、去重的 code point 数组
  */
 export function collectCodepoints(
-  names = [...CONTINENT_NAMES, ...OCEAN_NAMES],
+  names = [...CONTINENT_NAMES, ...OCEAN_NAMES, ...COUNTRY_NAMES],
   extra = BASE_CHARS,
 ) {
   const set = new Set();
@@ -74,5 +77,5 @@ export function buildCharsetString(names, extra) {
   return codepointsToString(collectCodepoints(names, extra));
 }
 
-// 默认 charset 字符串（M4：七大洲+四大洋 + BASE_CHARS）
+// 默认 charset 字符串（M4：七大洲+四大洋 + M8：代表性国家 + BASE_CHARS）
 export const DEFAULT_CHARSET = buildCharsetString();

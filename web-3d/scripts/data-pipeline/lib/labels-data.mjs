@@ -44,13 +44,53 @@ export const OCEAN_LABELS = [
 ]
 
 /**
- * 生成完整 labels 数组（M4：七大洲 + 四大洋 = 11 条）。
+ * 国家标签锚点（M8 Task 25：代表性大国）。
+ *
+ * SPEC §6.5「国家名（Phase 2）」+ §12.4「ISO_A3 join 中文名表」。MVP 合成数据覆盖 6 国，
+ * 与 M6 合成边界 `boundaries-data.mjs` 的 SYNTHETIC_COUNTRIES 同步（ISO_A3 一致）；
+ * 真实 NE ~200 国由 pipeline ISO_A3 join CC0 中文 ISO-3166 名表重生成（与本表同结构）。
+ *
+ * 锚点策略（SPEC §10 + 与前端 src/three/labels/countryInfo.ts 同源，确保「标签文字」与
+ *   「Task 24 数据卡片」定位严格一致——均落在 countryAnchorLonLat 同一点）：
+ *   · USA：主体陆地质心 [-96,37]（本土+阿拉斯加+夏威夷顶点均值落太平洋，§10 修复；
+ *     与 countryInfo.ts COUNTRY_ANCHORS.USA 同值）。
+ *   · 其余：合成矩形中心 = countryAnchorLonLat 顶点均值（单主体陆地，落陆地）。
+ *
+ * 优先级（SPEC §6.5「大洲 > 大洋 > 大国 > 小国」）：大国=60；未来小国细分~30。
+ * kind='country' 经 LabelLayer 渲染、collision 碰撞、LOD 密度（需 major 及以上显示）。
+ * @type {LabelSeed[]}
+ */
+export const COUNTRY_LABELS = [
+  { id: 'chn', zhName: '中国',     lon:  104, lat: 35.5, priority: 60 }, // 中国本土中心
+  { id: 'usa', zhName: '美国',     lon:  -96, lat:   37, priority: 60 }, // §10 主体陆地（覆盖落海均值）
+  { id: 'fra', zhName: '法国',     lon:  1.5, lat: 46.5, priority: 60 }, // 法国本土中心
+  { id: 'bra', zhName: '巴西',     lon:  -54, lat:  -14, priority: 60 }, // 巴西中心
+  { id: 'aus', zhName: '澳大利亚', lon: 133.5, lat: -25.5, priority: 60 }, // 澳大利亚中心
+  { id: 'egy', zhName: '埃及',     lon:   30, lat:   27, priority: 60 }, // 埃及中心
+]
+
+/**
+ * 国家 id → 所属大洲 slug（与 continent label id 同源：asia/europe/africa/...）。
+ * 供 country 标签 `continent` 字段（大洋=null；大洲=自身；国家=所属大洲 slug）。
+ */
+const COUNTRY_CONTINENT = {
+  chn: 'asia',
+  usa: 'north-america',
+  fra: 'europe',
+  bra: 'south-america',
+  aus: 'oceania',
+  egy: 'africa',
+}
+
+/**
+ * 生成完整 labels 数组（M4：七大洲 + 四大洋；M8 Task 25：+ 6 代表性大国 = 17 条）。
  *
  * 字段顺序 {id, zhName, kind, continent, lon, lat, priority} 对齐 SPEC §6.5 / types.ts Label。
- * - kind：continent / ocean（由分组注入，源数据按 kind 分两个数组，DRY）
- * - continent：大洲标签 = 自身 id；大洋标签 = null（大洋不属任何大洲，§6.5 continent 字段对大洋为空）
+ * - kind：continent / ocean / country（由分组注入，源数据按 kind 分数组，DRY）
+ * - continent：大洲标签 = 自身 id；大洋标签 = null（大洋不属任何大洲，§6.5 continent 字段对大洋为空）；
+ *   国家标签 = 所属大洲 slug（COUNTRY_CONTINENT）
  *
- * @returns {{id:string,zhName:string,kind:'continent'|'ocean',continent:string|null,lon:number,lat:number,priority:number}[]}
+ * @returns {{id:string,zhName:string,kind:'continent'|'ocean'|'country',continent:string|null,lon:number,lat:number,priority:number}[]}
  */
 export function buildLabels() {
   const continents = CONTINENT_LABELS.map((l) => ({
@@ -71,5 +111,14 @@ export function buildLabels() {
     lat: l.lat,
     priority: l.priority,
   }))
-  return [...continents, ...oceans]
+  const countries = COUNTRY_LABELS.map((l) => ({
+    id: l.id,
+    zhName: l.zhName,
+    kind: 'country',
+    continent: COUNTRY_CONTINENT[l.id] ?? null,
+    lon: l.lon,
+    lat: l.lat,
+    priority: l.priority,
+  }))
+  return [...continents, ...oceans, ...countries]
 }

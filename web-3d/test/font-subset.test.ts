@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import {
   CONTINENT_NAMES,
   OCEAN_NAMES,
+  COUNTRY_NAMES,
   BASE_CHARS,
   collectCodepoints,
   codepointsToString,
@@ -40,12 +41,26 @@ describe('charset · 七大洲四大洋中文名', () => {
   it('四大洋中文名为固定常识值（标准四大洋）', () => {
     expect(OCEAN_NAMES).toEqual(['太平洋', '大西洋', '印度洋', '北冰洋']);
   });
+
+  it('代表性国家中文名 6 个（Task 25，与 labels-data COUNTRY_LABELS 同源）', () => {
+    expect(COUNTRY_NAMES).toHaveLength(6);
+    expect(COUNTRY_NAMES).toEqual(['中国', '美国', '法国', '巴西', '澳大利亚', '埃及']);
+  });
 });
 
 describe('charset · 无缺字（根因断言）', () => {
   it('默认 charset 覆盖七大洲四大洋所有名字形', () => {
     const cps = new Set(collectCodepoints());
     for (const name of [...CONTINENT_NAMES, ...OCEAN_NAMES]) {
+      for (const ch of name) {
+        expect(cps.has(ch.codePointAt(0) as number), `charset 缺字「${ch}」`).toBe(true);
+      }
+    }
+  });
+
+  it('默认 charset 覆盖代表性国家名所有字形（Task 25 国家标签无缺字）', () => {
+    const cps = new Set(collectCodepoints());
+    for (const name of COUNTRY_NAMES) {
       for (const ch of name) {
         expect(cps.has(ch.codePointAt(0) as number), `charset 缺字「${ch}」`).toBe(true);
       }
