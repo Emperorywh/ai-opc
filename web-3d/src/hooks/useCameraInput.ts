@@ -40,6 +40,7 @@ export function useCameraInput(
     if (!el) return
     const wrapped: CameraInputHandlers = {
       onPan: (dx, dy) => latest.current.onPan(dx, dy),
+      onRotate: (dx, dy) => latest.current.onRotate(dx, dy),
       onZoom: (factor) => latest.current.onZoom(factor),
     }
     const detaches = adapters.map((a) => a.attach(el, wrapped))

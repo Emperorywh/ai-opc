@@ -1,13 +1,13 @@
 /**
- * 受限沙盘相机状态机（SPEC §6.6 / D13：固定倾斜 + 限 pan/zoom）。
+ * 自由轨道相机状态机（原 SPEC §6.6 / D13「固定倾斜 + 限 pan/zoom」已放宽为自由轨道）。
  *
  * 相机模型 —— 绕目标点 (targetX, 0, targetZ) 的球面：
  *   camPos = target + distance · (cos pitch · sin yaw,  sin pitch,  cos pitch · cos yaw)
  *
- * 约束（全部纯函数，便于单测覆盖 SPEC §6.6 边界）：
- *   - pitch ∈ [pitchMin°, pitchMax°]（锁定 pitchDeg，永不翻转）
- *   - yaw   ∈ [±yawRange°]（锁定主朝向 0，保留小范围摆动配置）
- *   - target ∈ panBounds（x∈[-1.1,1.1], z∈[-0.6,0.6]，SPEC §6.6）
+ * 约束（全部纯函数）：
+ *   - pitch ∈ [pitchMin°, pitchMax°]（10–85°，自由轨道可旋转；>90° 翻转区压回 pitchMax → 永不翻转）
+ *   - yaw   全自由 360°（yawRangeDeg=180 ⇒ clampYaw 透传；周期量不夹紧）
+ *   - target ∈ panBounds（x∈[-1.1,1.1], z∈[-0.6,0.6]）
  *   - distance ∈ [zoom.min, zoom.max]
  *
  * Task 09：控制器内核 + 内置 pointer/wheel 输入（见 SandboxControls.tsx）。
@@ -20,9 +20,9 @@ export type CameraState = {
   targetX: number
   targetZ: number
   distance: number
-  /** 俯仰（弧度），锁定 pitchDeg。 */
+  /** 俯仰（弧度），初值 pitchDeg；自由轨道下可由旋转手势改变。 */
   pitch: number
-  /** 偏航（弧度），锁定主朝向 0。 */
+  /** 偏航（弧度），初值 0；自由轨道下全自由（无界，周期量）。 */
   yaw: number
 }
 
@@ -60,14 +60,20 @@ export function clampDistance(d: number, cfg: CameraConfig = cameraConfig): numb
   return clamp(d, cfg.zoom.min, cfg.zoom.max)
 }
 
-/** pitch clamp（SPEC §6.6：锁定 45–60°）。>90° 翻转区被压回 pitchMax → 永不翻转。 */
+/** pitch clamp（pitchMin–pitchMax°，自由轨道 10–85°）。>90° 翻转区被压回 pitchMax → 永不翻转。 */
 export function clampPitch(p: number, cfg: CameraConfig = cameraConfig): number {
   return clamp(p, (cfg.pitchMinDeg * Math.PI) / 180, (cfg.pitchMaxDeg * Math.PI) / 180)
 }
 
-/** yaw clamp（SPEC §6.6：±yawRangeDeg 小范围摆动；锁定主朝向时 yaw=0）。 */
+/**
+ * yaw clamp（原 SPEC §6.6 ±yawRangeDeg 小范围摆动；自由轨道化后 yawRangeDeg=180）。
+ *
+ * yaw 为周期量（2π），球面位置对 yaw 取模不变 ⇒ 全自由旋转时**不夹紧**（透传），
+ * 连续拖拽不会在 ±180° 边界卡住。yawRangeDeg < 180° 时维持原 ±r 夹紧（向后兼容）。
+ */
 export function clampYaw(y: number, cfg: CameraConfig = cameraConfig): number {
   const r = (cfg.yawRangeDeg * Math.PI) / 180
+  if (r >= Math.PI) return y // 全自由 360°：透传不夹紧（周期量靠 sin/cos 归一）
   return clamp(y, -r, r)
 }
 
