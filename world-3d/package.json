@@ -7,7 +7,15 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dem:1-download": "node scripts/data-pipeline/1-download-dem.mjs",
+    "dem:2-vrt": "node scripts/data-pipeline/2-build-vrt.mjs",
+    "dem:3-warp": "node scripts/data-pipeline/3-warp-mercator.mjs",
+    "dem:4-overviews": "node scripts/data-pipeline/4-build-overviews.mjs",
+    "dem:5-tiles": "node scripts/data-pipeline/5-cut-terrain-tiles.mjs",
+    "dem:6-metadata": "node scripts/data-pipeline/6-write-metadata.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",
@@ -18,8 +26,15 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
+    "fast-png": "^8.0.0",
+    "gdal-async": "^3.12.3",
+    "geotiff": "^2.1.3",
     "oxlint": "^1.69.0",
     "typescript": "~6.0.2",
-    "vite": "^8.1.0"
+    "vite": "^8.1.0",
+    "vitest": "^2.1.9"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "gdal-async"]
   }
 }

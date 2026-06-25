@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# DEM pipeline: raw sources, intermediates, and generated tiles never committed
+raw/
+intermediate/
+public/tiles/
