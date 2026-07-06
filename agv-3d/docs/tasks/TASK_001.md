@@ -1,6 +1,6 @@
 ---
 id: TASK_001
-status: draft
+status: ready
 branch: task/001-scaffold
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md
