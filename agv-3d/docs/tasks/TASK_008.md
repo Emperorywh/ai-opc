@@ -1,12 +1,24 @@
 ---
 id: TASK_008
-title: 边几何共享与 EdgesLayer
 status: draft
-phase: 3
-depends_on: [TASK_006, TASK_007]
-files:
+branch: task/008-edges-layer
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_008): 实现单一粗线 EdgesLayer"
+depends_on:
+  - TASK_006
+  - TASK_007
+agent_allowed_paths:
   - src/scene/EdgesLayer.tsx
   - src/scene/MapView.tsx
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_008 · 边几何共享与 EdgesLayer

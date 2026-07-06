@@ -1,14 +1,24 @@
 ---
 id: TASK_003
-title: 配置层、坐标映射与全局状态
 status: draft
-phase: 1
-depends_on: [TASK_001]
-files:
-  - src/config/palette.ts
-  - src/config/constants.ts
-  - src/state/MapConfig.tsx
+branch: task/003-config-coordinates
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_003): 落地调色板常量坐标映射与全局状态"
+depends_on:
+  - TASK_001
+agent_allowed_paths:
+  - src/config
   - src/render/coordinates.ts
+  - src/state
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_003 · 配置层、坐标映射与全局状态

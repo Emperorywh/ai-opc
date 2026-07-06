@@ -1,12 +1,25 @@
 ---
 id: TASK_010
-title: 节点渲染层 NodesLayer
 status: draft
-phase: 3
-depends_on: [TASK_002, TASK_003, TASK_007]
-files:
+branch: task/010-nodes-layer
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_010): 实现节点与朝向三角 InstancedMesh"
+depends_on:
+  - TASK_002
+  - TASK_003
+  - TASK_007
+agent_allowed_paths:
   - src/scene/NodesLayer.tsx
   - src/scene/MapView.tsx
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_010 · 节点渲染层 NodesLayer

@@ -1,15 +1,31 @@
 ---
 id: TASK_001
-title: 项目脚手架与依赖
 status: draft
-phase: 0
+branch: task/001-scaffold
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_001): 搭建项目脚手架与运行依赖"
 depends_on: []
-files:
+agent_allowed_paths:
   - package.json
+  - pnpm-lock.yaml
   - vite.config.ts
   - src/App.tsx
   - src/main.tsx
+  - src/App.css
+  - src/index.css
+  - src/assets
   - public/maps/sample.json
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm add:*)
+  - Bash(pnpm install:*)
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_001 · 项目脚手架与依赖

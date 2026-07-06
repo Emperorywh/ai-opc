@@ -1,12 +1,23 @@
 ---
 id: TASK_005
-title: 双车道偏移工具
 status: draft
-phase: 2
-depends_on: [TASK_002]
-files:
+branch: task/005-lane-offset
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_005): 实现双车道配对索引与法线偏移"
+depends_on:
+  - TASK_002
+agent_allowed_paths:
   - src/render/laneOffset.ts
   - src/render/laneOffset.test.ts
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_005 · 双车道偏移工具

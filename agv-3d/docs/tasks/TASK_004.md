@@ -1,12 +1,23 @@
 ---
 id: TASK_004
-title: 贝塞尔几何工具
 status: draft
-phase: 2
-depends_on: [TASK_001]
-files:
+branch: task/004-bezier
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_004): 实现三次贝塞尔弧长自适应采样"
+depends_on:
+  - TASK_001
+agent_allowed_paths:
   - src/render/bezier.ts
   - src/render/bezier.test.ts
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_004 · 贝塞尔几何工具

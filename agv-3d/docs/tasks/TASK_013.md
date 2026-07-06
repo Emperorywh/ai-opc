@@ -1,12 +1,28 @@
 ---
 id: TASK_013
-title: 端到端复核与验收
 status: draft
-phase: 4
-depends_on: [TASK_008, TASK_009, TASK_010, TASK_011, TASK_012]
-files:
+branch: task/013-acceptance
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "chore(TASK_013): 端到端复核与横切验收"
+depends_on:
+  - TASK_008
+  - TASK_009
+  - TASK_010
+  - TASK_011
+  - TASK_012
+agent_allowed_paths:
   - src/scene/MapView.tsx
   - src/App.tsx
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allow_empty_code_changes: true
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_013 · 端到端复核与验收

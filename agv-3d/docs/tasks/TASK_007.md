@@ -1,12 +1,24 @@
 ---
 id: TASK_007
-title: 数据接入与场景骨架 MapView
 status: draft
-phase: 3
-depends_on: [TASK_002, TASK_003]
-files:
+branch: task/007-mapview
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_007): 接入正式数据与场景骨架 MapView"
+depends_on:
+  - TASK_002
+  - TASK_003
+agent_allowed_paths:
   - src/scene/MapView.tsx
   - src/App.tsx
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_007 · 数据接入与场景骨架 MapView

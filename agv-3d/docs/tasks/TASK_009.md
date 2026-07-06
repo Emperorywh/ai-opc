@@ -1,13 +1,26 @@
 ---
 id: TASK_009
-title: 方向箭头层 ArrowsLayer
 status: draft
-phase: 3
-depends_on: [TASK_006, TASK_008]
-files:
+branch: task/009-arrows-layer
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_009): 实现方向箭头 InstancedMesh"
+depends_on:
+  - TASK_006
+  - TASK_008
+agent_allowed_paths:
   - src/render/arrows.ts
   - src/render/arrows.test.ts
   - src/scene/ArrowsLayer.tsx
+  - src/scene/MapView.tsx
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_009 · 方向箭头层 ArrowsLayer

@@ -1,12 +1,25 @@
 ---
 id: TASK_012
-title: 标签层 LabelsLayer
 status: draft
-phase: 4
-depends_on: [TASK_002, TASK_003, TASK_008]
-files:
+branch: task/012-labels-layer
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_012): 实现标签层与剔除策略"
+depends_on:
+  - TASK_002
+  - TASK_003
+  - TASK_008
+agent_allowed_paths:
   - src/scene/LabelsLayer.tsx
   - src/scene/MapView.tsx
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_012 · 标签层 LabelsLayer

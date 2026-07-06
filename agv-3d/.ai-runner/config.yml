@@ -1,0 +1,27 @@
+# AI Task Runner 项目配置
+# Runner 通过 --project-root 指向本项目时读取此文件。
+# 字段含义见 Runner 仓库 README。
+
+task_dir: docs/tasks
+log_dir: docs/ai-runner-logs
+lock_file: .ai-task-runner.lock
+
+# 分支策略：chained
+# 本项目 13 个 task 构成强依赖 DAG（如 TASK_006 依赖 002/003/004/005）。
+# chained 让每个新 task 分支从上一 task 分支继续创建，
+# 自然继承前序全部提交，依赖任务代码始终在当前分支内可见；
+# Runner 同时按 depends_on 校验依赖是否完成，未完成不会执行。
+#
+# 不使用 base：base 要求 depends_on 为空且每分支独立从 base_branch 切出，
+# 而 Runner 完成后只 commit 到 task 分支、不自动 merge 回 main，
+# 会导致后续 task 分支缺失前序代码、build 直接失败。
+branch_policy:
+  mode: chained
+
+# verify 白名单：所有 verify 命令必须命中下列前缀之一。
+# dev/start/serve 等长期服务已由 Runner 内置禁止，这里只放行可结束的门禁命令。
+verify_policy:
+  allow_prefixes:
+    - pnpm lint
+    - pnpm build
+    - pnpm test

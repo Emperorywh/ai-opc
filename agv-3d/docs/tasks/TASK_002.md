@@ -1,13 +1,22 @@
 ---
 id: TASK_002
-title: 数据层 types + loader
 status: draft
-phase: 1
-depends_on: [TASK_001]
-files:
-  - src/data/types.ts
-  - src/data/loader.ts
-  - src/data/loader.test.ts
+branch: task/002-data-loader
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_002): 实现地图数据类型与纯函数 loader"
+depends_on:
+  - TASK_001
+agent_allowed_paths:
+  - src/data
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_002 · 数据层 types + loader

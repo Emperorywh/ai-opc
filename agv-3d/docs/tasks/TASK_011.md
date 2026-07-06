@@ -1,12 +1,27 @@
 ---
 id: TASK_011
-title: 极简控制条 Controls
 status: draft
-phase: 4
-depends_on: [TASK_003, TASK_007, TASK_008, TASK_010]
-files:
+branch: task/011-controls
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_011): 实现极简控制条 Controls"
+depends_on:
+  - TASK_003
+  - TASK_007
+  - TASK_008
+  - TASK_010
+agent_allowed_paths:
   - src/ui/Controls.tsx
   - src/App.tsx
+  - src/index.css
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_011 · 极简控制条 Controls

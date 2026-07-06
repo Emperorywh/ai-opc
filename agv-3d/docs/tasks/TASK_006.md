@@ -1,12 +1,26 @@
 ---
 id: TASK_006
-title: 统一折线 buffer 构建
 status: draft
-phase: 2
-depends_on: [TASK_002, TASK_003, TASK_004, TASK_005]
-files:
+branch: task/006-edge-geometry
+spec: docs/SPEC_agv-map-phase1.md
+plan: docs/PLAN_agv-map-phase1.md
+commit: "feat(TASK_006): 构建统一边折线 buffer 与采样路径"
+depends_on:
+  - TASK_002
+  - TASK_003
+  - TASK_004
+  - TASK_005
+agent_allowed_paths:
   - src/render/geometry.ts
   - src/render/geometry.test.ts
+verify:
+  - pnpm lint
+  - pnpm build
+  - pnpm test
+allowed_tools:
+  - Bash(pnpm test:*)
+  - Bash(pnpm build:*)
+  - Bash(pnpm lint:*)
 ---
 
 # TASK_006 · 统一折线 buffer 构建
