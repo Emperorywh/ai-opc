@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Map sample data (large, local-only — see docs/SPEC_agv-map-phase1.md §2.1)
+src/json/getMapInfo.json
