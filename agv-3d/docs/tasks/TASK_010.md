@@ -29,8 +29,8 @@ TASK_002（`Node`/类型）、TASK_003（palette/常量）、TASK_007（MapView�
    - `useLayoutEffect` 设每个实例 `matrix`（位置）+ `instanceColor`（`type → palette.nodeXxx`，未知 type 归 `nodeNode`，§5.2）。
 4. **朝向三角 InstancedMesh**：
    - 仅对 `angle != null` 的节点（真实约 460/1806）创建实例；实例数 = 这些节点数。
-   - 几何：小三角/wedge（可用 `<coneGeometry args=[wedgeSize, wedgeSize, 3]>` 三棱锥近似，或自定义 `ShapeGeometry` 三角片）。置于节点圆盘**前方偏移**一点 + 抬到 `yWedge=0.05`。
-   - 朝向：三角指向 `angle`（弧度）方向（绕 Y 轴旋转）。
+   - 几何统一为**贴地扁三角片**（`ShapeGeometry` 画等腰三角形，腰长 ≈ `nodeRadius*1.2`，底边在 `yWedge=0.05` 平面）。**不用三棱锥**（SPEC §5.3 已收敛形状）。
+   - 朝向：三角尖端指向 `angle`（弧度）方向（绕 Y 轴旋转）；可从节点圆心沿 `angle` 方向偏移 `nodeRadius*0.6`，使三角"探出"圆盘边缘。
 5. MapView：`bbox` 有效时挂 `<NodesLayer>`。
 
 ## 约束
@@ -51,5 +51,5 @@ TASK_002（`Node`/类型）、TASK_003（palette/常量）、TASK_007（MapView�
 - 节点 + 朝向三角两个 InstancedMesh 正确渲染，配色/分层/朝向无误。
 
 ## 风险/备注
-- 三角几何形状 SPEC 称「wedge/小三角」，具体用三棱锥还是薄片三角以俯视清晰为准；本 task 选定一种并在 PR 说明。
+- SPEC §5.3 已定形状为贴地扁三角片；若 `ShapeGeometry` 朝向调试成本高，可用 `<coneGeometry args={[wedgeSize, wedgeSize*0.02, 3]}>` 极扁三棱锥近似（俯视等效三角片），但底面仍在 `yWedge=0.05`。
 - `instanceColor` 需 material `vertexColors`/`toneMapped` 配合；若颜色偏暗，检查 `material.toneMapped=false` 或换 `meshBasicMaterial`。

@@ -47,7 +47,7 @@
 | TASK_003 | P1 配置 | `config/palette.ts` + `config/constants.ts` + `state/MapConfig.tsx` + `render/coordinates.ts` | 4 | 001 |
 | TASK_004 | P2 几何 | `render/bezier.ts`（贝塞尔采样+切线+退化）+ 单测 | 2 | 001 |
 | TASK_005 | P2 几何 | `render/laneOffset.ts`（配对索引+法线偏移）+ 单测 | 2 | 002 |
-| TASK_006 | P2 几何 | `render/geometry.ts`（统一 Line2 buffer + edgeSamplePaths）+ 单测 | 2 | 002, 003, 004, 005 |
+| TASK_006 | P2 几何 | `render/geometry.ts`（统一 LineSegments2 buffer + edgeSamplePaths）+ 单测 | 2 | 002, 003, 004, 005 |
 | TASK_007 | P3 场景 | `scene/MapView.tsx` + `App.tsx`（正式数据接入、Canvas、相机切换、手动 fit、WebGL2 降级） | 2 | 002, 003 |
 | TASK_008 | P3 场景 | `scene/EdgesLayer.tsx` + `MapView` 统一构建 `edgeGeometry`（单一粗线几何） | 2 | 006, 007 |
 | TASK_009 | P3 场景 | `render/arrows.ts` + `scene/ArrowsLayer.tsx`（InstancedMesh 方向箭头） | 3 | 006, 008 |
@@ -90,13 +90,14 @@
 3. **运行时观感（dev）** —— 渲染层 task：`pnpm dev` 打开浏览器，按 task 的"观感检查项"逐条肉眼确认；TASK_013 对照 SPEC §12 全量验收。
 4. **（可选）无头截图** —— 若需自动化观感回归，可后续引入 puppeteer-core + 系统 Chrome + SwiftShader（参考 world-3d 经验），Phase 1 不作为硬门禁。
 5. **性能记录** —— 真实样例（1806 节点 / 3101 边）为 Phase 1 硬验收数据；10k 合成压测仅记录结果，不阻塞 Phase 1。
+6. **退化用例** —— 真实样例不含零长度边 / 自环 / null 控制点 / 未知 type（实测均为 0），SPEC §12.9 的退化验收依赖**构造小 JSON**，不由真实样例覆盖；loader 的退化分支仍须由构造用例单测覆盖（TASK_002）。
 
 ## 7. 风险控制
 
 | 风险 | 概率 | 影响 | 缓解 |
 | --- | --- | --- | --- |
 | drei 版本与 fiber 9 / three 0.185 / react 19 不兼容 | 中 | 阻塞 | TASK_001 锁 `@react-three/drei@^10`，安装后立即跑 dev/build 验证 |
-| 粗线几何合并后段间连成一条线 | 中 | 视觉错误 | TASK_006 输出明确的多段语义；TASK_008 优先验证 NaN 分隔，若当前 API 不稳定则改用 `LineSegments2/LineSegmentsGeometry` 保持单 draw call |
+| 粗线几何合并后段间连成一条线 | — | 视觉错误 | **已规避**：SPEC §4.6 改用 `LineSegments2`（成对 segment 顶点天然断开多段），不依赖 NaN 分隔；TASK_006 输出 `positions` 为成对顶点，TASK_008 直接喂 `LineSegmentsGeometry.setPositions`，无需 fallback |
 | 正交相机 fit 不居中/缩放异常 | 中 | 取景错 | 已规避 `<Bounds>`（B 点），手动用包围盒算 zoom/距离；TASK_007 给兜底公式 |
 | troika `<Text>` 字体走 CDN 在内网失败 | 中 | 标签乱码/空白 | TASK_012 本地化字体或回退到 drei 默认；标注为风险 |
 | 10k 规模 fps 不达标 | 低 | 性能 | 10k 为性能预算记录项，不作为 Phase 1 硬门禁；真实样例必须流畅 |

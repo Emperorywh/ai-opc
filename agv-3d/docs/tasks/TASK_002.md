@@ -40,7 +40,7 @@ TASK_001（vitest 就绪）。
 3. **loader.test.ts**：`import sample from "../../src/json/getMapInfo.json"` 喂入，断言：
    - `nodes.length === 1806`、`edges.length`（去零长度/自环后）与原始 3101 接近（记录实际值）。
    - `mapName === "中环大地图"`、`mapId === "50e6465395bd40f59ebe1a0adb90a679"`。
-   - `bbox` 为有限数值且覆盖预期范围（如 `minX≈-85, maxX≈…`，记录真实值）。
+   - `bbox` 为有限数值且覆盖预期范围（真实值 `minX≈-165.7, maxX≈2.1, minY≈-25.1, maxY≈50.2`，以首次运行实测为准）。
    - 构造零长度边、自环边、null 控制点贝塞尔、未知 type 各一例，断言对应告警出现且被正确处理。
 
 ## 约束

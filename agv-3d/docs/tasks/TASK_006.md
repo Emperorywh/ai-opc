@@ -23,28 +23,29 @@ TASK_002（loader/类型）、TASK_003（坐标映射）、TASK_004（贝塞尔�
 
 ## 实现要点
 1. 入参：`buildEdgeGeometry(edges: Edge[], opts: { isFlipY: boolean; laneOffset: number; bezierMaxSegments: number; palette }): EdgeGeometry`。
-2. 坐标映射统一调用 `render/coordinates.ts`：地图 `(x,y)` → 场景 `(x, z)`；`y 轴(高度) = yEdge(0)`（SPEC §3）。**先做坐标映射，再做法线偏移**（偏移在场景 xz 平面，法线由场景切线算）。
+2. 坐标映射统一调用 `render/coordinates.ts`：**位置点**经 `mapPointToScene`（地图 `(x,y)` → 场景 `(x,z)`，高度 `y=yEdge(0)`）；**切线向量**经 `mapVectorToScene`（地图 `(tx,ty)` → 场景 `(tx,tz)`，受 `isFlipY` 影响）。**先映射位置与切线，再在场景 xz 平面做法线偏移**（法线由场景切线算）。⚠️ 贝塞尔 `sampleCubicBezier` 返回的 `SamplePoint.tx/ty` 是地图坐标切线，必须先 `mapVectorToScene` 再喂 `applyLaneOffset`，否则 `isFlipY=true` 时偏移方向反转。
 3. 流程（§4.6 构建 1–4）：
    - 先 `buildPairIndex(edges)` 一次。
    - 遍历每条边：
      - 跳过零长度/自环（loader 已剔除，本处再做防御性跳过）。
-     - LINE → 2 端点，切线 = 端点方向归一化。
+     - LINE → 2 端点；切线 = 端点方向归一化。
      - BEZIER → `sampleCubicBezier(P0..P3, bezierMaxSegments)` 得 `SamplePoint[]`（含切线）。
-      - 查 `getPairKind` 得 sign；paired 边 sign=1，孤儿 sign=0；对每个采样点 `applyLaneOffset`（场景 xz）。禁止使用 `isBackEdge` 决定偏移方向。
-      - 把该边采样点追加到 `positions`；默认用 **NaN 顶点**（`[NaN,NaN,NaN]`）表达段分隔。若 TASK_008 验证当前 Line2 API 不稳定，可保持 `edgeSamplePaths` 不变并把 `positions` 编码切换为 `LineSegments2` 需要的成对 segment 顶点。
-      - 每个顶点颜色 = `isBackEdge ? palette.edgeBack : palette.edgeForward`，追加到 `colors`（NaN 顶点颜色随便/重复上一个，Line2 不渲染 NaN）。
-      - 该边偏移后的场景采样点 + 切线 + 元数据存入 `edgeSamplePaths[i]`。
-4. 返回：`EdgeGeometry = { positions: Float32Array | number[]; colors: number[]; edgeSamplePaths: EdgeSamplePath[] }`。
+     - **位置与切线均经 `render/coordinates.ts` 映射到场景坐标**（位置 `mapPointToScene`、切线 `mapVectorToScene`，见要点 2）。
+     - 查 `getPairKind` 得 sign；paired 边 sign=1，孤儿 sign=0；对每个采样点 `applyLaneOffset`（场景 xz）。禁止使用 `isBackEdge` 决定偏移方向。
+     - 把该边**相邻两点拆成成对 segment 顶点**追加到 `positions`（直线 2 顶点 = 1 segment；贝塞尔 N 点 = N−1 segment = 2(N−1) 顶点）。**不使用 NaN 分隔**——这是 `LineSegments2` 的原生多段语义。
+     - 每个顶点颜色 = `isBackEdge ? palette.edgeBack : palette.edgeForward`，追加到 `colors`（与 `positions` 顶点一一对应，供 `LineSegmentsGeometry.setColors`）。
+     - 该边偏移后的场景采样点 + 切线 + 元数据存入 `edgeSamplePaths[i]`。
+4. 返回：`EdgeGeometry = { positions: number[]; colors: number[]; edgeSamplePaths: EdgeSamplePath[] }`。`positions`/`colors` 为**成对 segment 顶点**（每 6 个 float 一段:`x0,y0,z0, x1,y1,z1`），可直接喂 `LineSegmentsGeometry.setPositions/setColors`。
    - `EdgeSamplePath = { edgeId: string; edgeName: string; isBackEdge: boolean; points: { x:number; y:number; z:number; tx:number; tz:number }[]; length: number }`。
    - `points.y` 固定为 `yEdge`，`length` 为偏移后折线弧长，供箭头数量与路径标签中点复用。
 5. **geometry.test.ts**：
    - 构造 2 条直线（一对 u↔v，正/反）+ 1 条孤儿直线 + 1 条贝塞尔：
-      - `positions` 段数正确（4 段，3 个段分隔；若采用 NaN 编码则断言 3 个 NaN 分隔）。
-      - 双向 paired 边即使 `isBackEdge` 均为 `false`，也会因各自行驶切线相反而落在中心线两侧；孤儿不偏移（用具体坐标断言）。
-      - `colors` 按 `isBackEdge` 分色。
-      - `edgeSamplePaths` 长度 = 边数，且包含 `edgeId/edgeName/isBackEdge/length`；贝塞尔边的 sample 数 > 2。
+     - `positions` 顶点数正确：直线段各 2 顶点、贝塞尔 `2*(N-1)` 顶点；且 `positions.length % 6 === 0`（成对 segment 编码，每段 6 float）。
+     - 双向 paired 边即使 `isBackEdge` 均为 `false`，也会因各自行驶切线相反而落在中心线两侧；孤儿不偏移（用具体坐标断言）。
+     - `colors` 按 `isBackEdge` 分色，且与 `positions` 顶点一一对应。
+     - `edgeSamplePaths` 长度 = 边数，且包含 `edgeId/edgeName/isBackEdge/length`；贝塞尔边的 sample 数 > 2。
    - 零长度边被跳过（不出现在 positions）。
-   - `isFlipY=true` 时 z 取反。
+   - `isFlipY=true` 时 z 取反，且 **paired 边仍对称分布于中心线两侧**（验证切线经 `mapVectorToScene` 映射后偏移方向正确，要点 2）。
 
 ## 约束
 - 纯函数、无 React、无 three 依赖（返回裸数值）。颜色以数字/hex 数组给出。
@@ -59,5 +60,5 @@ TASK_002（loader/类型）、TASK_003（坐标映射）、TASK_004（贝塞尔�
 - 合并 buffer 正确（含明确段分隔语义）、双车道偏移方向正确、孤儿不偏移、`edgeSamplePaths` 可供箭头与路径标签复用。
 
 ## 风险/备注
-- NaN 分隔为首选实现；若 EdgesLayer 验证当前 API 不稳定，可改为 `LineSegments2` 所需的 segment-pair 编码，本函数必须保证 `edgeSamplePaths` 语义不变。
-- `colors` 的具体承载形式（THREE.Color vs number[]）在 EdgesLayer 对接时确定；本函数优先返回 `number[]`（每顶点 rgb 或每段一个 hex），测试按所选形式断言。
+- 采用 `LineSegments2` 成对 segment 编码（SPEC §4.6 已定稿），不再考虑 NaN 分隔；`edgeSamplePaths` 语义与编码无关，箭头/标签复用不受影响。
+- `colors` 返回 `number[]`（每顶点 rgb 三个 float，与 `positions` 顶点一一对应），供 `LineSegmentsGeometry.setColors` 直接使用。

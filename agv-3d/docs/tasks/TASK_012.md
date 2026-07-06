@@ -29,7 +29,7 @@ TASK_002（nodes/类型）、TASK_003（开关/常量/palette/坐标映射）、
 3. **视口剔除**：用 `useThree(state => state.camera)` + 每帧（或节流）把候选标签世界坐标投影到屏幕，保留在视锥 + 屏幕内的。
 4. **缩放阈值**：相机距离/zoom 过远（屏幕密度过低）时整体不显示（如正交 `zoom < threshold` 或透视 `distance > threshold`）。
 5. **数量上限**：`labelMaxVisible`（默认 200）为节点 + 路径标签的全局总上限。候选按优先级截断：非普通节点优先，其次距视口中心近的节点，再其次距视口中心近的路径标签；超出不渲染。
-6. 渲染：对保留的标签用 `<Text fontSize=… color={palette.labelText} outlineColor outlineWidth position={[x, yLabel, z]}>`；`yLabel` 高于三角（如 `0.08`），文字平铺在 xz 平面并保持俯视可读（必要时 `rotation-x=-Math.PI/2`）。
+6. 渲染：对保留的标签用 `<Text fontSize=… color={palette.labelText} outlineColor outlineWidth position={[x, yLabel, z]}>`；`yLabel` 引用 `constants.yLabel`（=0.08，高于三角 `yWedge=0.05`，SPEC §3），文字平铺在 xz 平面并保持俯视可读（必要时 `rotation-x=-Math.PI/2`）。
 7. 节点名空（§9）不显示；边名同理。
 8. **字体**：drei `<Text>` 默认从 CDN 拉 Roboto；若内网不可用，需本地化字体文件并通过 `font` prop 指定。本 task 先用默认，若加载失败在控制台告警并在风险项记录。
 

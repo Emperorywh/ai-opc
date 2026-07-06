@@ -53,6 +53,7 @@ loader 解析步骤：
 2. 地图标题 = `data.mapName`；`mapId` = `data.mapId`
 3. 校验 `data.mapState === "ENABLED"`，否则告警但仍渲染
 4. 外层 `code/message/timestamp` 为传输包装，loader 不依赖
+5. `mapJson` 中的 `zones`/`nodeEdgeGroups`、`currentMapInfoVersion` 下的 `mapImage`/`originalMapData`/嵌套 `currentMapInfoVersion` 等字段 Phase 1 一律忽略，loader 不校验未知字段
 
 样例文件现位于 `src/json/getMapInfo.json`；接入前端时复制到 `public/maps/sample.json` 供 fetch，或由 loader 直接 import 该 JSON。
 
@@ -95,7 +96,7 @@ loader 解析步骤：
 | **相机投影** | 正交（默认，纯俯视）↔ 透视（斜视）可一键切换 |
 | **初始取景** | 加载数据后自动计算地图包围盒 `Box3` 并 fit 到视图 |
 | **地面/网格** | **不画**。背景为纯深色 |
-| **z-fighting 处理** | 无地面层。贴片图元按底面 y 单调分层避免共面闪烁：路径 `y=0`、方向箭头 `y=0.02`、朝向三角 `y=0.05`。节点为不透明实心圆柱（底面 `y=0`、高 `nodeHeight=0.04`、顶面 `y=0.04`），自然遮挡穿过的路径；朝向三角 `y=0.05` 严格高于节点顶面 `0.04`，俯视不被圆盘遮挡 |
+| **z-fighting 处理** | 无地面层。贴片图元按底面 y 单调分层避免共面闪烁：路径 `y=0`、方向箭头 `y=0.02`、朝向三角 `y=0.05`、标签文字 `y=0.08`。节点为不透明实心圆柱（底面 `y=0`、高 `nodeHeight=0.04`、顶面 `y=0.04`），自然遮挡穿过的路径；朝向三角 `y=0.05` 严格高于节点顶面 `0.04`，俯视不被圆盘遮挡；标签 `y=0.08` 最高，俯视可读 |
 | **背景色** | 深色工业风，如 `#0a0e1a` |
 
 **相机实现**：drei `<OrthographicCamera>` / `<PerspectiveCamera>`（`makeDefault`）按模式切换 + `<OrbitControls>`（平移/缩放/旋转）+ 手动包围盒 fit。正交模式下 fit 通过调整 `zoom`，透视模式下通过调整相机距离。Phase 1 不使用 `<Bounds>`，避免正交相机 fit 行为依赖组件内部实现。
@@ -105,7 +106,7 @@ loader 解析步骤：
 ## 4. 路径（Edge）渲染
 
 ### 4.1 线宽技术
-采用 **drei `<Line>`**（底层 `Line2` + `LineMaterial`，mesh 粗线、抗锯齿、可设像素宽度）。理由：原生 `glLineWidth` 在 WebGL2/Windows 上几乎锁死 1px，无法满足粗线需求。
+采用 three 的 **`LineSegments2` + `LineSegmentsGeometry` + `LineMaterial`**（mesh 粗线、抗锯齿、屏幕空间像素宽度）。理由：(1) 原生 `glLineWidth` 在 WebGL2/Windows 上几乎锁死 1px，无法满足粗线需求；(2) `LineSegments2` 按**成对 segment 顶点**组织，天然表达「单 draw call 内多条断开折线」，规避 `Line2` 连续折线多段合并时的段间连线问题。属 `three/examples/jsm`，随 `three` 包提供，无需额外依赖。
 
 ### 4.2 几何
 - **LINE**：直线段 `(sx,sy)→(ex,ey)`
@@ -144,17 +145,18 @@ loader 解析步骤：
 ### 4.6 性能架构（面向 1k–10k 边）
 **禁止**每条边一个 `<Line>` 实例（= 每条一次 draw call，10k 不可接受）。
 
-**决策：所有边（直线 + 贝塞尔）统一 CPU tessellate 成折线，合并进单个 `Line2`**（`LineGeometry` 多段折线 + `vertexColors` 按 `isBackEdge` 上色，双车道偏移在采样点算入），全部图边 **1 次 draw call**。
+**决策：所有边（直线 + 贝塞尔）统一 CPU tessellate 成折线，合并进单个 `LineSegments2`**（`LineSegmentsGeometry` 成对 segment 顶点 + `vertexColors` 按 `isBackEdge` 上色，双车道偏移在采样点算入），全部图边 **1 次 draw call**。
 
 理由：
 - 真实数据贝塞尔占比仅 ~3.5%（108/3101），为 3.5% 的边单独维护直线 ribbon `InstancedMesh` 管线不划算；
-- 统一 `Line2` 与 §4.1 线宽技术自洽——全部屏幕空间像素宽度 `lineWidthPx`，缩放下视觉一致（避免「直线世界宽度 / 贝塞尔像素宽度」两套粗细在缩放时表现不一）；
-- 直线 tessellate 退化为 1 段（2 端点），开销可忽略。
+- 统一 `LineSegments2` 与 §4.1 线宽技术自洽——全部屏幕空间像素宽度 `lineWidthPx`，缩放下视觉一致（避免「直线世界宽度 / 贝塞尔像素宽度」两套粗细在缩放时表现不一）；
+- `LineSegments2` 按成对 segment 顶点组织，**天然表达断开的多段折线**（直线 2 顶点 = 1 segment；贝塞尔 N 点 = N−1 segment），不需要 NaN 分隔等 hack；
+- 直线退化为 1 个 segment（2 端点），开销可忽略。
 
 构建流程：
 1. 遍历所有边：LINE 取首尾 2 点；BEZIER 按弧长自适应 tessellate（封顶 `bezierMaxSegments`）；
-2. 每个采样点叠加双车道法线偏移（§4.4）；
-3. 全部折线点拼接到单一 `LineGeometry`，每段顶点附带颜色（按 `isBackEdge`）；
+2. **位置点经 `mapPointToScene`、切线经 `mapVectorToScene` 完成坐标映射后**，每个采样点叠加双车道法线偏移（§4.4）；
+3. 把每条边相邻两点拆成**成对 segment 顶点**拼接到单一 `LineSegmentsGeometry.setPositions`（直线 2 顶点 = 1 segment；贝塞尔 N 点 = N−1 segment = 2(N−1) 顶点），每顶点经 `setColors` 附带颜色（按 `isBackEdge`）。**不使用 NaN 分隔**；
 4. 同步产出 `edgeSamplePaths` 元数据（`edgeId` / `edgeName` / `isBackEdge` / 偏移后的采样点 / 切线 / 弧长），供箭头与路径标签复用，避免重复 tessellate；
 5. 数据变更时整建 buffer（Phase 1 静态，基本不发生）。
 
@@ -177,7 +179,7 @@ loader 解析步骤：
 | `node` | `#ced4da`（浅灰） | 普通节点 |
 
 ### 5.3 朝向指示（angle）
-`angle` 非 `null` 的节点（真实数据约 460/1806），在圆点上叠加一个朝向小三角（wedge）。用单独的小 `InstancedMesh`，仅对有 `angle` 的节点设置实例；`angle=null` 的节点不渲染三角。**三角底面 `y=0.05`，严格高于节点圆柱顶面 `0.04`（见 §3 分层），确保俯视不被圆盘遮挡。**
+`angle` 非 `null` 的节点（真实数据约 460/1806），在圆点上叠加一个朝向小三角（wedge）。用单独的小 `InstancedMesh`，仅对有 `angle` 的节点设置实例；`angle=null` 的节点不渲染三角。**三角底面 `y=0.05`，严格高于节点圆柱顶面 `0.04`（见 §3 分层），确保俯视不被圆盘遮挡。** 形状统一为**贴地扁三角片**（`ShapeGeometry` 画等腰三角形，腰长 ≈ `nodeRadius*1.2`，底边在 `yWedge=0.05` 平面、尖端指向 `angle` 方向、绕 Y 轴旋转），不用三棱锥。
 
 ### 5.4 标签
 - 节点 `name` 与路径 `name` **各自独立的显隐开关**（`showNodeLabels` / `showEdgeLabels`），默认**关闭**，UI 可切换
@@ -212,7 +214,7 @@ node      #ced4da
 | --- | --- | --- |
 | `isFlipY` | `false` | Y 翻转全局开关 |
 | `unitScale` | `1.0` | 1 单位 = 1 米 |
-| `lineWidthPx` | `3` | Line2 像素宽度 |
+| `lineWidthPx` | `3` | LineSegments2 像素宽度 |
 | `laneOffset` | `0.15` | 双车道偏移量（米） |
 | `nodeRadius` | `0.18` | 节点圆点半径（米） |
 | `nodeHeight` | `0.04` | 圆柱厚度 |
@@ -220,6 +222,7 @@ node      #ced4da
 | `arrowSize` | `0.12` | 方向箭头尺寸 |
 | `longEdgeThreshold` | `3.0` | 长边阈值（米），超过则多箭头 |
 | `labelMaxVisible` | `200` | 标签同帧渲染上限 |
+| `yLabel` | `0.08` | 标签文字层高度（严格高于朝向三角 `yWedge=0.05`） |
 
 ---
 
@@ -241,10 +244,10 @@ src/
     coordinates.ts    # 地图坐标与场景坐标的唯一映射入口（含 isFlipY）
     bezier.ts         # 三次贝塞尔采样
     laneOffset.ts     # 双车道法线偏移 + 配对判定（§4.4）
-    geometry.ts       # 构建统一 Line2 折线 buffer
+    geometry.ts       # 构建统一 LineSegments2 折线 buffer
   scene/
     MapView.tsx       # <Canvas> + 相机 + OrbitControls + 手动 fit
-    EdgesLayer.tsx    # 单一 Line2（直线 + 贝塞尔合并）
+    EdgesLayer.tsx    # 单一 LineSegments2（直线 + 贝塞尔合并）
     ArrowsLayer.tsx   # 方向箭头 InstancedMesh
     NodesLayer.tsx    # 节点 InstancedMesh + 朝向三角
     LabelsLayer.tsx   # troika 文字（带剔除/上限）
@@ -275,7 +278,7 @@ src/
 
 ## 10. 交互与控制（Phase 1 全集）
 
-- **相机**：OrbitControls 拖拽平移、滚轮缩放、右键旋转；手动包围盒 fit；正交/透视切换按钮
+- **相机**：OrbitControls 默认键位（左键旋转、右键平移、滚轮缩放）；手动包围盒 fit；正交/透视切换按钮
 - **UI 开关**（极简控制条）：
   - 相机模式：正交 / 透视
   - 节点标签：开 / 关
@@ -289,7 +292,7 @@ src/
 
 - 目标：现代桌面浏览器、WebGL2、60fps
 - 规模上限：单图 1k–10k 节点 + 1k–10k 边
-- 策略：全部边统一合并为单个 `Line2`，节点/箭头使用 `InstancedMesh`，标签视口剔除 + 上限，draw call 控制在个位数到低两位数
+- 策略：全部边统一合并为单个 `LineSegments2`，节点/箭头使用 `InstancedMesh`，标签视口剔除 + 上限，draw call 控制在个位数到低两位数
 - 变更数据时（Phase 1 静态，基本不发生）按需重建 buffer，避免每帧重算
 
 ---

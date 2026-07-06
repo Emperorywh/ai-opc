@@ -35,8 +35,8 @@ TASK_001（React 环境）。不依赖 TASK_002（纯配置）。
    nodeWarehouse #b197fc  nodeNode #ced4da
    labelText #e9ecef   labelStroke rgba(0,0,0,0.6)
    ```
-   颜色统一存 `string`（drei/Line2 需要时各自解析）。
-2. **constants.ts**（`as const`）—— SPEC §7 全部常量：`isFlipY=false`、`unitScale=1.0`、`lineWidthPx=3`、`laneOffset=0.15`、`nodeRadius=0.18`、`nodeHeight=0.04`、`bezierMaxSegments=64`、`arrowSize=0.12`、`longEdgeThreshold=3.0`、`labelMaxVisible=200`。并导出 y 分层常量：`yEdge=0`、`yArrow=0.02`、`yNodeTop=0.04`、`yWedge=0.05`（SPEC §3）。
+   颜色统一存 `string`（drei/`LineSegments2` 需要时各自解析）。
+2. **constants.ts**（`as const`）—— SPEC §7 全部常量：`isFlipY=false`、`unitScale=1.0`、`lineWidthPx=3`、`laneOffset=0.15`、`nodeRadius=0.18`、`nodeHeight=0.04`、`bezierMaxSegments=64`、`arrowSize=0.12`、`longEdgeThreshold=3.0`、`labelMaxVisible=200`、`yLabel=0.08`。并导出 y 分层常量：`yEdge=0`、`yArrow=0.02`、`yNodeTop=0.04`、`yWedge=0.05`、`yLabel=0.08`（SPEC §3，单调递增规避 z-fighting）。
 3. **coordinates.ts**（纯函数，无 React / three 依赖）：
    - `mapPointToScene(point, opts)`：地图 `{x, y}` → 场景 `{x, z}`，其中 `z = opts.isFlipY ? -y : y`，并应用 `unitScale`。
    - `mapVectorToScene(vector, opts)`：地图切线/方向 `{x, y}` → 场景方向 `{x, z}`，同样应用 `isFlipY`，并返回归一化结果。
@@ -64,5 +64,5 @@ TASK_001（React 环境）。不依赖 TASK_002（纯配置）。
 - Provider 可挂载、钩子可读默认值。
 
 ## 风险/备注
-- y 分层常量务必满足 `yEdge(0) < yArrow(0.02) < yNodeTop(0.04) < yWedge(0.05)`，z-fighting 规避（SPEC §3）。
+- y 分层常量务必满足 `yEdge(0) < yArrow(0.02) < yNodeTop(0.04) < yWedge(0.05) < yLabel(0.08)`，z-fighting 规避（SPEC §3）。
 - 颜色一律字符串；three 的 `Color` 解析在各使用点做。

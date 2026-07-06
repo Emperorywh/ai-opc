@@ -31,14 +31,14 @@ TASK_002（loader/类型）、TASK_003（palette/常量 + 坐标映射 + MapConf
 3. `<Canvas>`：
    - `gl={{ antialias: true }}`；背景用 `<color attach="background" args={[palette.background]} />`。
    - 内部根据 `cameraMode` 渲染 `<OrthographicCamera makeDefault …/>` 或 `<PerspectiveCamera makeDefault …/>`（drei）。
-   - `<OrbitControls makeDefault enablePan enableZoom enableRotate />`（左键旋转/右键平移按需调，SPEC §10：拖拽平移、滚轮缩放、右键旋转）。
+   - `<OrbitControls makeDefault enablePan enableZoom enableRotate />`，采用**默认键位**（左键旋转、右键平移、滚轮缩放，SPEC §10）。
 4. **手动 fit**（核心）：
    - props 接收 `mapData: MapData | null`，从 `mapData.bbox` 取包围盒。
    - 使用 `mapBoxToSceneBox(bbox, { isFlipY, unitScale })` 得到场景 x/z 范围，禁止手写翻转公式。
-   - 计算 center `(cx, cz)`、尺寸 `(w, h)`。
-   - 正交：`camera.zoom = min(viewW/w, viewH/h) * 0.9`（留边），`position=[cx, 100, cz]`、`lookAt(cx,0,cz)`（纯俯视）。
-   - 透视：根据 FOV 与 w/h 反推相机高度距离 `distance = max(w,h)/2 / tan(fov/2) * 1.1`，`position=[cx, distance, cz]`（略带俯角或纯俯视）。
-   - 用 `useEffect` 在 bbox/`isFlipY`/cameraMode/viewport size 变化时更新相机并 `camera.updateProjectionMatrix()`。
+   - 计算 center `(cx, cz)`、世界尺寸 `w = maxX-minX`、`h = maxZ-minZ`。
+   - **正交**：frustum 固定为 drei 默认（`left/right/top/bottom = ±size/2`，随画布 `size` 更新），**仅调 `zoom`**：`zoom = min(size.width / w, size.height / h) * 0.9`（留 10% 边）；`position=[cx, 100, cz]`、`lookAt(cx,0,cz)`（纯俯视）。⚠️ 不要同时改 frustum 与 zoom，否则可视世界范围不可预测。
+   - **透视**：根据 FOV 与 w/h 反推相机高度距离 `distance = max(w,h)/2 / tan(fov/2) * 1.1`；`position=[cx, distance, cz]`、`lookAt(cx,0,cz)`（略带俯角或纯俯视）。
+   - 用 `useEffect` 在 bbox/`isFlipY`/cameraMode/viewport `size` 变化时更新相机并 `camera.updateProjectionMatrix()`。
 5. **占位**：本 task 不挂任何 layer（Edges/Nodes/Arrows/Labels 在后续 task 挂载）。可放一个调试用 `<axesHelper/>` 或留空，但提交前默认不显示调试辅助。
 6. App.tsx：包 Provider + MapView；移除 TASK_001 里临时硬编码背景（改由 palette 注入）。
 
@@ -51,7 +51,7 @@ TASK_002（loader/类型）、TASK_003（palette/常量 + 坐标映射 + MapConf
 ## 验证步骤
 1. `pnpm dev`：全屏深色 Canvas，无报错。
 2. 加载真实 `public/maps/sample.json` 后，MapView 使用 `mapData.bbox` 自动居中、铺满约 90%；切到透视模式仍居中。
-3. OrbitControls：左键拖拽旋转/平移、滚轮缩放、右键平移均正常（按 §10 约定配置）。
+3. OrbitControls 默认键位正常：左键旋转、右键平移、滚轮缩放（§10）。
 4. 模拟 WebGL2 不可用（临时令检测函数返回 false）→ 显示降级文案。
 5. 模拟 fetch / JSON 解析失败 → 显示错误提示；空地图 → 显示空地图提示但不崩溃。
 6. `pnpm build`、`pnpm lint` 通过。

@@ -30,7 +30,7 @@ files:
 
 ## 实现要点
 1. `pnpm add @react-three/drei`（确保解析到 v10+，与 `@react-three/fiber@9` / `three@0.185` / `react@19` 兼容）；`pnpm add -D vitest`。
-2. `vite.config.ts`：引入 `vitest/config`，`defineConfig` 改为接受 `test` 字段（`environment: 'node'` 即可，纯逻辑测试不需 jsdom）。
+2. `vite.config.ts`：引入 `vitest/config`，`defineConfig` 改为接受 `test` 字段（`environment: 'node'` 即可，纯逻辑测试不需 jsdom）。备注：`node` 环境仅覆盖纯逻辑模块（loader / bezier / laneOffset / geometry / arrows）；后续若要单测 React 层组件，再单独引入 `jsdom`，Phase 1 不需要。
 3. `package.json` `scripts` 加 `"test": "vitest run --passWithNoTests"`、`"test:watch": "vitest"`，确保 TASK_001 尚无测试文件时测试门禁仍可稳定通过。
 4. 复制样例：`src/json/getMapInfo.json` → `public/maps/sample.json`（内容完全一致，后续 fetch 用）。
 5. `src/App.tsx` 重写为最小骨架：
