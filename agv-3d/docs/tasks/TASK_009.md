@@ -13,10 +13,10 @@ files:
 # TASK_009 · 方向箭头层 ArrowsLayer
 
 ## 目标
-SPEC §4.5：沿每条边标注 `snode→enode` 走向的小箭头。短边中点 1 个；长边（弧长 > `longEdgeThreshold`）按等弧长间隔多个。用**单个 InstancedMesh(cone)** 承载所有箭头，`instanceColor` 随 `isBackEdge`，朝向 = 该参数点切线。复用 TASK_006 的 `edgeSamples` 避免重复 tessellate。
+SPEC §4.5：沿每条边标注 `snode→enode` 走向的小箭头。短边中点 1 个；长边（弧长 > `longEdgeThreshold`）按等弧长间隔多个。用**单个 InstancedMesh(cone)** 承载所有箭头，`instanceColor` 随 `isBackEdge`，朝向 = 该参数点切线。复用 TASK_006/TASK_008 的 `edgeSamplePaths` 避免重复 tessellate。
 
 ## 前置依赖
-TASK_006（`edgeSamples` 含切线）、TASK_008（MapView 已挂 EdgesLayer，本层并列挂载）。
+TASK_006（`edgeSamplePaths` 含切线与边元数据）、TASK_008（MapView 已统一构建 `edgeGeometry`，本层与 EdgesLayer 并列挂载）。
 
 ## 涉及文件
 - `src/render/arrows.ts`（新建，纯函数）
@@ -24,15 +24,16 @@ TASK_006（`edgeSamples` 含切线）、TASK_008（MapView 已挂 EdgesLayer，�
 - `src/scene/ArrowsLayer.tsx`（新建）
 
 ## 实现要点
-1. **arrows.ts**：`buildArrowInstances(edgeSamples, opts: { longEdgeThreshold, arrowSize }): ArrowInstance[]`：
-   - 对每条边的 `edgeSamples`（已偏移到双车道、场景 xz 坐标 + 切线 tx,tz）：
-     - 估算弧长（采样点折线段长度之和）。
-     - `length <= longEdgeThreshold` → 取中点采样点，1 个箭头。
-     - `length > longEdgeThreshold` → 按等弧长间隔取多个参数点（间隔可设为 `longEdgeThreshold`，至少 1 个），每点 1 个箭头。
+1. **arrows.ts**：`buildArrowInstances(edgeSamplePaths, opts: { longEdgeThreshold, arrowSize }): ArrowInstance[]`：
+   - 对每条 `EdgeSamplePath`（已偏移到双车道、场景 xz 坐标 + 切线 tx,tz + `isBackEdge`）：
+      - 优先使用 `path.length`；若缺失则由采样点折线段长度兜底计算。
+      - `length <= longEdgeThreshold` → 取中点采样点，1 个箭头。
+      - `length > longEdgeThreshold` → 按等弧长间隔取多个参数点（间隔可设为 `longEdgeThreshold`，至少 1 个），每点 1 个箭头。
    - 每个 `ArrowInstance = { x, z, tx, tz, isBackEdge }`（位置 + 切线 + 配色标记）。
    - 高度统一 `yArrow(0.02)`（SPEC §3，高于路径、低于节点顶面）。
 2. **ArrowsLayer.tsx**：
-   - props 接 `edgeSamples`（与 EdgesLayer 共用同一份 `useMemo` 结果，避免重算）或接 `edges`+`isFlipY` 自行调 `buildEdgeGeometry` 取 `edgeSamples`（推荐前者，由父级 MapView 传同一份）。
+   - props 接 `edgeSamplePaths`（由父级 MapView 从同一份 `edgeGeometry` 传入）。
+   - 禁止接 `edges` 后自行调用 `buildEdgeGeometry`。
    - `<instancedMesh args={[undefined, undefined, count]}>` + cone geometry（`<coneGeometry args={[arrowSize, arrowSize*2, 8]}/>`）；cone 默认朝 +Y，需旋转使其朝切线方向（绕 Y 轴：`rotationY = atan2(tx, tz)` 或用 `quaternion.setFromUnitVectors(Y, tangentXZ)`）。
    - 用 `useLayoutEffect` 遍历实例设 `matrix`（位置 + 朝向）与 `instanceColor`（`isBackEdge ? arrowBack : arrowForward`，§6）。
    - 实例数 = `Σ 每条边箭头数`，必须与 `buildArrowInstances` 输出一致。
@@ -45,7 +46,7 @@ TASK_006（`edgeSamples` 含切线）、TASK_008（MapView 已挂 EdgesLayer，�
 
 ## 约束
 - 单 InstancedMesh；实例数预先确定（§4.6）。
-- 切线来自 `edgeSamples`，不重新 tessellate。
+- 切线来自 `edgeSamplePaths`，不重新 tessellate。
 - 遵守 PLAN §3。
 
 ## 验证步骤

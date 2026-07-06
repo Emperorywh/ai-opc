@@ -65,7 +65,7 @@ loader 解析步骤：
 | `ex, ey` | number | 终点 |
 | `cx, cy` | number \| null | 贝塞尔第一控制点 P1（仅 BEZIER） |
 | `dx, dy` | number \| null | 贝塞尔第二控制点 P2（仅 BEZIER） |
-| `isBackEdge` | boolean | **反向边**，渲染分色 + 双车道偏移方向 |
+| `isBackEdge` | boolean | **反向边**，仅用于渲染分色；不参与双车道左右偏移计算 |
 | `snodeId` / `enodeId` | string | 起/止节点引用（Phase 1 不用于定位，仅留作语义） |
 | `sfacing` / `efacing` | number | 进/出节点朝向角（Phase 1 不可视化） |
 | `cost` `loadType` `*Security` `max*Speed` `*Acceleration` … | 各类型 | 业务属性，Phase 1 **不渲染** |
@@ -98,7 +98,7 @@ loader 解析步骤：
 | **z-fighting 处理** | 无地面层。贴片图元按底面 y 单调分层避免共面闪烁：路径 `y=0`、方向箭头 `y=0.02`、朝向三角 `y=0.05`。节点为不透明实心圆柱（底面 `y=0`、高 `nodeHeight=0.04`、顶面 `y=0.04`），自然遮挡穿过的路径；朝向三角 `y=0.05` 严格高于节点顶面 `0.04`，俯视不被圆盘遮挡 |
 | **背景色** | 深色工业风，如 `#0a0e1a` |
 
-**相机实现**：drei `<OrthographicCamera>` / `<PerspectiveCamera>`（`makeDefault`）按模式切换 + `<OrbitControls>`（平移/缩放/旋转）+ `<Bounds>` 做 fit。正交模式下 fit 通过调整 `zoom`，透视模式下通过调整相机距离。
+**相机实现**：drei `<OrthographicCamera>` / `<PerspectiveCamera>`（`makeDefault`）按模式切换 + `<OrbitControls>`（平移/缩放/旋转）+ 手动包围盒 fit。正交模式下 fit 通过调整 `zoom`，透视模式下通过调整相机距离。Phase 1 不使用 `<Bounds>`，避免正交相机 fit 行为依赖组件内部实现。
 
 ---
 
@@ -121,12 +121,12 @@ loader 解析步骤：
 
 **配对判定（必须用节点 id，不用坐标）**：
 - 边 A `(snodeId=u, enodeId=v)` 与边 B `(snodeId=v, enodeId=u)` 互为配对（A 的终点是 B 的起点、A 的起点是 B 的终点）。
-- 配对**仅依赖 `snodeId/enodeId` 的语义匹配**；几何定位仍信任边自带 `(sx,sy)/(ex,ey)`（§2.2 关键决策不变）。两者职责分离，互不冲突。
-- 预建索引：`Map<key, Edge[]>`，`key = min(u,v) + "-" + max(u,v)`（归一化无向键），同 key 下 0/1/2 条边；2 条即一对，1 条为孤儿，0 条不可能（边自身一定在表里）。
+- 配对**仅依赖 `snodeId/enodeId` 的精确反向语义匹配**；几何定位仍信任边自带 `(sx,sy)/(ex,ey)`（§2.2 关键决策不变）。两者职责分离，互不冲突。
+- 预建索引：`Map<key, Edge[]>`，`key = min(u,v) + "-" + max(u,v)`（归一化无向键）。只有同 key 下**恰好 2 条且方向互逆**时才视为 paired；1 条为孤儿；同向重复或超过 2 条为数据歧义，Phase 1 不做配对偏移。
 
 **偏移规则**：
-- 每条边平面内切线 `T`，统一约定法线 `N = perpendicular(T)`（如顺时针 90°，全图一致）。
-- 成对边中，正向（`isBackEdge=false`）向 `+N` 偏移 `laneOffset/2`，反向（`isBackEdge=true`）向 `-N` 偏移 `laneOffset/2`（`laneOffset` 见 §7）。
+- `isBackEdge` **只用于颜色语义，不参与左右偏移计算**。真实样例中存在双向配对但两条边 `isBackEdge` 均为 `false` 的情况，因此不能把它当作配对左右依据。
+- 每条边按自身行驶方向计算平面内切线 `T`，统一约定法线 `N = perpendicular(T)`（顺时针 90°，即行驶方向右侧）。paired 边一律向自身 `+N` 偏移 `laneOffset/2`。由于反向边的切线天然相反，两条互逆边会自动落在中心线两侧。
 - 直线边：两端点常量偏移。
 - 贝塞尔边：逐 tessellate 采样点沿局部法线偏移（曲线上法线方向连续变化）。
 
@@ -155,9 +155,10 @@ loader 解析步骤：
 1. 遍历所有边：LINE 取首尾 2 点；BEZIER 按弧长自适应 tessellate（封顶 `bezierMaxSegments`）；
 2. 每个采样点叠加双车道法线偏移（§4.4）；
 3. 全部折线点拼接到单一 `LineGeometry`，每段顶点附带颜色（按 `isBackEdge`）；
-4. 数据变更时整建 buffer（Phase 1 静态，基本不发生）。
+4. 同步产出 `edgeSamplePaths` 元数据（`edgeId` / `edgeName` / `isBackEdge` / 偏移后的采样点 / 切线 / 弧长），供箭头与路径标签复用，避免重复 tessellate；
+5. 数据变更时整建 buffer（Phase 1 静态，基本不发生）。
 
-**方向箭头**：单独 1 个 `InstancedMesh`（cone）。实例总数 = Σ(每条边箭头数)，需在 tessellate 阶段**预先统计**（每条边按 §4.5 规则算出箭头数：短边 1 个、长边按等弧长间隔多个），统计完成后再分配实例池，`instanceColor` 按 `isBackEdge`。
+**方向箭头**：单独 1 个 `InstancedMesh`（cone）。实例总数 = Σ(每条边箭头数)，基于 `edgeSamplePaths` 预先统计（每条边按 §4.5 规则算出箭头数：短边 1 个、长边按等弧长间隔多个），统计完成后再分配实例池，`instanceColor` 按 `isBackEdge`。
 
 ---
 
@@ -185,7 +186,7 @@ loader 解析步骤：
   - 视口剔除：只生成相机视锥内可见节点的文字
   - 缩放阈值：缩太远（屏幕密度过低）时不显示
   - 数量上限：同一帧最多渲染 N 个（如 200），超出按优先级丢弃
-  - 简单碰撞剔除：屏幕空间重叠的标签互斥显示
+- 简单碰撞剔除（屏幕空间重叠标签互斥）为后续增强，Phase 1 不作为硬验收
 - 标签状态用 React Context / `useState` 管理（不引入 zustand）
 
 ---
@@ -237,11 +238,12 @@ src/
   state/
     MapConfig.tsx     # React Context: isFlipY/cameraMode/showNodeLabels/showEdgeLabels/palette
   render/             # 纯几何工具（无 React）
+    coordinates.ts    # 地图坐标与场景坐标的唯一映射入口（含 isFlipY）
     bezier.ts         # 三次贝塞尔采样
     laneOffset.ts     # 双车道法线偏移 + 配对判定（§4.4）
     geometry.ts       # 构建统一 Line2 折线 buffer
   scene/
-    MapView.tsx       # <Canvas> + 相机 + OrbitControls + Bounds
+    MapView.tsx       # <Canvas> + 相机 + OrbitControls + 手动 fit
     EdgesLayer.tsx    # 单一 Line2（直线 + 贝塞尔合并）
     ArrowsLayer.tsx   # 方向箭头 InstancedMesh
     NodesLayer.tsx    # 节点 InstancedMesh + 朝向三角
@@ -273,7 +275,7 @@ src/
 
 ## 10. 交互与控制（Phase 1 全集）
 
-- **相机**：OrbitControls 拖拽平移、滚轮缩放、右键旋转；`Bounds` 自动 fit；正交/透视切换按钮
+- **相机**：OrbitControls 拖拽平移、滚轮缩放、右键旋转；手动包围盒 fit；正交/透视切换按钮
 - **UI 开关**（极简控制条）：
   - 相机模式：正交 / 透视
   - 节点标签：开 / 关
@@ -287,7 +289,7 @@ src/
 
 - 目标：现代桌面浏览器、WebGL2、60fps
 - 规模上限：单图 1k–10k 节点 + 1k–10k 边
-- 策略：节点/直线边/箭头 `InstancedMesh`，贝塞尔合并 `Line2`，标签视口剔除 + 上限，draw call 控制在个位数到低两位数
+- 策略：全部边统一合并为单个 `Line2`，节点/箭头使用 `InstancedMesh`，标签视口剔除 + 上限，draw call 控制在个位数到低两位数
 - 变更数据时（Phase 1 静态，基本不发生）按需重建 buffer，避免每帧重算
 
 ---
@@ -301,7 +303,7 @@ src/
 5. 5 类节点按配色区分，有 `angle` 的节点显示朝向三角
 6. 正交/透视相机可切换，OrbitControls 平移/缩放/旋转正常
 7. 节点/路径标签开关有效，开启后无性能崩溃（剔除生效）
-8. 10k 规模样例下保持接近 60fps
+8. 真实样例（约 1.8k 节点 / 3.1k 边）下保持接近 60fps；10k 合成压测作为性能预算记录，不作为 Phase 1 硬验收
 9. 退化数据（零长度边、null 控制点、空 angle 等）不报错、不崩溃
 
 ---

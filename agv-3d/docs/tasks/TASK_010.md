@@ -6,6 +6,7 @@ phase: 3
 depends_on: [TASK_002, TASK_003, TASK_007]
 files:
   - src/scene/NodesLayer.tsx
+  - src/scene/MapView.tsx
 ---
 
 # TASK_010 · 节点渲染层 NodesLayer
@@ -21,8 +22,8 @@ TASK_002（`Node`/类型）、TASK_003（palette/常量）、TASK_007（MapView�
 - `src/scene/MapView.tsx`（改：挂 `<NodesLayer nodes={…} />`）
 
 ## 实现要点
-1. props：`{ nodes: Node[]; isFlipY: boolean }`（从 Context 取 `isFlipY`）。
-2. 坐标映射：`sceneX = node.x`、`sceneZ = isFlipY ? -node.y : node.y`；圆柱底面 `y=0`、高 `nodeHeight=0.04`（§5/§3）。
+1. props：`{ nodes: Node[] }`；从 Context 取 `isFlipY`，但坐标转换必须调用 `mapPointToScene`。
+2. 坐标映射：`mapPointToScene({ x: node.x, y: node.y }, { isFlipY, unitScale })`；圆柱底面 `y=0`、高 `nodeHeight=0.04`（§5/§3）。
 3. **节点 InstancedMesh**：
    - `<instancedMesh args={[undefined, undefined, nodes.length]}>` + `<cylinderGeometry args={[nodeRadius, nodeRadius, nodeHeight, 16]}/>`（cylinder 默认轴 +Y，中心在原点 → 实例 matrix 平移 `y = nodeHeight/2` 使底面贴 y=0）。
    - `useLayoutEffect` 设每个实例 `matrix`（位置）+ `instanceColor`（`type → palette.nodeXxx`，未知 type 归 `nodeNode`，§5.2）。
@@ -35,6 +36,7 @@ TASK_002（`Node`/类型）、TASK_003（palette/常量）、TASK_007（MapView�
 ## 约束
 - 节点 1 个 InstancedMesh、三角 1 个 InstancedMesh；禁止 per-node mesh。
 - y 分层严格遵守 `0 < 0.02 < 0.04 < 0.05`（与 TASK_003 常量一致）。
+- 禁止在组件内手写 `isFlipY ? -node.y : node.y`；所有点位映射走 `render/coordinates.ts`。
 - 遵守 PLAN §3。
 
 ## 验证步骤

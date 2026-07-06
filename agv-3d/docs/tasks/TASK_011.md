@@ -3,7 +3,7 @@ id: TASK_011
 title: 极简控制条 Controls
 status: draft
 phase: 4
-depends_on: [TASK_003, TASK_007]
+depends_on: [TASK_003, TASK_007, TASK_008, TASK_010]
 files:
   - src/ui/Controls.tsx
   - src/App.tsx
@@ -15,7 +15,7 @@ files:
 SPEC §10 的 UI 全集：相机模式（正交/透视）、节点标签开关、路径标签开关、（可选）Y 翻转开关。读写 TASK_003 的 `MapConfig` Context，浮于 Canvas 之上。
 
 ## 前置依赖
-TASK_003（Context）、TASK_007（相机模式已被 MapView 消费 → 切换即时生效）。
+TASK_003（Context）、TASK_007（相机模式已被 MapView 消费 → 切换即时生效）、TASK_008/TASK_010（边和节点已消费 `isFlipY` → Y 翻转可视验证）。
 
 ## 涉及文件
 - `src/ui/Controls.tsx`（新建）
