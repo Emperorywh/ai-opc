@@ -34,8 +34,8 @@ runner_remove:
   - src/assets/react.svg
   - src/assets/vite.svg
   - src/assets/hero.png
+updated_at: 2026-07-07T03:36:36.978Z
 ---
-
 # TASK_001 · 项目脚手架与依赖
 
 ## 目标
