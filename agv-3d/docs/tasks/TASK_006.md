@@ -1,6 +1,6 @@
 ---
 id: TASK_006
-status: ready
+status: done
 branch: task/006-edge-geometry
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md
@@ -21,8 +21,8 @@ allowed_tools:
   - Bash(pnpm test:*)
   - Bash(pnpm build:*)
   - Bash(pnpm lint:*)
+updated_at: 2026-07-07T05:51:59.642Z
 ---
-
 # TASK_006 · 统一折线 buffer 构建
 
 ## 目标
