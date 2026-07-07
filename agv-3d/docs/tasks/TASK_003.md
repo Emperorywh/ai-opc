@@ -1,6 +1,6 @@
 ---
 id: TASK_003
-status: ready
+status: done
 branch: task/003-config-coordinates
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md
@@ -19,8 +19,8 @@ allowed_tools:
   - Bash(pnpm test:*)
   - Bash(pnpm build:*)
   - Bash(pnpm lint:*)
+updated_at: 2026-07-07T05:16:32.880Z
 ---
-
 # TASK_003 · 配置层、坐标映射与全局状态
 
 ## 目标
