@@ -26,6 +26,14 @@ allowed_tools:
   - Bash(pnpm test:*)
   - Bash(pnpm build:*)
   - Bash(pnpm lint:*)
+runner_assets:
+  - src: src/json/getMapInfo.json
+    dest: public/maps/sample.json
+runner_remove:
+  - src/App.css
+  - src/assets/react.svg
+  - src/assets/vite.svg
+  - src/assets/hero.png
 ---
 
 # TASK_001 · 项目脚手架与依赖
@@ -41,18 +49,18 @@ allowed_tools:
 - `vite.config.ts`（改：挂 vitest 的 `test` 配置）
 - `src/App.tsx`（改：替换为空 `<Canvas>` + 深色背景）
 - `src/main.tsx`（可能微调，去掉无用 import）
-- `public/maps/sample.json`（新建：从 `src/json/getMapInfo.json` 复制）
-- 可删：`src/App.css`、`src/assets/*`（模板残留）
+- `public/maps/sample.json`（Runner 通过 `runner_assets` 从 `src/json/getMapInfo.json` 复制；agent 无需自行创建）
+- Runner 删除：`src/App.css`、`src/assets/{react.svg,vite.svg,hero.png}`（模板残留；agent 无法删除文件，由 `runner_remove` 处理）
 
 ## 实现要点
 1. `pnpm add @react-three/drei`（确保解析到 v10+，与 `@react-three/fiber@9` / `three@0.185` / `react@19` 兼容）；`pnpm add -D vitest`。
 2. `vite.config.ts`：引入 `vitest/config`，`defineConfig` 改为接受 `test` 字段（`environment: 'node'` 即可，纯逻辑测试不需 jsdom）。备注：`node` 环境仅覆盖纯逻辑模块（loader / bezier / laneOffset / geometry / arrows）；后续若要单测 React 层组件，再单独引入 `jsdom`，Phase 1 不需要。
 3. `package.json` `scripts` 加 `"test": "vitest run --passWithNoTests"`、`"test:watch": "vitest"`，确保 TASK_001 尚无测试文件时测试门禁仍可稳定通过。
-4. 复制样例：`src/json/getMapInfo.json` → `public/maps/sample.json`（内容完全一致，后续 fetch 用）。
+4. 复制样例由 Runner 通过 `runner_assets` 在 agent 执行前完成（`src/json/getMapInfo.json` → `public/maps/sample.json`）。源文件约 13 万行，超出 agent 的 Read/Write 能力边界，agent 不要尝试自行复制，直接把就位的文件当作既存资产使用。
 5. `src/App.tsx` 重写为最小骨架：
    - `<Canvas>` 占满视口；通过 R3F 的 `onCreated` 或 `<color attach="background" args={[palette.bg]} />` 设背景（颜色硬编码 `#0a0e1a` 临时即可，TASK_003 再抽到 palette）。
    - 外层 `#root`/`body` 的 CSS 改为全屏（`width:100vw;height:100vh;margin:0`），避免模板 1126px 居中布局残留。
-6. 删除模板资产 `src/App.css`、`src/assets/react.svg`、`src/assets/vite.svg`、`src/assets/hero.png` 及其引用。
+6. 模板资产 `src/App.css`、`src/assets/react.svg`、`src/assets/vite.svg`、`src/assets/hero.png` 由 Runner 通过 `runner_remove` 删除（agent 的 Edit/Write 只能覆写、无法删除文件）；agent 只需确保代码中不再引用这些资产即可。
 
 ## 约束
 - 遵守 PLAN §3 全局约束（无 enum、`import type`、无未用变量）。
