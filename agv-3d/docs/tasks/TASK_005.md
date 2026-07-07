@@ -1,6 +1,6 @@
 ---
 id: TASK_005
-status: ready
+status: done
 branch: task/005-lane-offset
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md
@@ -18,8 +18,8 @@ allowed_tools:
   - Bash(pnpm test:*)
   - Bash(pnpm build:*)
   - Bash(pnpm lint:*)
+updated_at: 2026-07-07T05:38:51.860Z
 ---
-
 # TASK_005 · 双车道偏移工具
 
 ## 目标
