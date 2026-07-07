@@ -1,6 +1,6 @@
 ---
 id: TASK_002
-status: ready
+status: done
 branch: task/002-data-loader
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md
@@ -17,8 +17,8 @@ allowed_tools:
   - Bash(pnpm test:*)
   - Bash(pnpm build:*)
   - Bash(pnpm lint:*)
+updated_at: 2026-07-07T04:35:17.323Z
 ---
-
 # TASK_002 · 数据层 types + loader
 
 ## 目标
