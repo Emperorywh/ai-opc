@@ -1,6 +1,6 @@
 ---
 id: TASK_012
-status: draft
+status: ready
 branch: task/012-labels-layer
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md

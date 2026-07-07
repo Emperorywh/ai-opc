@@ -1,6 +1,6 @@
 ---
 id: TASK_007
-status: draft
+status: ready
 branch: task/007-mapview
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md

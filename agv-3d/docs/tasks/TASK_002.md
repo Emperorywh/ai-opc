@@ -1,6 +1,6 @@
 ---
 id: TASK_002
-status: draft
+status: ready
 branch: task/002-data-loader
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md

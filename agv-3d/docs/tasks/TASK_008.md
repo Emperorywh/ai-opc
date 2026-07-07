@@ -1,6 +1,6 @@
 ---
 id: TASK_008
-status: draft
+status: ready
 branch: task/008-edges-layer
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md
