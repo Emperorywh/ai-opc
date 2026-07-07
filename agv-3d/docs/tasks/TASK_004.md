@@ -1,6 +1,6 @@
 ---
 id: TASK_004
-status: ready
+status: done
 branch: task/004-bezier
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md
@@ -18,8 +18,8 @@ allowed_tools:
   - Bash(pnpm test:*)
   - Bash(pnpm build:*)
   - Bash(pnpm lint:*)
+updated_at: 2026-07-07T05:31:06.245Z
 ---
-
 # TASK_004 · 贝塞尔几何工具
 
 ## 目标
