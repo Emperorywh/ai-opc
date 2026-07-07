@@ -1,6 +1,6 @@
 ---
 id: TASK_001
-status: ready
+status: done
 branch: task/001-scaffold
 spec: docs/SPEC_agv-map-phase1.md
 plan: docs/PLAN_agv-map-phase1.md
@@ -34,7 +34,7 @@ runner_remove:
   - src/assets/react.svg
   - src/assets/vite.svg
   - src/assets/hero.png
-updated_at: 2026-07-07T03:36:36.978Z
+updated_at: 2026-07-07T04:18:02.225Z
 ---
 # TASK_001 · 项目脚手架与依赖
 
