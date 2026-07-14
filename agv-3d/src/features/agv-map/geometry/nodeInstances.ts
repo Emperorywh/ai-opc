@@ -1,6 +1,6 @@
 import type { RawNodeType } from '../domain/rawDto'
 import type { MapNode } from '../domain/domainModel'
-import type { CompiledNodeInstances, NodeInstancePacket } from '../domain/renderPacket'
+import type { CompiledNodeInstances, CompileProgressReport, NodeInstancePacket } from '../domain/renderPacket'
 import type { NodeDimensions, NodeDimensionsConfig } from '../config/geometryConfig'
 import type { MapSpace } from './worldCoords'
 import { mapToWorld } from './worldCoords'
@@ -59,17 +59,24 @@ const NODE_TYPE_ORDER: readonly RawNodeType[] = ['node', 'work', 'charge', 'park
  * 1. 按类型分桶，桶内保持输入顺序，保证相同输入产生相同实例下标。
  * 2. 每个节点计算世界放置（共享 computeNodePlacement），写入列主序 4×4 TR 矩阵。
  * 3. 每类型产出 { count, matrices }，矩阵数组长度恒为 count × 16。
+ *
+ * 可选 onProgress 在每写完一个节点矩阵后回调，processed 跨类型累计、
+ * total 等于输入节点总数（V76 基线 1768），供后台编译报告 compiling-nodes 进度。
+ * 回调不影响输出字节，保持纯函数语义（SPEC §7.1）。
  */
 export function compileNodeInstances(
   nodes: readonly MapNode[],
   space: MapSpace,
   config: NodeDimensionsConfig,
+  onProgress?: (report: CompileProgressReport) => void,
 ): CompiledNodeInstances {
   const byType: Record<RawNodeType, MapNode[]> = { node: [], work: [], charge: [], park: [] }
   for (const node of nodes) {
     byType[node.type].push(node)
   }
 
+  const total = nodes.length
+  let processed = 0
   const result = {} as CompiledNodeInstances
   for (const type of NODE_TYPE_ORDER) {
     const typed = byType[type]
@@ -77,6 +84,8 @@ export function compileNodeInstances(
     for (let i = 0; i < typed.length; i += 1) {
       const placement = computeNodePlacement(typed[i], space, config)
       writeNodeMatrix(matrices, i * NODE_MATRIX_FLOATS, placement)
+      processed += 1
+      onProgress?.({ phase: 'nodes', processed, total })
     }
     result[type] = { count: typed.length, matrices }
   }

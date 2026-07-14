@@ -1,5 +1,5 @@
 import type { MapModel } from '../domain/domainModel'
-import type { RenderPacket } from '../domain/renderPacket'
+import type { CompileProgressReport, RenderPacket } from '../domain/renderPacket'
 import type {
   LaneGroupingConfig,
   NodeDimensionsConfig,
@@ -28,6 +28,11 @@ import { computeRenderBounds } from './renderBounds'
  *
  * RenderPacket 与 CompilationReport 契约已上移至 domain 层（SPEC §5.1），
  * 应用层加载状态机据此持有渲染数据包而无需反向依赖 geometry。
+ *
+ * 进度顺序：节点编译在路径扁带编译之前报告，使后台编译流程能按状态机阶段顺序
+ * （compiling-nodes → compiling-paths）映射真实处理记录数（SPEC §10.1）。
+ * 采样与车道分组是共享前置（决定联合中心，二者都依赖），不计入可报告进度阶段。
+ * 节点与扁带编译互不读写共享可变状态，调换顺序不改变输出字节。
  */
 
 /** 场景编译所需的全部配置，按职责集中传入。 */
@@ -42,13 +47,18 @@ export interface SceneCompileConfigs {
  * 把规范化地图模型一次性编译为完整渲染数据包。
  *
  * 数据流（SPEC §5.2）：
- * 采样有向边 → 车道分组 → 联合中心 → 路径扁带 + 节点实例 → 渲染边界 → 统计报告。
+ * 采样有向边 → 车道分组 → 联合中心 → 节点实例 + 路径扁带 → 渲染边界 → 统计报告。
  * 任一子步骤抛出的几何编译错误向上传播，由加载状态机映射为 GEOMETRY_COMPILE_FAILED。
+ *
+ * 可选 onProgress 透传给节点与扁带编译，按 nodes → paths 顺序报告已处理记录数，
+ * 供后台编译把真实处理进度映射到状态机 compiling-nodes 与 compiling-paths 区间。
  */
 export function compileRenderPacket(
   model: MapModel,
   configs: SceneCompileConfigs,
+  onProgress?: (report: CompileProgressReport) => void,
 ): RenderPacket {
+  // 共享前置：采样与车道分组决定联合中心，节点与扁带均依赖该中心（SPEC §6.3）。
   const sampled = sampleEdges(model.edges, configs.sampling)
   const groups = groupLanes(sampled, configs.laneGrouping)
   const space = computeMapSpace(
@@ -56,13 +66,15 @@ export function compileRenderPacket(
     sampled.map((s) => s.path),
   )
 
+  // 节点编译先于路径扁带报告进度，匹配状态机 compiling-nodes → compiling-paths 顺序。
+  const nodeInstances = compileNodeInstances(model.nodes, space, configs.nodeDimensions, onProgress)
   const compiledPath = compilePathGeometry(
     groups,
     space,
     configs.ribbon,
     configs.laneGrouping,
+    onProgress,
   )
-  const nodeInstances = compileNodeInstances(model.nodes, space, configs.nodeDimensions)
   const renderBounds = computeRenderBounds(
     model.nodes,
     space,

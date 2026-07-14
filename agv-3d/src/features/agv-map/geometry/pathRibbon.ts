@@ -1,6 +1,6 @@
 import type { LaneGroupingConfig, PathRibbonConfig } from '../config/geometryConfig'
 import type { Point2 } from '../domain/domainModel'
-import type { PathGeometryPacket } from '../domain/renderPacket'
+import type { CompileProgressReport, PathGeometryPacket } from '../domain/renderPacket'
 import type { MapSpace } from './worldCoords'
 import { mapToWorld } from './worldCoords'
 import { GeometryCompileError, type SampledPath } from './pathSampling'
@@ -79,15 +79,25 @@ interface PointTangent {
  * 3. 在地图 XY 平面生成横截面序列（miter/bevel），按相邻横截面 Quad 输出三角形。
  * 4. 横截面顶点统一映射到世界 XZ 平面，写入主缓冲并记录该边的顶点区间。
  * 5. 全部写入完成后做有限性与索引校验，任一非法即抛出几何编译错误。
+ *
+ * 可选 onProgress 在每写完一条车道后回调，processed 跨组累计、
+ * total 等于全部车道数（等于有向边数，V76 基线 3045），
+ * 供后台编译报告 compiling-paths 进度。回调不影响输出字节（SPEC §7.1）。
  */
 export function compilePathGeometry(
   groups: readonly LaneGroup[],
   space: MapSpace,
   ribbonConfig: PathRibbonConfig,
   groupingConfig: LaneGroupingConfig,
+  onProgress?: (report: CompileProgressReport) => void,
 ): CompiledPath {
   const halfWidth = ribbonConfig.ribbonWidthM / 2
   const offsetM = groupingConfig.laneCenterOffsetM
+
+  // 全部车道数 = 有向边数，作为 paths 阶段进度分母。
+  let totalLanes = 0
+  for (const group of groups) totalLanes += group.lanes.length
+  let processedLanes = 0
 
   const positions: number[] = []
   const pathU: number[] = []
@@ -137,6 +147,8 @@ export function compilePathGeometry(
       const endVertex = positions.length / 3
       edgeIds.push(lane.edgeId)
       edgeVertexRanges.push(startVertex, endVertex)
+      processedLanes += 1
+      onProgress?.({ phase: 'paths', processed: processedLanes, total: totalLanes })
     }
   }
 
@@ -300,8 +312,8 @@ function normalize(x: number, y: number): Point2 {
   return { x: x / len, y: y / len }
 }
 
-/** 生成全部为地面法线 (0,1,0) 的法线缓冲。 */
-function fillGroundNormal(vertexCount: number): Float32Array {
+/** 生成全部为地面法线 (0,1,0) 的法线缓冲（ArrayBuffer 支撑，可转移）。 */
+function fillGroundNormal(vertexCount: number): Float32Array<ArrayBuffer> {
   const normals = new Float32Array(vertexCount * 3)
   for (let i = 0; i < vertexCount; i += 1) {
     normals[i * 3 + 1] = 1

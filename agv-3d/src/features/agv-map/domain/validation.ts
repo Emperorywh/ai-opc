@@ -79,8 +79,18 @@ interface ValidationContext {
   directedPairs: Set<string>
 }
 
-/** 严格校验 mapJson 载荷，返回全部问题。 */
-export function validateRawMap(payload: unknown): ValidationProblem[] {
+/**
+ * 严格校验 mapJson 载荷，返回全部问题。
+ *
+ * 可选的 onProgress 在每处理完一条节点或边记录后回调，参数为
+ * (已处理记录数, 节点数+边数)。该回调只反映遍历进度，不影响校验结果
+ * 或短路行为（SPEC §4.4：不在首个错误处短路）。
+ * 供后台编译流程把真实处理记录数映射到状态机 validating 区间（SPEC §10.1）。
+ */
+export function validateRawMap(
+  payload: unknown,
+  onProgress?: (processed: number, total: number) => void,
+): ValidationProblem[] {
   const ctx: ValidationContext = {
     problems: [],
     nodeIds: new Set(),
@@ -89,22 +99,42 @@ export function validateRawMap(payload: unknown): ValidationProblem[] {
   }
 
   collectPayloadProblems(payload, ctx)
+  // 仅当 nodes/edges 均为数组时才可知总数，进度才具有意义；否则跳过回调。
+  const nodeCount = isRecord(payload) && Array.isArray(payload.nodes) ? payload.nodes.length : 0
+  const edgeCount = isRecord(payload) && Array.isArray(payload.edges) ? payload.edges.length : 0
+  const total = nodeCount + edgeCount
+  let processed = 0
+
   if (isRecord(payload)) {
     if (Array.isArray(payload.nodes)) {
-      payload.nodes.forEach((node, index) => collectNodeProblems(node, index, ctx))
+      payload.nodes.forEach((node, index) => {
+        collectNodeProblems(node, index, ctx)
+        processed += 1
+        onProgress?.(processed, total)
+      })
     }
     if (Array.isArray(payload.edges)) {
-      payload.edges.forEach((edge, index) => collectEdgeProblems(edge, index, ctx))
+      payload.edges.forEach((edge, index) => {
+        collectEdgeProblems(edge, index, ctx)
+        processed += 1
+        onProgress?.(processed, total)
+      })
     }
   }
   return ctx.problems
 }
 
-/** 顶层校验：先提取载荷，再执行载荷契约校验，返回合并后的问题列表。 */
-export function validateRawMapAsset(rawAsset: unknown): ValidationProblem[] {
+/**
+ * 顶层校验：先提取载荷，再执行载荷契约校验，返回合并后的问题列表。
+ * 可选 onProgress 透传给 validateRawMap（SPEC §10.1）。
+ */
+export function validateRawMapAsset(
+  rawAsset: unknown,
+  onProgress?: (processed: number, total: number) => void,
+): ValidationProblem[] {
   const extraction = extractMapPayload(rawAsset)
   if (!extraction.ok) return extraction.problems
-  return validateRawMap(extraction.payload)
+  return validateRawMap(extraction.payload, onProgress)
 }
 
 function collectPayloadProblems(payload: unknown, ctx: ValidationContext): void {

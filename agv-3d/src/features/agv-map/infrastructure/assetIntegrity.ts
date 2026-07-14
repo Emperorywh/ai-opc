@@ -1,4 +1,8 @@
-import { ASSET_SHA256_HEX, ASSET_SIZE_BYTES } from '../domain/assetContract'
+import { ASSET_SHA256_HEX, ASSET_SIZE_BYTES, type AssetIntegrityResult } from '../domain/assetContract'
+
+// 重新导出结果类型，保持既有从 infrastructure 引用 AssetIntegrityResult 的消费方稳定；
+// 类型定义归属 domain（SPEC §5.1 单向依赖）。
+export type { AssetIntegrityResult }
 
 /**
  * 资产完整性校验：解析前比对字节数与 SHA-256 指纹（SPEC §10.1）。
@@ -7,14 +11,6 @@ import { ASSET_SHA256_HEX, ASSET_SIZE_BYTES } from '../domain/assetContract'
  * 均原生支持；因此不引入 Node 专用 crypto 模块，保持基础设施层运行时中立。
  * 该模块属于 infrastructure 层，domain 层不依赖此处实现。
  */
-
-export interface AssetIntegrityResult {
-  ok: boolean
-  expectedSize: number
-  actualSize: number
-  expectedSha256: string
-  actualSha256: string
-}
 
 /**
  * 计算给定字节序列的 SHA-256 小写十六进制摘要。
