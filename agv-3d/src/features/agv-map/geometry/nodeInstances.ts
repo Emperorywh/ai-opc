@@ -1,8 +1,14 @@
 import type { RawNodeType } from '../domain/rawDto'
 import type { MapNode } from '../domain/domainModel'
+import type { CompiledNodeInstances, NodeInstancePacket } from '../domain/renderPacket'
 import type { NodeDimensions, NodeDimensionsConfig } from '../config/geometryConfig'
 import type { MapSpace } from './worldCoords'
 import { mapToWorld } from './worldCoords'
+
+// 节点实例包契约（NodeInstancePacket、CompiledNodeInstances）已上移至 domain 层
+// （SPEC §5.1 依赖方向），使应用层加载状态机能持有渲染数据包而无需反向依赖 geometry。
+// 此处重新导出以保持 geometry 公共 API 稳定，下游仍可从本模块按需引用类型。
+export type { CompiledNodeInstances, NodeInstancePacket }
 
 /**
  * 节点实例编译（SPEC §7.2、§6.2）。
@@ -21,20 +27,6 @@ import { mapToWorld } from './worldCoords'
 
 /** 每个 4×4 实例矩阵的浮点分量数（Three.js Matrix4 列主序）。 */
 export const NODE_MATRIX_FLOATS = 16
-
-/**
- * 单类型节点实例包（SPEC §5.2 NodeInstancePacket）。
- *
- * matrices 为可转移的 Float32Array，每实例连续 16 个分量构成一个列主序 4×4 矩阵，
- * 供主线程 InstancedMesh.setMatrixAt 直接消费，不包含 Three.js 类实例。
- */
-export interface NodeInstancePacket {
-  readonly count: number
-  readonly matrices: Float32Array
-}
-
-/** 四类节点的实例包集合，键为节点类型。 */
-export type CompiledNodeInstances = Record<RawNodeType, NodeInstancePacket>
 
 /**
  * 节点放置结果：世界空间中心、绕 Y 轴旋转角与该类型尺寸。

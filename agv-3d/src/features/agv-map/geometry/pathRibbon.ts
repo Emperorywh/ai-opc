@@ -1,9 +1,14 @@
 import type { LaneGroupingConfig, PathRibbonConfig } from '../config/geometryConfig'
 import type { Point2 } from '../domain/domainModel'
+import type { PathGeometryPacket } from '../domain/renderPacket'
 import type { MapSpace } from './worldCoords'
 import { mapToWorld } from './worldCoords'
 import { GeometryCompileError, type SampledPath } from './pathSampling'
 import type { LaneGroup } from './laneGrouping'
+
+// 路径几何包契约 PathGeometryPacket 已上移至 domain 层（SPEC §5.1 依赖方向），
+// 此处重新导出以保持 geometry 公共 API 稳定。
+export type { PathGeometryPacket }
 
 /**
  * 路径扁带编译（SPEC §7.5、§7.6）。
@@ -35,22 +40,6 @@ import type { LaneGroup } from './laneGrouping'
 interface LaneExpansion {
   readonly expandNear: number
   readonly expandFar: number
-}
-
-/**
- * 路径几何包（SPEC §5.2 PathGeometryPacket）。
- *
- * 全部数组为可转移的 TypedArray，不包含 Three.js 类实例。positions/normals/pathU/
- * flowDirections 按顶点对齐（前三者每顶点 3/3/1 个分量，flowDirections 每顶点 1 个），
- * edgeVertexRanges 按车道顺序成对存储 [startVertex, endVertex)。
- */
-export interface PathGeometryPacket {
-  readonly positions: Float32Array
-  readonly normals: Float32Array
-  readonly pathU: Float32Array
-  readonly flowDirections: Float32Array
-  readonly indices: Uint32Array
-  readonly edgeVertexRanges: Uint32Array
 }
 
 /**

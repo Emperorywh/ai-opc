@@ -1,18 +1,16 @@
 import type { MapModel } from '../domain/domainModel'
+import type { RenderPacket } from '../domain/renderPacket'
 import type {
   LaneGroupingConfig,
   NodeDimensionsConfig,
   PathRibbonConfig,
   SamplingConfig,
 } from '../config/geometryConfig'
-import type { PathGeometryPacket } from './pathRibbon'
 import { compilePathGeometry } from './pathRibbon'
 import { sampleEdges } from './pathSampling'
 import { groupLanes } from './laneGrouping'
 import { computeMapSpace } from './worldCoords'
-import type { CompiledNodeInstances } from './nodeInstances'
 import { compileNodeInstances } from './nodeInstances'
-import type { Bounds3Data } from './renderBounds'
 import { computeRenderBounds } from './renderBounds'
 
 /**
@@ -27,35 +25,10 @@ import { computeRenderBounds } from './renderBounds'
  *   给主线程，大地图交接不复制缓冲（SPEC §5.2、TASK-005）。
  * - 边界后置：renderBounds 在路径与节点几何编译完成后计算，确保完整包含
  *   节点尺寸、扁带宽度和车道偏移（SPEC §6.3）。
- */
-
-/**
- * 编译统计报告（SPEC §5.2 CompilationReport）。
- * 数值来自本次编译的模型与车道分组，稳定且与 RenderPacket 其余部分同源。
- */
-export interface CompilationReport {
-  /** 节点总数（V76 基线 1768）。 */
-  readonly nodeCount: number
-  /** 有向车道记录总数（V76 基线 3045）。 */
-  readonly edgeLaneCount: number
-  /** 双向车道组数（V76 基线 998）。 */
-  readonly bidirectionalGroupCount: number
-  /** 未配对单向边数（V76 基线 1049）。 */
-  readonly unpairedEdgeCount: number
-}
-
-/**
- * 完整渲染数据包（SPEC §5.2 RenderPacket）。
  *
- * 全部 TypedArray 可转移；不包含 Three.js 类实例。nodeInstances 按类型索引，
- * pathGeometry 为合并后的单一扁带，renderBounds 为世界空间 3D AABB。
+ * RenderPacket 与 CompilationReport 契约已上移至 domain 层（SPEC §5.1），
+ * 应用层加载状态机据此持有渲染数据包而无需反向依赖 geometry。
  */
-export interface RenderPacket {
-  readonly nodeInstances: CompiledNodeInstances
-  readonly pathGeometry: PathGeometryPacket
-  readonly renderBounds: Bounds3Data
-  readonly report: CompilationReport
-}
 
 /** 场景编译所需的全部配置，按职责集中传入。 */
 export interface SceneCompileConfigs {

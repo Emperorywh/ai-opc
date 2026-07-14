@@ -1,8 +1,13 @@
 import type { MapNode } from '../domain/domainModel'
+import type { Bounds3Data } from '../domain/renderPacket'
 import type { NodeDimensionsConfig } from '../config/geometryConfig'
 import type { MapSpace } from './worldCoords'
 import { GeometryCompileError } from './pathSampling'
 import { computeNodePlacement } from './nodeInstances'
+
+// 渲染边界契约 Bounds3Data 已上移至 domain 层（SPEC §5.1 依赖方向），此处重新导出
+// 以保持 geometry 公共 API 稳定。
+export type { Bounds3Data }
 
 /**
  * 最终渲染边界计算（SPEC §5.2 Bounds3Data、§6.3）。
@@ -16,15 +21,6 @@ import { computeNodePlacement } from './nodeInstances'
  * - 世界空间：输出为世界 XZ 地面 + Y 高度的 3D AABB，供相机 framing、雾效、阴影与
  *   反射地面范围统一推导（SPEC §6.3、§9.1、§8.4）。
  */
-
-/**
- * 三维渲染边界（SPEC §5.2 Bounds3Data）。世界空间轴对齐包围盒，单位米。
- * min/max 为 [x, y, z] 三元组；min 分量不大于对应 max 分量。
- */
-export interface Bounds3Data {
-  readonly min: readonly [number, number, number]
-  readonly max: readonly [number, number, number]
-}
 
 /**
  * 在几何编译完成后重新计算渲染边界（SPEC §6.3）。
