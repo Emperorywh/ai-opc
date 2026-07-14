@@ -1,21 +1,29 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Canvas, type RootState } from '@react-three/fiber'
 import type { LoadSessionController } from '../../application/loadSession'
+import { FRAMING_REFERENCE_ASPECT } from '../../config/cameraConfig'
 import type { RenderPacket } from '../../domain/renderPacket'
+import { CameraRig } from './CameraRig'
+import { PixelBudgetDpr } from './PixelBudgetDpr'
+import { computeCameraFrame } from './cameraFraming'
 import { NodeLayer } from './NodeLayer'
 import { PathLayer } from './PathLayer'
-import { computeBasicFraming } from './basicFraming'
 import './sceneView.css'
 
 /**
- * 地图场景视图（SPEC §8.1、§10.1、TASK-009）。
+ * 地图场景视图（SPEC §8.1、§9、§10.1，TASK-009/010/011）。
  *
- * 职责：在渲染数据包就绪后挂载 R3F Canvas，呈现 NodeLayer（本期交付），并以最小可用的
- * 相机与照明保证四类节点在沙盘视角下可辨识；同时驱动加载状态机的场景准备生命周期
+ * 职责：在渲染数据包就绪后挂载 R3F Canvas，呈现 PathLayer 与 NodeLayer，并以 CameraRig
+ * 提供自动框选的倾斜沙盘视角与受控 OrbitControls 交互；同时驱动加载状态机的场景准备生命周期
  * （creating-scene → fading → ready），使加载覆盖层在首帧成功渲染并完成淡入后卸载。
  *
+ * 相机与控件（TASK-011，SPEC §9）：
+ * - 自动框选：computeCameraFrame 以包围盒八角点在相机空间的水平/垂直需求与 5% 安全区求解
+ *   相机距离，保证 16:9 与 21:9 画面均完整容纳 renderBounds（§9.1）。
+ * - 受控交互：CameraRig 挂载 OrbitControls，极角 25°～70°、距离与平移边界由 renderBounds 推导（§9.2）。
+ * - 像素预算：PixelBudgetDpr 在挂载与 resize 后把有效 DPR 钳制到 3840×2160 预算内（§9.3、§11.1）。
+ *
  * 边界说明（后续任务接入点）：
- * - 相机框选与控件属 TASK-011，此处只用基础框选（computeBasicFraming），不挂 OrbitControls。
  * - 深色环境（反射地面、网格、雾、阴影贴图）属 TASK-012，此处仅给深色背景与最小照明。
  * - 后处理（Bloom/SMAA）属 TASK-013，此处不接入 EffectComposer；R3F 默认的 ACES 色调映射与
  *   sRGB 输出已与 SPEC §8.5 一致，节点基础色可辨识。
@@ -44,17 +52,17 @@ export function MapSceneView({ packet, controller }: MapSceneViewProps) {
   const [opacity, setOpacity] = useState(0)
   const [fadeStarted, setFadeStarted] = useState(false)
 
-  const frame = computeBasicFraming(packet.renderBounds)
+  // 自动框选：以 16:9 为参考宽高比求解，保证 16:9 与 21:9 均完整容纳（SPEC §9.1、cameraConfig）。
+  // packet 在 preparing/ready 间为同一引用，frame 随之稳定，不因状态推进而重算。
+  const frame = useMemo(
+    () => computeCameraFrame(packet.renderBounds, FRAMING_REFERENCE_ASPECT),
+    [packet.renderBounds],
+  )
 
-  // 对准框选目标并推进到 fading。
-  // R3F 默认透视相机保持单位旋转、朝世界 -Z 看，不会自动 lookAt 场景中心；只给 position 会
-  // 让整张地图落在 45° FOV 的半角 22.5° 之外、画面不可见，故首帧后显式 lookAt(target)，
-  // 使四类节点进入视锥（SPEC §9.1）。OrbitControls 与八角点 framing 精算属 TASK-011，
-  // 届时由控件接管 target 朝向；本处只做一次性定向，运行期不再修改相机姿态。
-  // 已 ready（如重挂）时只补 lookAt 并直接显示，不重复驱动生命周期。
+  // onCreated 推进到 fading。相机姿态由 CameraRig（OrbitControls）接管，此处不再手动 lookAt。
+  // 已 ready（如重挂）时直接显示，不重复驱动生命周期。
   const handleCreated = useCallback(
-    ({ camera }: RootState) => {
-      camera.lookAt(frame.target[0], frame.target[1], frame.target[2])
+    (_state: RootState) => {
       const state = controller.getState()
       if (state?.status === 'ready') {
         setOpacity(1)
@@ -64,7 +72,7 @@ export function MapSceneView({ packet, controller }: MapSceneViewProps) {
       controller.apply({ type: 'advance', to: 'fading' }, requestId)
       setFadeStarted(true)
     },
-    [controller, frame],
+    [controller],
   )
 
   // fading：opacity 0→1 过渡，结束后 complete。
@@ -86,18 +94,20 @@ export function MapSceneView({ packet, controller }: MapSceneViewProps) {
   return (
     <div className="agv-map-scene" style={{ opacity }}>
       <Canvas
-        // DPR 上限 2，避免高 DPI 屏过度膨胀物理像素；TASK-011 按 §11.1 公式精算 effectiveDpr。
-        dpr={[1, 2]}
+        // 初始 DPR 占位为 1，PixelBudgetDpr 在挂载后立即按像素预算精算并写入（§9.3、§11.1）。
+        // 淡入期间画布 opacity:0，DPR 切换的潜在首帧重排对用户不可见。
+        dpr={1}
         // SPEC §8.5：Canvas 原生抗锯齿关闭，由 TASK-013 的 SMAA 负责。
         gl={{ antialias: false, powerPreference: 'high-performance' }}
         camera={{
           fov: 45,
           near: 0.1,
           far: frame.far,
-          position: frame.position,
+          position: [frame.position[0], frame.position[1], frame.position[2]],
         }}
         onCreated={handleCreated}
       >
+        <PixelBudgetDpr />
         <color attach="background" args={[SCENE_BACKGROUND]} />
         {/* 最小照明：环境光补底、方向光塑形。TASK-012 接入阴影贴图与完整环境光。 */}
         <ambientLight intensity={0.7} />
@@ -105,6 +115,8 @@ export function MapSceneView({ packet, controller }: MapSceneViewProps) {
         {/* SPEC §8.1 图层顺序：PathLayer 位于 NodeLayer 之下（扁带离地 0.015 m，节点贴地）。 */}
         <PathLayer geometry={packet.pathGeometry} />
         <NodeLayer instances={packet.nodeInstances} />
+        {/* SPEC §8.1 CameraRig：受控 OrbitControls，提供旋转/缩放/平移与自动框选目标。 */}
+        <CameraRig bounds={packet.renderBounds} frame={frame} />
       </Canvas>
     </div>
   )
