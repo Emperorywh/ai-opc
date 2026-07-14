@@ -1,3 +1,5 @@
+import type { RawNodeType } from '../domain/rawDto'
+
 /**
  * 几何编译集中配置（SPEC §7、§12）。
  *
@@ -5,7 +7,7 @@
  * - TASK-002 落地路径采样参数；
  * - TASK-003 追加车道分组参数（反向配对容差、等参数采样数、中心偏移）；
  * - TASK-004 追加扁带宽度、离地高度与斜接上限；
- * - 节点尺寸由后续任务在同一文件追加，避免散落常量。
+ * - TASK-005 追加节点实例尺寸（基准宽度、各类高度），避免散落常量。
  */
 
 /**
@@ -75,4 +77,48 @@ export const DEFAULT_PATH_RIBBON_CONFIG: PathRibbonConfig = {
   ribbonWidthM: 0.22,
   ribbonHeightM: 0.015,
   miterLimitRatio: 2.0,
+}
+
+/**
+ * 节点实例尺寸配置（SPEC §7.2）。
+ *
+ * 不变量：
+ * - 尺寸为模型空间包围盒，几何模型以原点为中心构建（X 前、Y 上、Z 侧），
+ *   实例矩阵只编码平移与绕 Y 旋转，不编码缩放（SPEC §6.2、§7.2）。
+ * - 基准宽度 0.5 m：四类节点占地均为 0.5×0.5 m，高度按类型区分以形成可辨识剪影。
+ * - 真实米制：1 world unit = 1 m，尺寸直接作为世界单位，不做整体缩放（SPEC §6.1）。
+ *
+ * 几何模型前向约定（SPEC §6.2、§7.2）：方向性节点（work/charge/park）模型 +X 为前向；
+ * 普通节点（node）为立方体，无方向性，角度不参与放置。
+ */
+export interface NodeDimensions {
+  /** 模型空间前向（+X）尺寸，单位米。 */
+  readonly sizeXM: number
+  /** 模型空间高度（+Y）尺寸，单位米。实例中心 Y 等于其半值。 */
+  readonly sizeYM: number
+  /** 模型空间侧向（+Z）尺寸，单位米。 */
+  readonly sizeZM: number
+}
+
+/** 按节点类型索引的尺寸表，供实例编译与边界计算共享。 */
+export interface NodeDimensionsConfig {
+  readonly byType: Record<RawNodeType, NodeDimensions>
+}
+
+/** 节点基准占地宽度，单位米（SPEC §7.2：0.5 m）。 */
+export const DEFAULT_NODE_BASE_WIDTH_M = 0.5
+
+/**
+ * 初始节点尺寸配置（SPEC §7.2：0.5 m 基准宽度，高度按类型微调）。
+ *
+ * 占地统一为 0.5×0.5 m；高度区别为：充电桩最高（六棱柱）、停车点最矮（切角长方体）、
+ * 普通与工作节点等高。高度仅影响剪影与 Y 边界，不改变占地。
+ */
+export const DEFAULT_NODE_DIMENSIONS_CONFIG: NodeDimensionsConfig = {
+  byType: {
+    node: { sizeXM: 0.5, sizeYM: 0.5, sizeZM: 0.5 },
+    work: { sizeXM: 0.5, sizeYM: 0.5, sizeZM: 0.5 },
+    charge: { sizeXM: 0.5, sizeYM: 0.6, sizeZM: 0.5 },
+    park: { sizeXM: 0.5, sizeYM: 0.4, sizeZM: 0.5 },
+  },
 }
