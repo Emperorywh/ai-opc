@@ -1,0 +1,51 @@
+version: 1
+project:
+  root: .
+  spec: SPEC.md
+  plan: PLAN.md
+  contextFiles:
+    - AGENTS.md
+
+defaults:
+  maxAttempts: 3
+  taskTimeoutMinutes: 45
+  maxTurns: 80
+  model: sonnet
+  effort: high
+
+review:
+  enabled: true
+  maxAttempts: 2
+  model: sonnet
+  effort: high
+  maxTurns: 30
+
+git:
+  commitMessagePrefix: task
+
+tasks:
+  - id: TASK-001
+    title: 实现第一个独立任务
+    file: tasks/TASK-001.md
+    dependsOn: []
+    scope:
+      allow:
+        - src/**
+        - test/**
+        - package.json
+        - pnpm-lock.yaml
+      deny:
+        - .env*
+    gates:
+      - name: typecheck
+        command: pnpm
+        args:
+          - typecheck
+        timeoutMinutes: 10
+      - name: test
+        command: pnpm
+        args:
+          - test
+        timeoutMinutes: 15
+    manualAcceptance:
+      - 在本地浏览器中完成功能与视觉验收
