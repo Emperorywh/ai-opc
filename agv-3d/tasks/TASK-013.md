@@ -1,7 +1,31 @@
 ---
 id: TASK-013
 title: 完成色彩输出与后处理
-status: pending
+dependsOn:
+  - TASK-009
+  - TASK-010
+  - TASK-012
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance:
+  - 在本地浏览器中确认色彩、Bloom、SMAA 与基础拓扑清晰度
 ---
 
 # TASK-013 — 完成色彩输出与后处理

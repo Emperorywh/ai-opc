@@ -1,7 +1,29 @@
 ---
 id: TASK-001
 title: 建立 V76 地图数据契约
-status: pending
+dependsOn: []
+scope:
+  allow:
+    - src/**
+    - test/**
+    - public/**
+    - map.json
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance: []
 ---
 
 # TASK-001 — 建立 V76 地图数据契约

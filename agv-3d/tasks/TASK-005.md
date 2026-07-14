@@ -1,7 +1,28 @@
 ---
 id: TASK-005
 title: 编译节点放置数据与场景边界
-status: pending
+dependsOn:
+  - TASK-004
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance: []
 ---
 
 # TASK-005 — 编译节点放置数据与场景边界

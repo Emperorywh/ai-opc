@@ -1,7 +1,31 @@
 ---
 id: TASK-007
 title: 接通启动后的后台地图编译
-status: pending
+dependsOn:
+  - TASK-005
+  - TASK-006
+scope:
+  allow:
+    - src/**
+    - test/**
+    - public/**
+    - package.json
+    - pnpm-lock.yaml
+    - vite.config.ts
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance: []
 ---
 
 # TASK-007 — 接通启动后的后台地图编译

@@ -1,7 +1,28 @@
 ---
 id: TASK-004
 title: 编译完整路径扁带数据
-status: pending
+dependsOn:
+  - TASK-003
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance: []
 ---
 
 # TASK-004 — 编译完整路径扁带数据

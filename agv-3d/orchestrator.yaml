@@ -1,4 +1,6 @@
-version: 1
+# Manifest 只声明项目级策略，避免与 TASK 文档形成两套任务事实源。
+# 任务依赖、写入边界与验收门禁统一由 tasks 目录中的前置元数据维护。
+version: 2
 project:
   root: .
   spec: SPEC.md
@@ -23,29 +25,9 @@ review:
 git:
   commitMessagePrefix: task
 
-tasks:
-  - id: TASK-001
-    title: 实现第一个独立任务
-    file: tasks/TASK-001.md
-    dependsOn: []
-    scope:
-      allow:
-        - src/**
-        - test/**
-        - package.json
-        - pnpm-lock.yaml
-      deny:
-        - .env*
-    gates:
-      - name: typecheck
-        command: pnpm
-        args:
-          - typecheck
-        timeoutMinutes: 10
-      - name: test
-        command: pnpm
-        args:
-          - test
-        timeoutMinutes: 15
-    manualAcceptance:
-      - 在本地浏览器中完成功能与视觉验收
+taskCatalog:
+  directory: tasks
+
+verification:
+  sharedPaths:
+    - node_modules

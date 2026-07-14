@@ -1,7 +1,29 @@
 ---
 id: TASK-008
 title: 呈现加载进度与统一错误界面
-status: pending
+dependsOn:
+  - TASK-007
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance:
+  - 在本地浏览器中确认加载阶段、进度和错误界面符合验收标准
 ---
 
 # TASK-008 — 呈现加载进度与统一错误界面

@@ -1,7 +1,32 @@
 ---
 id: TASK-014
 title: 保证场景创建与资源释放原子性
-status: pending
+dependsOn:
+  - TASK-006
+  - TASK-007
+  - TASK-011
+  - TASK-013
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance:
+  - 在本地浏览器中重复挂载和卸载，确认资源计数恢复到基线
 ---
 
 # TASK-014 — 保证场景创建与资源释放原子性

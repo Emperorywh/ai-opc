@@ -1,7 +1,31 @@
 ---
 id: TASK-016
 title: 完成目标机性能与长期稳定性验收
-status: pending
+dependsOn:
+  - TASK-015
+scope:
+  allow:
+    - src/**
+    - test/**
+    - docs/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+    - docs/tasks/**
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance:
+  - 在目标机完成 1080p、4K 和 24 小时稳定性验收并记录结果
 ---
 
 # TASK-016 — 完成目标机性能与长期稳定性验收

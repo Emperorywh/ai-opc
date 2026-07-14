@@ -1,7 +1,31 @@
 ---
 id: TASK-012
 title: 构建深色沙盘环境
-status: pending
+dependsOn:
+  - TASK-009
+  - TASK-010
+  - TASK-011
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance:
+  - 在本地浏览器中确认反射、网格、雾、照明和阴影同时正确呈现
 ---
 
 # TASK-012 — 构建深色沙盘环境

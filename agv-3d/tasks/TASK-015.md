@@ -1,7 +1,30 @@
 ---
 id: TASK-015
 title: 首帧后平滑淡入完整场景
-status: pending
+dependsOn:
+  - TASK-008
+  - TASK-014
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance:
+  - 在本地浏览器中确认首帧成功后才开始显示并完成平滑淡入
 ---
 
 # TASK-015 — 首帧后平滑淡入完整场景

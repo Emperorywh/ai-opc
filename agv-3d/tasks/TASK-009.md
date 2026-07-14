@@ -1,7 +1,30 @@
 ---
 id: TASK-009
 title: 展示四类节点
-status: pending
+dependsOn:
+  - TASK-005
+  - TASK-007
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance:
+  - 在本地浏览器中确认四类节点的形状、颜色、朝向和批次数量
 ---
 
 # TASK-009 — 展示四类节点

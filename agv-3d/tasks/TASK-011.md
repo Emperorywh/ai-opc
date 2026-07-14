@@ -1,7 +1,30 @@
 ---
 id: TASK-011
 title: 提供自动框选与受控相机交互
-status: pending
+dependsOn:
+  - TASK-005
+  - TASK-007
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance:
+  - 在本地浏览器中确认自动框选、相机边界和不同窗口比例下的交互
 ---
 
 # TASK-011 — 提供自动框选与受控相机交互

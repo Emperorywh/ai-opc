@@ -1,7 +1,28 @@
 ---
 id: TASK-003
 title: 形成稳定的单双向车道分组
-status: pending
+dependsOn:
+  - TASK-002
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance: []
 ---
 
 # TASK-003 — 形成稳定的单双向车道分组

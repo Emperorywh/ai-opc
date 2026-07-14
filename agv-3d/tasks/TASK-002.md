@@ -1,7 +1,28 @@
 ---
 id: TASK-002
 title: 生成确定性路径采样与世界坐标
-status: pending
+dependsOn:
+  - TASK-001
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance: []
 ---
 
 # TASK-002 — 生成确定性路径采样与世界坐标

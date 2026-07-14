@@ -1,7 +1,30 @@
 ---
 id: TASK-010
 title: 展示有向路径与流动高亮
-status: pending
+dependsOn:
+  - TASK-004
+  - TASK-007
+scope:
+  allow:
+    - src/**
+    - test/**
+    - package.json
+    - pnpm-lock.yaml
+  deny:
+    - .env*
+gates:
+  - name: build
+    command: pnpm
+    args:
+      - build
+    timeoutMinutes: 15
+  - name: lint
+    command: pnpm
+    args:
+      - lint
+    timeoutMinutes: 10
+manualAcceptance:
+  - 在本地浏览器中确认单双向路径间距、流向和长时间动画连续性
 ---
 
 # TASK-010 — 展示有向路径与流动高亮
