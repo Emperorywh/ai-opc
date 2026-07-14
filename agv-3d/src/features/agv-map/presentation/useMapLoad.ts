@@ -22,13 +22,24 @@ import type { MapSceneState } from '../application/loadState'
  *   契合 useSyncExternalStore 的快照稳定性要求。
  */
 
+/** useMapLoad 返回值：当前状态与用于驱动生命周期的会话控制器。 */
+export interface UseMapLoadResult {
+  readonly state: MapSceneState | null
+  /**
+   * 加载会话控制器。场景视图在首帧渲染后经它推进 creating-scene → fading → ready（SPEC §10.1）。
+   * 暴露控制器而非窄接口，使展示层能直接复用应用层的纯状态机命令，避免重复抽象。
+   */
+  readonly controller: LoadSessionController
+}
+
 /**
- * 在组件挂载后启动后台地图加载，返回当前加载状态（null 表示尚未启动）。
+ * 在组件挂载后启动后台地图加载，返回当前加载状态与会话控制器。
  *
  * 场景渲染、加载/错误界面等后续展示由消费方根据 state 自行实现；本 Hook 只负责
- * 接通后台编译与状态暴露（TASK-007 边界）。
+ * 接通后台编译与状态暴露（TASK-007 边界）。controller 供场景视图驱动场景准备生命周期
+ * （TASK-009：creating-scene → fading → ready），调用方应在卸载时随组件清理取消会话。
  */
-export function useMapLoad(): MapSceneState | null {
+export function useMapLoad(): UseMapLoadResult {
   // 控制器在渲染间稳定：useRef 惰性初始化一次，StrictMode 重复挂载复用同一实例，
   // 使 start() 的 requestId 在卸载/重挂过程中单调递增，旧会话结果被自然隔离。
   const controllerRef = useRef<LoadSessionController | null>(null)
@@ -62,5 +73,5 @@ export function useMapLoad(): MapSceneState | null {
     }
   }, [controller])
 
-  return state
+  return { state, controller }
 }
