@@ -2,8 +2,9 @@
  * 几何编译集中配置（SPEC §7、§12）。
  *
  * 配置按职责集中、所有参数携带单位后缀。本文件随任务推进逐步补充：
- * 当前（TASK-002）仅落地路径采样相关常量；车道偏移、扁带宽度与节点尺寸
- * 由后续任务在同一文件追加，避免散落常量。
+ * - TASK-002 落地路径采样参数；
+ * - TASK-003 追加车道分组参数（反向配对容差、等参数采样数、中心偏移）；
+ * - 扁带宽度与节点尺寸由后续任务在同一文件追加，避免散落常量。
  */
 
 /**
@@ -25,4 +26,26 @@ export const DEFAULT_SAMPLING_CONFIG: SamplingConfig = {
   maxChordLengthM: 0.25,
   maxFlatnessErrorM: 0.01,
   maxRecursionDepth: 12,
+}
+
+/**
+ * 车道分组参数（SPEC §7.4）。
+ *
+ * 双向车道由互为反向拓扑且几何等价的边组成。这些参数决定配对判定与侧向偏移，
+ * 同样为纯函数输入，确保相同数据产生稳定的车道布局，且与渲染自适应采样相互独立。
+ */
+export interface LaneGroupingConfig {
+  /** 反向候选中心线在统一方向后的最大允许对应点偏差，单位米。 */
+  readonly laneGroupToleranceM: number
+  /** 反向中心线比较时沿弧长等参数采样的点数。 */
+  readonly lanePairSampleCount: number
+  /** 双向车道相对共享中心线的侧向偏移，单位米。 */
+  readonly laneCenterOffsetM: number
+}
+
+/** 初始车道分组配置（SPEC §7.4：0.02 m 容差、33 点比较、0.18 m 偏移）。 */
+export const DEFAULT_LANE_GROUPING_CONFIG: LaneGroupingConfig = {
+  laneGroupToleranceM: 0.02,
+  lanePairSampleCount: 33,
+  laneCenterOffsetM: 0.18,
 }

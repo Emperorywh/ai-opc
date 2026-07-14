@@ -19,9 +19,15 @@ export interface SampledPath {
   readonly points: readonly Point2[]
 }
 
-/** 一条有向边采样后与其 id 的绑定结果，供下游车道分组与中心计算消费。 */
+/**
+ * 一条有向边采样后与其拓扑信息的绑定结果，供下游车道分组与中心计算消费。
+ * 携带 sourceNodeId/targetNodeId 使车道分组能依据反向拓扑关系配对，无需回查原始 DTO，
+ * 保持几何层与领域层之间的单向依赖（SPEC §5.1）。
+ */
 export interface SampledEdge {
   readonly edgeId: string
+  readonly sourceNodeId: string
+  readonly targetNodeId: string
   readonly path: SampledPath
 }
 
@@ -81,7 +87,12 @@ export function sampleEdges(edges: readonly DirectedEdge[], config: SamplingConf
   const result: SampledEdge[] = []
   for (const edge of edges) {
     try {
-      result.push({ edgeId: edge.id, path: samplePath(edge.path, config) })
+      result.push({
+        edgeId: edge.id,
+        sourceNodeId: edge.sourceNodeId,
+        targetNodeId: edge.targetNodeId,
+        path: samplePath(edge.path, config),
+      })
     } catch (error) {
       // 单条采样错误补充边 id 后向上传播，使加载层能定位到具体边。
       if (error instanceof GeometryCompileError && error.edgeId === undefined) {
