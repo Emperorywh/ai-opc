@@ -32,7 +32,11 @@ export interface SampledEdge {
 }
 
 /** 几何编译错误码封闭联合。 */
-export type GeometryErrorCode = 'ZERO_LENGTH_SAMPLE_SEGMENT' | 'EMPTY_COMPUTE_BOUNDS'
+export type GeometryErrorCode =
+  | 'ZERO_LENGTH_SAMPLE_SEGMENT'
+  | 'EMPTY_COMPUTE_BOUNDS'
+  | 'INVALID_RIBBON_GEOMETRY'
+  | 'RIBBON_INDEX_OUT_OF_BOUNDS'
 
 /**
  * 几何编译错误。携带错误码与可定位上下文（边 id、采样点序号），

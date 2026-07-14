@@ -4,7 +4,8 @@
  * 配置按职责集中、所有参数携带单位后缀。本文件随任务推进逐步补充：
  * - TASK-002 落地路径采样参数；
  * - TASK-003 追加车道分组参数（反向配对容差、等参数采样数、中心偏移）；
- * - 扁带宽度与节点尺寸由后续任务在同一文件追加，避免散落常量。
+ * - TASK-004 追加扁带宽度、离地高度与斜接上限；
+ * - 节点尺寸由后续任务在同一文件追加，避免散落常量。
  */
 
 /**
@@ -48,4 +49,30 @@ export const DEFAULT_LANE_GROUPING_CONFIG: LaneGroupingConfig = {
   laneGroupToleranceM: 0.02,
   lanePairSampleCount: 33,
   laneCenterOffsetM: 0.18,
+}
+
+/**
+ * 路径扁带编译参数（SPEC §7.4、§7.5）。
+ *
+ * 扁带在地图 XY 平面完成侧向偏移与带宽展开后统一映射到世界 XZ 平面。
+ * 这些参数为纯函数输入，确保相同车道分组产生字节级稳定的扁带几何，
+ * 且不引入对展示状态、相机或系统时间的依赖（SPEC §7.1）。
+ */
+export interface PathRibbonConfig {
+  /** 扁带宽度，单位米。扁带以此宽度沿中心线法向两侧展开。 */
+  readonly ribbonWidthM: number
+  /** 扁带离地高度，单位米。映射到世界坐标时作为 Y 分量。 */
+  readonly ribbonHeightM: number
+  /**
+   * 斜接长度上限，以半带宽的倍数表达（SPEC §7.5：上限为半带宽的 2 倍）。
+   * 当斜接比例超过该值时折角切换为斜切（bevel）连接，避免尖刺。
+   */
+  readonly miterLimitRatio: number
+}
+
+/** 初始扁带配置（SPEC §7.4、§7.5：0.22 m 带宽、0.015 m 离地、斜接上限 2 倍）。 */
+export const DEFAULT_PATH_RIBBON_CONFIG: PathRibbonConfig = {
+  ribbonWidthM: 0.22,
+  ribbonHeightM: 0.015,
+  miterLimitRatio: 2.0,
 }
