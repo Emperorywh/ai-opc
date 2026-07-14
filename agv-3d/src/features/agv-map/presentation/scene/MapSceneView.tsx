@@ -3,6 +3,7 @@ import { Canvas, type RootState } from '@react-three/fiber'
 import type { LoadSessionController } from '../../application/loadSession'
 import type { RenderPacket } from '../../domain/renderPacket'
 import { NodeLayer } from './NodeLayer'
+import { PathLayer } from './PathLayer'
 import { computeBasicFraming } from './basicFraming'
 import './sceneView.css'
 
@@ -18,7 +19,8 @@ import './sceneView.css'
  * - 深色环境（反射地面、网格、雾、阴影贴图）属 TASK-012，此处仅给深色背景与最小照明。
  * - 后处理（Bloom/SMAA）属 TASK-013，此处不接入 EffectComposer；R3F 默认的 ACES 色调映射与
  *   sRGB 输出已与 SPEC §8.5 一致，节点基础色可辨识。
- * - 路径图层属 TASK-010，此处不渲染路径。
+ * - 路径扁带与流光（TASK-010）：PathLayer 渲染合并后的单一扁带 Mesh，材质声明 fog:true，
+ *   待 TASK-012 接入场景雾后自动生效，无需修改本图层。
  *
  * 生命周期（SPEC §10.1）：
  * 1. 组件在 preparing/creating-scene 挂载，Canvas 以 opacity:0 创建场景资源。
@@ -100,6 +102,8 @@ export function MapSceneView({ packet, controller }: MapSceneViewProps) {
         {/* 最小照明：环境光补底、方向光塑形。TASK-012 接入阴影贴图与完整环境光。 */}
         <ambientLight intensity={0.7} />
         <directionalLight position={[1, 2.5, 1.5]} intensity={2.8} />
+        {/* SPEC §8.1 图层顺序：PathLayer 位于 NodeLayer 之下（扁带离地 0.015 m，节点贴地）。 */}
+        <PathLayer geometry={packet.pathGeometry} />
         <NodeLayer instances={packet.nodeInstances} />
       </Canvas>
     </div>

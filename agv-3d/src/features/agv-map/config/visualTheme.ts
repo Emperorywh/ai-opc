@@ -78,3 +78,70 @@ export const NODE_BASE_COLORS: Readonly<Record<RawNodeType, HslColor>> = {
   charge: { h: 48, s: 1.0, l: 0.6 },
   park: { h: 140, s: 0.8, l: 0.55 },
 }
+
+/**
+ * 路径扁带色彩主题（SPEC §8.2 路径扁带 / 流动高亮）。
+ *
+ * 不变量：
+ * - 基础色低于 Bloom 阈值（§8.2、§8.5）：扁带作为底层拓扑呈现，不进入 Bloom。
+ * - 流动高亮明确高于 Bloom 阈值：在着色器中按高亮强度叠加，使峰值线性亮度 > 1.0，
+ *   TASK-013 接入 Bloom 后形成稳定发光脉冲；当前无后处理时仍以亮青色脉冲可见。
+ * - 色值集中定义，展示层禁止散落色值（§8.2 末条）。
+ */
+export interface PathColorTheme {
+  /** 扁带基础色（SPEC §8.2：hsl(200, 85%, 55%)）。 */
+  readonly baseColor: HslColor
+  /** 流动高亮色（SPEC §8.2：hsl(185, 100%, 75%)）。 */
+  readonly flowHighlightColor: HslColor
+  /**
+   * 流动高亮叠加强度。在线性空间与脉冲峰值相乘，使峰值亮度明确高于 Bloom 阈值 1.0
+   * （§8.2、§8.5）；无后处理时仍保证脉冲在扁带基础色之上清晰可辨。
+   */
+  readonly flowHighlightIntensity: number
+}
+
+/**
+ * 流光动画参数（SPEC §7.6 初始流光参数）。
+ *
+ * 不变量：
+ * - 单位显式标注（_M / _MPS / _SECONDS），不通过散落数字隐式表达业务规则（§12）。
+ * - 三参数满足 repeat = speed × period 的运动学关系（2.0 = 0.4 × 5.0），
+ *   即一个周期内脉冲恰好推进一个重复距离，动画首尾相接无跳变。
+ * - 为展示层纯动画配置，非几何编译参数（§12：颜色/材质/Bloom 归 visualTheme）。
+ */
+export interface PathFlowConfig {
+  /** 流光沿弧长的重复距离，单位米（SPEC §7.6：2.0 m）。 */
+  readonly flowRepeatM: number
+  /** 流光推进速度，单位米/秒（SPEC §7.6：0.4 m/s）。 */
+  readonly flowSpeedMps: number
+  /** 流光相位有界周期，单位秒（SPEC §7.6：5 s）。 */
+  readonly flowPeriodSeconds: number
+}
+
+/**
+ * 路径视觉主题初值（SPEC §8.2、§7.6）。
+ *
+ * 基础色与高亮色逐字对齐 SPEC §8.2；流光参数对齐 §7.6；高亮强度初值使脉冲峰值
+ * 明确超过 Bloom 阈值，TASK-013 按 Bloom 亮度阈值最终精调时只改本表数值。
+ */
+export const PATH_VISUAL_THEME: Readonly<{
+  readonly color: PathColorTheme
+  readonly flow: PathFlowConfig
+}> = {
+  color: {
+    baseColor: { h: 200, s: 0.85, l: 0.55 },
+    flowHighlightColor: { h: 185, s: 1.0, l: 0.75 },
+    flowHighlightIntensity: 1.5,
+  },
+  flow: {
+    flowRepeatM: 2.0,
+    flowSpeedMps: 0.4,
+    flowPeriodSeconds: 5.0,
+  },
+}
+
+/** SPEC §8.2 路径扁带基础色，供测试与展示层共享断言基准。 */
+export const PATH_BASE_COLOR: HslColor = { h: 200, s: 0.85, l: 0.55 }
+
+/** SPEC §8.2 流动高亮色，供测试与展示层共享断言基准。 */
+export const PATH_FLOW_HIGHLIGHT_COLOR: HslColor = { h: 185, s: 1.0, l: 0.75 }
