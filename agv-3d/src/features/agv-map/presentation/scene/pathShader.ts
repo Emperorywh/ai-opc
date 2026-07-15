@@ -1,5 +1,6 @@
-import { Color, ShaderMaterial, UniformsLib, UniformsUtils } from 'three'
+import { ShaderMaterial, UniformsLib, UniformsUtils } from 'three'
 import type { PathFlowConfig, PathColorTheme } from '../../config/visualTheme'
+import { hslToLinearColor } from './colorConvert'
 
 /**
  * 路径扁带着色器（SPEC §7.5、§7.6、§8.3，TASK-010）。
@@ -102,19 +103,9 @@ void main() {
 export const FLOW_OFFSET_UNIFORM = 'uFlowOffsetM'
 
 /**
- * 把 HSL 颜色转换为线性空间 THREE.Color。
- *
- * 与 NodeLayer 一致地经 CSS hsl() 字符串解析：Color.setStyle 默认按 sRGB 色彩空间解读，
- * 在 ColorManagement 启用（R3F 默认）时自动转换到工作线性空间，保证着色器直接输出即可
- * 进入色调映射/输出色彩空间块。
- */
-function hslToLinearColor(hsl: { readonly h: number; readonly s: number; readonly l: number }): Color {
-  const css = `hsl(${hsl.h}, ${(hsl.s * 100).toFixed(3)}%, ${(hsl.l * 100).toFixed(3)}%)`
-  return new Color().setStyle(css)
-}
-
-/**
  * 创建路径扁带 ShaderMaterial（唯一实例）。
+ *
+ * HSL→线性 Color 转换由共享 colorConvert.hslToLinearColor 完成（见该模块注释）。
  *
  * uniform 组成：
  * - uBaseColor / uFlowColor / uFlowRepeatM / uFlowIntensity：创建时一次设置，运行期不变。

@@ -8,6 +8,7 @@ import { PixelBudgetDpr } from './PixelBudgetDpr'
 import { computeCameraFrame } from './cameraFraming'
 import { NodeLayer } from './NodeLayer'
 import { PathLayer } from './PathLayer'
+import { SceneErrorBoundary } from './SceneErrorBoundary'
 import './sceneView.css'
 
 /**
@@ -115,8 +116,12 @@ export function MapSceneView({ packet, scene, initiallyReady }: MapSceneViewProp
         <ambientLight intensity={0.7} />
         <directionalLight position={[1, 2.5, 1.5]} intensity={2.8} />
         {/* SPEC §8.1 图层顺序：PathLayer 位于 NodeLayer 之下（扁带离地 0.015 m，节点贴地）。 */}
-        <PathLayer geometry={packet.pathGeometry} />
-        <NodeLayer instances={packet.nodeInstances} />
+        {/* 数据驱动 GPU 图层纳入场景错误边界：任一图层渲染期抛错（如节点包不自洽、GPU 创建失败）
+            经 notifySceneCreateFailed 进入统一 error 状态，不展示半成品场景（SPEC §10.2、TASK-009）。 */}
+        <SceneErrorBoundary scene={scene}>
+          <PathLayer geometry={packet.pathGeometry} />
+          <NodeLayer instances={packet.nodeInstances} />
+        </SceneErrorBoundary>
         {/* SPEC §8.1 CameraRig：受控 OrbitControls，提供旋转/缩放/平移与自动框选目标。 */}
         <CameraRig bounds={packet.renderBounds} frame={frame} />
       </Canvas>

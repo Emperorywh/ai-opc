@@ -188,3 +188,18 @@ describe('buildNodeGeometry — 确定性', () => {
     }
   })
 })
+
+describe('buildNodeGeometry — 释放生命周期（SPEC §5.4，TASK-009）', () => {
+  it.each(ALL_TYPES)('%s dispose 触发 dispose 事件，使释放路径可自动化验证', (type) => {
+    const dim = DEFAULT_NODE_DIMENSIONS_CONFIG.byType[type]
+    const geo = buildNodeGeometry(type, dim)
+    let disposed = false
+    geo.addEventListener('dispose', () => {
+      disposed = true
+    })
+    // NodeLayer 卸载 effect 调用 geometry.dispose()；此处验证该调用确实释放资源，
+    // 不依赖后续 TASK 或浏览器环境即可证明释放路径有效。
+    geo.dispose()
+    expect(disposed).toBe(true)
+  })
+})

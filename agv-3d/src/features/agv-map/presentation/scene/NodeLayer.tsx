@@ -6,7 +6,9 @@ import type { NodeDimensions } from '../../config/geometryConfig'
 import { NODE_VISUAL_THEME } from '../../config/visualTheme'
 import type { RawNodeType } from '../../domain/rawDto'
 import type { CompiledNodeInstances, NodeInstancePacket } from '../../domain/renderPacket'
+import { NODE_BATCH_TYPES, assertNodeInstancePacket } from './nodeBatch'
 import { buildNodeGeometry } from './nodeGeometry'
+import { createNodeMaterial } from './nodeMaterial'
 
 /**
  * 节点图层：四类节点各一个 InstancedMesh（SPEC §7.2、§8.1 NodeLayer）。
@@ -17,14 +19,14 @@ import { buildNodeGeometry } from './nodeGeometry'
  * - 只读渲染：实例矩阵来自 RenderPacket（geometry 层预编译），本组件只负责上传到 GPU 与渲染，
  *   不解析原始 JSON、不重算放置（SPEC §5.1 展示层边界）。
  * - 无交互：不渲染名称、图例，不挂悬停或点击处理（SPEC §2.3、TASK-009 验收）。
- * - 确定性释放：几何经 useMemo 构建一次，组件卸载时显式 dispose（SPEC §5.4、§11.3）。
+ * - 确定性释放：几何与材质各构建一次（useMemo），primitive 关闭 R3F 自动释放，由 effect 统一 dispose
+ *   （SPEC §5.4、§11.3；释放路径不依赖后续 TASK）。
+ * - 数据自洽校验：挂载前校验每类包的 count 与 matrices 长度一致，不一致直接抛错，交由
+ *   SceneErrorBoundary → notifySceneCreateFailed 进入统一错误状态，绝不静默跳过坏记录（TASK-009 异常路径）。
  */
 
 /** 每个 4×4 实例矩阵的浮点分量数（与 geometry 层 NODE_MATRIX_FLOATS 对齐）。 */
 const MATRIX_FLOATS = 16
-
-/** 固定类型遍历顺序，保证四批渲染顺序确定。 */
-const NODE_TYPE_ORDER: readonly RawNodeType[] = ['node', 'work', 'charge', 'park']
 
 export interface NodeLayerProps {
   /** 四类节点实例包（来自 RenderPacket.nodeInstances）。 */
@@ -35,11 +37,18 @@ export interface NodeLayerProps {
  * 渲染四类节点的 InstancedMesh 集合。
  *
  * 每类一个 NodeInstancedMesh 子组件，独立持有几何与材质，互不查询内部对象（SPEC §8.1）。
+ * 挂载前先校验全部四类包自洽，任一不一致直接抛错，不分配任何 GPU 资源。
  */
 export function NodeLayer({ instances }: NodeLayerProps) {
+  // 挂载前校验全部四类包自洽：任一不一致即抛错，交由 Canvas 内 SceneErrorBoundary 捕获，
+  // 进入统一错误状态；绝不静默上传越界矩阵或展示半批节点（TASK-009 异常路径）。
+  for (const type of NODE_BATCH_TYPES) {
+    assertNodeInstancePacket(instances[type], type)
+  }
+
   return (
     <>
-      {NODE_TYPE_ORDER.map((type) => (
+      {NODE_BATCH_TYPES.map((type) => (
         <NodeInstancedMesh
           key={type}
           type={type}
@@ -60,9 +69,9 @@ interface NodeInstancedMeshProps {
 /**
  * 单类节点的 InstancedMesh。
  *
- * 几何按类型与尺寸构建一次（useMemo），经 primitive 挂接、关闭 R3F 自动释放，
- * 由 effect 统一 dispose，避免重复释放或泄漏。材质为 MeshStandardMaterial（SPEC §8.3），
- * 颜色与自发光取自视觉主题，HSL 经 CSS 字符串由 Three.js 解析。
+ * 几何与材质各按类型与主题构建一次（useMemo），经 primitive 挂接、关闭 R3F 自动释放，
+ * 由卸载 effect 统一 dispose，避免重复释放或泄漏。材质为 MeshStandardMaterial（SPEC §8.3），
+ * 由 createNodeMaterial 从视觉主题构建，颜色、自发光、金属度与粗糙度集中取自主题（§8.2、§12）。
  *
  * 实例矩阵在挂载后用 useLayoutEffect 一次性写入（节点为静态几何，运行期不再更新，SPEC §11.1），
  * 随后计算包围球以修正视锥剔除——InstancedMesh 默认包围球只覆盖几何本地范围，
@@ -71,51 +80,41 @@ interface NodeInstancedMeshProps {
 function NodeInstancedMesh({ type, packet, dimensions }: NodeInstancedMeshProps) {
   const ref = useRef<InstancedMesh>(null)
   const geometry = useMemo(() => buildNodeGeometry(type, dimensions), [type, dimensions])
-  const theme = NODE_VISUAL_THEME[type]
-  const colorCss = hslToCss(theme.color.baseColor)
+  const material = useMemo(() => createNodeMaterial(NODE_VISUAL_THEME[type]), [type])
+  const count = packet.count
 
   useLayoutEffect(() => {
     const mesh = ref.current
     if (mesh === null) return
     const matrix = new Matrix4()
-    for (let i = 0; i < packet.count; i += 1) {
+    for (let i = 0; i < count; i += 1) {
       matrix.fromArray(packet.matrices, i * MATRIX_FLOATS)
       mesh.setMatrixAt(i, matrix)
     }
     mesh.instanceMatrix.needsUpdate = true
     // 重算包围球，使视锥剔除覆盖全部实例的世界位移（SPEC §11.1 静态几何、避免误剔除）。
     mesh.computeBoundingSphere()
-  }, [packet])
+  }, [packet, count])
 
-  // 几何确定性释放：primitive 关闭 R3F 自动释放，由本 effect 统一 dispose。
+  // 几何与材质确定性释放：primitive 关闭 R3F 自动释放，由本 effect 统一 dispose（SPEC §5.4）。
   useEffect(() => {
     return () => {
       geometry.dispose()
+      material.dispose()
     }
-  }, [geometry])
+  }, [geometry, material])
 
-  if (packet.count === 0) return null
+  if (count === 0) return null
 
   return (
     <instancedMesh
       ref={ref}
-      // 构造时给出实例数；几何与材质由子节点挂接，避免构造期分配默认资源。
-      args={[undefined, undefined, packet.count]}
+      // 构造时给出实例数；几何与材质由 primitive 挂接，避免构造期分配默认资源。
+      args={[undefined, undefined, count]}
       castShadow
     >
       <primitive object={geometry} attach="geometry" dispose={null} />
-      <meshStandardMaterial
-        color={colorCss}
-        emissive={colorCss}
-        emissiveIntensity={theme.color.emissiveIntensity}
-        metalness={theme.material.metalness}
-        roughness={theme.material.roughness}
-      />
+      <primitive object={material} attach="material" dispose={null} />
     </instancedMesh>
   )
-}
-
-/** 把 HSL 元组格式化为 Three.js 可解析的 CSS hsl() 字符串。 */
-function hslToCss(hsl: { readonly h: number; readonly s: number; readonly l: number }): string {
-  return `hsl(${hsl.h}, ${(hsl.s * 100).toFixed(3)}%, ${(hsl.l * 100).toFixed(3)}%)`
 }
