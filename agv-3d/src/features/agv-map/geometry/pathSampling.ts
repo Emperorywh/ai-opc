@@ -10,8 +10,12 @@ import type { SamplingConfig } from '../config/geometryConfig'
  * - 方向稳定：采样点始终从 sourceNodeId 指向 targetNodeId。LINE 直出起终点；
  *   BEZIER 以确定性的 de Casteljau 中点递归细分，从起点向终点推进。
  * - 端点完整：采样结果首点恒为路径起点、末点恒为路径终点。
+ * - 三约束同时成立：每个 BEZIER 叶段必须同时满足最大弦长与最大平坦度，
+ *   仅当二者都达标才接受；递归深度上限只作为有限性保证，不作为合格判据。
+ *   达到深度上限仍未满足约束时属于病理输入，抛出可定位错误终止编译，
+ *   不返回假合格段、不退化为 LINE（SPEC §7.3、TASK-002 实现约束）。
  * - 零长度禁止：相邻采样点不得重合，否则抛出可定位的几何编译错误，
- *   不退化或静默跳过（SPEC §7.3、TASK-002）。
+ *   不删除重合点后继续、不静默跳过（SPEC §7.3、TASK-002）。
  */
 
 /** 一条路径的采样结果。点序列至少 2 个，沿源→目标方向。 */
@@ -34,6 +38,7 @@ export interface SampledEdge {
 /** 几何编译错误码封闭联合。 */
 export type GeometryErrorCode =
   | 'ZERO_LENGTH_SAMPLE_SEGMENT'
+  | 'BEZIER_SUBDIVISION_LIMIT_REACHED'
   | 'EMPTY_COMPUTE_BOUNDS'
   | 'INVALID_RIBBON_GEOMETRY'
   | 'RIBBON_INDEX_OUT_OF_BOUNDS'
@@ -130,12 +135,20 @@ function collectPoints(path: DirectedPath, config: SamplingConfig): Point2[] {
 /**
  * 三次贝塞尔的确定性递归细分（de Casteljau 中点切分）。
  *
- * 终止条件（满足其一）：
- * - 当前子段弦长 ≤ maxChordLengthM 且控制点到弦的偏差 ≤ maxFlatnessErrorM；
- * - 递归深度达到 maxRecursionDepth，作为安全上限保证有限细分。
+ * 合格判据（必须同时成立，TASK-002 实现约束）：
+ * - 当前子段弦长 ≤ maxChordLengthM；
+ * - 控制点到弦的平坦度偏差 ≤ maxFlatnessErrorM。
  *
- * 终止时把子段终点追加到 points，保证整条曲线的点序列连续、首尾完整、
- * 且每个追加点都是原曲线上的点（de Casteljau 切分点恒在曲线上）。
+ * 终止行为：
+ * - 合格：把子段终点追加到 points，子段不再细分；
+ * - 仍不合格但未达深度上限：在 t=0.5 处切分为左右两条三次贝塞尔继续细分；
+ * - 仍不合格且已达 maxRecursionDepth：属于病理输入，抛出 GeometryCompileError
+ *   终止整条边的编译，不接受假合格段、不退化、不静默跳过（SPEC §7.3、TASK-002）。
+ *   抛出时 points 中已追加的局部点随调用栈一同丢弃，不产生部分采样结果。
+ *
+ * maxRecursionDepth 仅作为有限性安全上限，不是合格判据：深度耗尽本身不使段合格。
+ * 合格段无论在何深度都接受，保证正常曲线在远低于上限处自然终止（V76 全部 109 条
+ * 贝塞尔实测最大递归深度远小于 12，由 samplingIntegration.test.ts 平坦度断言守护）。
  */
 function flattenCubicBezier(
   p0: Point2,
@@ -150,9 +163,20 @@ function flattenCubicBezier(
   const flatness = bezierFlatness(p0, p1, p2, p3)
   const flatEnough =
     chord <= config.maxChordLengthM && flatness <= config.maxFlatnessErrorM
-  if (flatEnough || depth >= config.maxRecursionDepth) {
+  if (flatEnough) {
     points.push(p3)
     return
+  }
+  // 三约束未同时满足且已达深度上限：病理输入，终止编译并提供可定位错误。
+  // depth 从 0 起计，maxRecursionDepth=0 表示根调用即不允许再细分。
+  if (depth >= config.maxRecursionDepth) {
+    throw new GeometryCompileError(
+      'BEZIER_SUBDIVISION_LIMIT_REACHED',
+      `贝塞尔递归细分达到深度上限 ${config.maxRecursionDepth} 仍未满足平坦度约束`
+        + `（depth=${depth}，chord=${chord}m，flatness=${flatness}m）`,
+      undefined,
+      undefined,
+    )
   }
 
   // de Casteljau 在 t=0.5 处切分为左右两条三次贝塞尔；分量级运算保证确定性。

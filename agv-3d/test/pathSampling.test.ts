@@ -94,12 +94,17 @@ describe('samplePath — 三次贝塞尔', () => {
     }
   })
 
-  it('最大递归深度约束生效：深度 0 时只产生首尾两点', () => {
+  it('深度上限不作为合格判据：合格段在任何深度都被接受', () => {
+    // 一条本身已足够平坦、且弦长足够短的曲线，在 maxRecursionDepth=0（根调用不再细分）
+    // 时仍应被接受为首尾两点——证明深度上限只保证有限细分，不会误拒已达标段。
     const sampled = samplePath(
-      bezier({ x: 0, y: 0 }, { x: 5, y: 10 }, { x: 15, y: -10 }, { x: 20, y: 0 }),
+      bezier({ x: 0, y: 0 }, { x: 0.05, y: 0.001 }, { x: 0.1, y: -0.001 }, { x: 0.15, y: 0 }),
       { ...DEFAULT_SAMPLING_CONFIG, maxRecursionDepth: 0 },
     )
-    expect(sampled.points).toEqual([{ x: 0, y: 0 }, { x: 20, y: 0 }])
+    expect(sampled.points).toEqual([
+      { x: 0, y: 0 },
+      { x: 0.15, y: 0 },
+    ])
   })
 
   it('采样方向沿 source → target：调换首尾得到反向点序', () => {
@@ -152,6 +157,68 @@ describe('samplePath — 零长度段', () => {
   })
 })
 
+describe('samplePath — 递归深度上限与病理输入', () => {
+  // SPEC §7.3、TASK-002 实现约束：三约束必须同时成立；达到深度上限仍未满足时
+  // 终止编译并提供可定位错误，不接受假合格段、不退化为 LINE、不产生部分采样结果。
+  const nonFlatCurve = bezier(
+    { x: 0, y: 0 },
+    { x: 5, y: 10 },
+    { x: 15, y: -10 },
+    { x: 20, y: 0 },
+  )
+
+  it('未满足平坦度且达到深度上限时抛出可定位错误', () => {
+    // 该曲线平坦度远大于 0.01 m，maxRecursionDepth=0 表示根调用即不允许细分，
+    // 故根段不合格且已达上限——必须抛出，而非静默返回首尾两点。
+    try {
+      samplePath(nonFlatCurve, { ...DEFAULT_SAMPLING_CONFIG, maxRecursionDepth: 0 })
+      throw new Error('expected throw')
+    } catch (error) {
+      expect(error).toBeInstanceOf(GeometryCompileError)
+      const geo = error as GeometryCompileError
+      expect(geo.code).toBe('BEZIER_SUBDIVISION_LIMIT_REACHED')
+      expect(geo.edgeId).toBeUndefined()
+    }
+  })
+
+  it('未达到深度上限时不因平坦度不足而报错：继续细分直到合格或耗尽深度', () => {
+    // 给予充分深度后该曲线应在远低于上限处自然终止，返回完整采样而非错误。
+    const sampled = samplePath(nonFlatCurve, {
+      ...DEFAULT_SAMPLING_CONFIG,
+      maxRecursionDepth: 24,
+    })
+    expect(sampled.points.length).toBeGreaterThan(2)
+    expect(sampled.points[0]).toEqual({ x: 0, y: 0 })
+    expect(sampled.points[sampled.points.length - 1]).toEqual({ x: 20, y: 0 })
+  })
+
+  it('默认深度 12 下无法满足约束的病理曲线终止编译', () => {
+    // 控制点远离弦 1e15 m：即便 12 级细分（平坦度约按 4 倍每级衰减），
+    // 叶段平坦度仍远超 0.01 m，属于在深度上限内无法满足约束的病理输入。
+    const pathological = bezier(
+      { x: 0, y: 0 },
+      { x: 0, y: 1e15 },
+      { x: 1, y: 1e15 },
+      { x: 1, y: 0 },
+    )
+    expect(() => samplePath(pathological, DEFAULT_SAMPLING_CONFIG)).toThrow(GeometryCompileError)
+    try {
+      samplePath(pathological, DEFAULT_SAMPLING_CONFIG)
+      throw new Error('expected throw')
+    } catch (error) {
+      expect((error as GeometryCompileError).code).toBe('BEZIER_SUBDIVISION_LIMIT_REACHED')
+    }
+  })
+
+  it('错误向上传播时不产生部分采样结果', () => {
+    // 深度优先递归在首个达到上限且不合格的叶段即抛出；此前可能已向局部 points
+    // 追加若干点，但抛出后 collectPoints 不返回该数组，samplePath 不返回结果。
+    expect(() =>
+      samplePath(nonFlatCurve, { ...DEFAULT_SAMPLING_CONFIG, maxRecursionDepth: 1 }),
+    ).toThrow(GeometryCompileError)
+  })
+})
+
 describe('sampleEdges', () => {
   it('按顺序返回绑定 id 的采样结果', () => {
     const edges: DirectedEdge[] = [
@@ -195,6 +262,33 @@ describe('sampleEdges', () => {
       expect(error).toBeInstanceOf(GeometryCompileError)
       expect((error as GeometryCompileError).edgeId).toBe('bad')
       expect((error as GeometryCompileError).code).toBe('ZERO_LENGTH_SAMPLE_SEGMENT')
+    }
+  })
+
+  it('为递归深度上限错误补充边 id 后向上抛出', () => {
+    // 深度上限错误同样需要可定位到具体边：与零长度段错误走相同的边 id 补全路径，
+    // 保证加载层能把 BEZIER_SUBDIVISION_LIMIT_REACHED 映射为带边定位的编译失败。
+    const edges: DirectedEdge[] = [
+      {
+        id: 'good',
+        sourceNodeId: 'a',
+        targetNodeId: 'b',
+        path: line({ x: 0, y: 0 }, { x: 1, y: 0 }),
+      },
+      {
+        id: 'spike',
+        sourceNodeId: 'b',
+        targetNodeId: 'c',
+        path: bezier({ x: 0, y: 0 }, { x: 0, y: 1e15 }, { x: 1, y: 1e15 }, { x: 1, y: 0 }),
+      },
+    ]
+    try {
+      sampleEdges(edges, DEFAULT_SAMPLING_CONFIG)
+      throw new Error('expected throw')
+    } catch (error) {
+      expect(error).toBeInstanceOf(GeometryCompileError)
+      expect((error as GeometryCompileError).edgeId).toBe('spike')
+      expect((error as GeometryCompileError).code).toBe('BEZIER_SUBDIVISION_LIMIT_REACHED')
     }
   })
 
