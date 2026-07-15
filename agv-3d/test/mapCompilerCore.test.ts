@@ -30,6 +30,14 @@ const REAL_BYTES = Uint8Array.from(rawBuffer)
 const TAMPERED_BYTES = REAL_BYTES.slice()
 TAMPERED_BYTES[0] ^= 0xff
 
+// 默认场景编译配置：与 Worker 入口注入的真实配置一致，供 runCore 与自定义依赖用例复用。
+const DEFAULT_CONFIGS = {
+  sampling: DEFAULT_SAMPLING_CONFIG,
+  laneGrouping: DEFAULT_LANE_GROUPING_CONFIG,
+  ribbon: DEFAULT_PATH_RIBBON_CONFIG,
+  nodeDimensions: DEFAULT_NODE_DIMENSIONS_CONFIG,
+}
+
 /**
  * 收集全部编译事件，返回事件序列与终止事件（success/error）。
  *
@@ -64,7 +72,7 @@ async function runCore(
           controller.abort()
         }
         received = Math.min(received + step, total)
-        onProgress(received, total)
+        onProgress(received)
         // 让出微任务，保证 await 边界推进。
         await Promise.resolve()
       }
@@ -86,12 +94,23 @@ async function runCore(
     controller.signal,
     (event) => events.push(event),
     deps,
-    {
-      sampling: DEFAULT_SAMPLING_CONFIG,
-      laneGrouping: DEFAULT_LANE_GROUPING_CONFIG,
-      ribbon: DEFAULT_PATH_RIBBON_CONFIG,
-      nodeDimensions: DEFAULT_NODE_DIMENSIONS_CONFIG,
-    },
+    DEFAULT_CONFIGS,
+  )
+  return events
+}
+
+/**
+ * 以自定义依赖运行核心，用于隔离下载失败、不可预期错误等无法经字节输入驱动的路径。
+ * fetchBytes / verifyIntegrity 由调用方注入；其余与 runCore 一致。
+ */
+async function runWithDeps(deps: CompilationDeps): Promise<CompilationEvent[]> {
+  const events: CompilationEvent[] = []
+  await runMapCompilation(
+    'fake://map.json',
+    new AbortController().signal,
+    (event) => events.push(event),
+    deps,
+    DEFAULT_CONFIGS,
   )
   return events
 }
@@ -299,5 +318,154 @@ describe('中止：取消下载后静默返回，不 emit 错误（SPEC §5.4、
     expect(events.some((e) => e.kind === 'success' || e.kind === 'error')).toBe(false)
     // 至少有部分下载进度事件。
     expect(events.some((e) => e.kind === 'download-progress')).toBe(true)
+  })
+})
+
+describe('下载失败：fetchBytes 非中止拒绝 → DOWNLOAD_FAILED（SPEC §10.2、TASK-007）', () => {
+  it('网络错误拒绝 → DOWNLOAD_FAILED，不进入解析，无成功数据包', async () => {
+    const events = await runWithDeps({
+      fetchBytes: async () => {
+        throw new Error('网络中断：ETIMEDOUT')
+      },
+      verifyIntegrity: verifyAssetIntegrity,
+    })
+    const last = events[events.length - 1]
+    expect(last?.kind).toBe('error')
+    if (last?.kind !== 'error') throw new Error('unreachable')
+    expect(last.code).toBe('DOWNLOAD_FAILED')
+    // 下载失败不进入解析；不产生成功数据包或半成品。
+    expect(events.some((e) => e.kind === 'parse')).toBe(false)
+    expect(events.some((e) => e.kind === 'success')).toBe(false)
+  })
+})
+
+describe('几何编译失败：超长贝塞尔触发细分上限 → COMPILE_FAILED（SPEC §10.2、TASK-007）', () => {
+  it('通过校验但无法在深度上限内平坦化的贝塞尔 → COMPILE_FAILED，携带边定位', async () => {
+    // 构造结构合法但几何病理的载荷：单条贝塞尔跨度 10000 m。默认采样配置
+    // （最大弦长 0.25 m、递归深度上限 12）最多平坦化约 1024 m（2^12 × 0.25），远不足以覆盖，
+    // 因此 sampleEdges 在深度耗尽时抛出 BEZIER_SUBDIVISION_LIMIT_REACHED。
+    const asset = {
+      data: {
+        currentMapInfoVersion: {
+          mapJson: {
+            nodes: [
+              { id: 'n1', type: 'work', x: 0, y: 0, angle: 0 },
+              { id: 'n2', type: 'work', x: 10000, y: 0, angle: 0 },
+            ],
+            edges: [
+              {
+                id: 'e-long',
+                edgeType: 'BEZIER',
+                sx: 0,
+                sy: 0,
+                ex: 10000,
+                ey: 0,
+                cx: 3000,
+                cy: 500,
+                dx: 7000,
+                dy: -500,
+                snodeId: 'n1',
+                enodeId: 'n2',
+                isBackEdge: false,
+              },
+            ],
+            zones: [],
+            nodeEdgeGroups: [],
+          },
+        },
+      },
+    }
+    const bytes = Uint8Array.from(Buffer.from(JSON.stringify(asset)))
+    // 绕过完整性校验，直接驱动到几何编译错误路径。
+    const events = await runCore(bytes, { bypassIntegrity: true })
+    const last = events[events.length - 1]
+    expect(last?.kind).toBe('error')
+    if (last?.kind !== 'error') throw new Error('unreachable')
+    expect(last.code).toBe('COMPILE_FAILED')
+    // 几何错误携带可定位的边 id。
+    expect(last.details.some((d) => d.includes('e-long'))).toBe(true)
+    // 校验阶段已通过（出现过 validate-progress），但无成功数据包。
+    expect(events.some((e) => e.kind === 'validate-progress')).toBe(true)
+    expect(events.some((e) => e.kind === 'success')).toBe(false)
+  })
+})
+
+describe('不可预期错误：依赖抛异常 → UNEXPECTED_ERROR（SPEC §10.2、TASK-007）', () => {
+  it('verifyIntegrity 抛出（非返回 ok:false）→ UNEXPECTED_ERROR', async () => {
+    const events = await runWithDeps({
+      fetchBytes: async (_url, _signal, onProgress) => {
+        onProgress(REAL_BYTES.byteLength)
+        return REAL_BYTES
+      },
+      verifyIntegrity: async () => {
+        throw new Error('crypto.subtle 不可用')
+      },
+    })
+    const last = events[events.length - 1]
+    expect(last?.kind).toBe('error')
+    if (last?.kind !== 'error') throw new Error('unreachable')
+    expect(last.code).toBe('UNEXPECTED_ERROR')
+    expect(events.some((e) => e.kind === 'success')).toBe(false)
+  })
+})
+
+describe('恒不 reject：所有错误经 emit 上报，Promise 恒为已决（SPEC §5.4、TASK-007）', () => {
+  it('依赖抛错时 runMapCompilation 仍 resolve（不产生未处理拒绝），错误经事件上报', async () => {
+    const events: CompilationEvent[] = []
+    await expect(
+      runMapCompilation(
+        'fake://map.json',
+        new AbortController().signal,
+        (e) => events.push(e),
+        {
+          fetchBytes: async () => {
+            throw new Error('网络中断')
+          },
+          verifyIntegrity: verifyAssetIntegrity,
+        },
+        DEFAULT_CONFIGS,
+      ),
+    ).resolves.toBeUndefined()
+    expect(events[events.length - 1]?.kind).toBe('error')
+  })
+})
+
+describe('下载边界：分母固定为契约字节数，不依赖 Content-Length（SPEC §10.1、TASK-007）', () => {
+  it('多分块响应：每条 download-progress 的 total 恒为 ASSET_SIZE_BYTES', async () => {
+    const events = await runCore(REAL_BYTES, { chunkCount: 32 })
+    const dl = eventsOf(events, 'download-progress')
+    expect(dl.length).toBeGreaterThanOrEqual(2)
+    for (const e of dl) {
+      if (e.kind !== 'download-progress') throw new Error('unreachable')
+      // 分母固定为契约字节数，不随分块大小或运行时 Content-Length 变化。
+      expect(e.total).toBe(ASSET_SIZE_BYTES)
+    }
+    const last = dl[dl.length - 1]
+    if (last.kind !== 'download-progress') throw new Error('unreachable')
+    expect(last.received).toBe(ASSET_SIZE_BYTES)
+  })
+
+  it('首块不被误报为 100%：首块占比远小于 1（排除 Content-Length 缺失把首块当全量的回归）', async () => {
+    const events = await runCore(REAL_BYTES, { chunkCount: 8 })
+    const first = events.find((e) => e.kind === 'download-progress')
+    if (first?.kind !== 'download-progress') throw new Error('unreachable')
+    // 首块约占 1/8 ≈ 0.125，绝非 1.0。
+    expect(first.received).toBeGreaterThan(0)
+    expect(first.received / first.total).toBeLessThan(0.2)
+  })
+
+  it('实际字节数少于契约基线时进度永不达 1，最终由完整性校验裁决失败', async () => {
+    // 截断字节：下载完成（received 达截断长度）但少于契约字节数，完整性校验失败。
+    const truncated = REAL_BYTES.slice(0, ASSET_SIZE_BYTES - 1000)
+    const events = await runCore(truncated)
+    const dl = eventsOf(events, 'download-progress')
+    for (const e of dl) {
+      if (e.kind !== 'download-progress') throw new Error('unreachable')
+      // 分母仍为契约基线，故进度 < 1。
+      expect(e.received / e.total).toBeLessThan(1)
+    }
+    const last = events[events.length - 1]
+    if (last?.kind !== 'error') throw new Error('应失败')
+    expect(last.code).toBe('INTEGRITY_FAILED')
   })
 })

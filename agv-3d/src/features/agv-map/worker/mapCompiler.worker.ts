@@ -5,9 +5,9 @@ import {
   DEFAULT_PATH_RIBBON_CONFIG,
   DEFAULT_SAMPLING_CONFIG,
 } from '../config/geometryConfig'
-import type { RenderPacket } from '../domain/renderPacket'
 import { verifyAssetIntegrity } from '../infrastructure/assetIntegrity'
 import { runMapCompilation, type CompilationDeps } from './mapCompilerCore'
+import { collectPacketTransferables } from './packetTransfer'
 import type {
   CompileRequest,
   CompilationEvent,
@@ -34,22 +34,22 @@ const ctx = self as unknown as DedicatedWorkerGlobalScope
 /**
  * 用 fetch 流式下载资产字节，按已读字节经 onProgress 上报。
  *
- * total 取 Content-Length；缺失时退化为已读字节上界（单调不下降），
- * 主线程进度映射据此始终单调。signal 中止时 fetch 自然 reject 为 AbortError。
+ * 进度分母不由下载层决定：核心把已读字节绑定到固定契约字节数（ASSET_SIZE_BYTES），
+ * 因此此处只上报 received，不读取也不依赖 Content-Length——缺失或错误的 Content-Length
+ * 不会影响进度单调，实际字节总数最终由完整性校验裁决（SPEC §10.1、TASK-007）。
+ * signal 中止时 fetch 自然 reject 为 AbortError。
  */
 const fetchBytes: CompilationDeps['fetchBytes'] = async (url, signal, onProgress) => {
   const response = await fetch(url, { signal })
   if (!response.ok) {
     throw new Error(`资产下载失败：HTTP ${response.status} ${response.statusText}`)
   }
-  const contentLength = response.headers.get('content-length')
-  const declaredTotal = contentLength ? Number.parseInt(contentLength, 10) : 0
 
   if (response.body === null) {
-    // 无流body（如 data: URL 或被 polyfill）；退化为一次性读取。
+    // 无流 body（如 data: URL 或被 polyfill）：一次性读取，按已读总字节报告进度。
     const buffer = await response.arrayBuffer()
     const bytes = new Uint8Array(buffer)
-    onProgress(bytes.byteLength, declaredTotal || bytes.byteLength)
+    onProgress(bytes.byteLength)
     return bytes
   }
 
@@ -62,13 +62,11 @@ const fetchBytes: CompilationDeps['fetchBytes'] = async (url, signal, onProgress
     if (value) {
       chunks.push(value as Uint8Array<ArrayBuffer>)
       received += value.byteLength
-      // total 取 Content-Length 与已读字节的较大者，保证单调不下降。
-      const total = declaredTotal > received ? declaredTotal : received
-      onProgress(received, total)
+      onProgress(received)
     }
   }
 
-  // 合并分块为单一连续 Uint8Array；运行时分块类型为 ArrayBuffer 支撑。
+  // 合并分块为单一连续 Uint8Array，供完整性校验与 JSON 解码消费。
   const merged = new Uint8Array(received)
   let offset = 0
   for (const chunk of chunks) {
@@ -78,31 +76,11 @@ const fetchBytes: CompilationDeps['fetchBytes'] = async (url, signal, onProgress
   return merged
 }
 
-/**
- * 收集 RenderPacket 内全部可转移 ArrayBuffer（节点矩阵 + 路径扁带缓冲）。
- * 转移后 Worker 侧 TypedArray 被分离，主线程零拷贝接收（SPEC §5.4）。
- */
-function collectTransferables(packet: RenderPacket): Transferable[] {
-  const buffers: ArrayBuffer[] = [
-    packet.nodeInstances.node.matrices.buffer,
-    packet.nodeInstances.work.matrices.buffer,
-    packet.nodeInstances.charge.matrices.buffer,
-    packet.nodeInstances.park.matrices.buffer,
-    packet.pathGeometry.positions.buffer,
-    packet.pathGeometry.normals.buffer,
-    packet.pathGeometry.pathU.buffer,
-    packet.pathGeometry.flowDirections.buffer,
-    packet.pathGeometry.indices.buffer,
-    packet.pathGeometry.edgeVertexRanges.buffer,
-  ]
-  return buffers as Transferable[]
-}
-
-/** 把编译事件包装为 Worker 消息并回传；成功事件附带 transfer 列表。 */
+/** 把编译事件包装为 Worker 消息并回传；成功事件附带全部数据包缓冲的转移列表（SPEC §5.4）。 */
 function postEvent(requestId: number, event: CompilationEvent): void {
   const message: FromWorkerMessage = { type: 'event', requestId, event }
   if (event.kind === 'success') {
-    ctx.postMessage(message, collectTransferables(event.packet))
+    ctx.postMessage(message, collectPacketTransferables(event.packet))
   } else {
     ctx.postMessage(message)
   }

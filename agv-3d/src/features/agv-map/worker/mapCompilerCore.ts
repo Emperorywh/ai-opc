@@ -1,4 +1,4 @@
-import type { AssetIntegrityResult } from '../domain/assetContract'
+import { ASSET_SIZE_BYTES, type AssetIntegrityResult } from '../domain/assetContract'
 import type { CompileProgressReport, RenderPacket } from '../domain/renderPacket'
 import { normalizeMap } from '../domain/normalize'
 import { validateRawMapAsset } from '../domain/validation'
@@ -40,13 +40,15 @@ export type CompilationEmitter = (event: CompilationEvent) => void
  */
 export interface CompilationDeps {
   /**
-   * 下载资产字节，按已读字节数经 onProgress 上报，total 为 Content-Length 或已读上界。
+   * 下载资产字节，按已读字节数经 onProgress 上报。
+   * 进度分母不由此处决定：核心把已读字节绑定到固定契约字节数 ASSET_SIZE_BYTES，
+   * 因此 onProgress 只需报告 received，无需也不应依赖 Content-Length（SPEC §10.1、TASK-007）。
    * 必须在 signal 中止时 reject（AbortError），使核心进入静默中止路径。
    */
   readonly fetchBytes: (
     url: string,
     signal: AbortSignal,
-    onProgress: (received: number, total: number) => void,
+    onProgress: (received: number) => void,
   ) => Promise<Uint8Array<ArrayBuffer>>
 
   /**
@@ -71,13 +73,15 @@ export async function runMapCompilation(
   configs: SceneCompileConfigs,
 ): Promise<void> {
   try {
-    // —— 下载（downloading 阶段：0%～30%，按已读字节映射）——
-    // 字节总数优先取 Content-Length；fetchBytes 实现保证 total 单调不下降。
+    // —— 下载（downloading 阶段：0%～30%，按 已读字节 / 契约字节数 映射）——
+    // 进度分母固定为资产契约字节数 ASSET_SIZE_BYTES（SPEC §10.1、TASK-007），不依赖运行时
+    // Content-Length：缺失或错误的 Content-Length 不会把首块误报为 100%，实际字节总数最终
+    // 由完整性校验裁决。fetchBytes 只上报已读字节，total 在此绑定为固定基线。
     // 下载错误单独捕获并归为 DOWNLOAD_FAILED，不与后续阶段错误混淆。
     let bytes: Uint8Array<ArrayBuffer>
     try {
-      bytes = await deps.fetchBytes(assetUrl, signal, (received, total) => {
-        emit({ kind: 'download-progress', received, total })
+      bytes = await deps.fetchBytes(assetUrl, signal, (received) => {
+        emit({ kind: 'download-progress', received, total: ASSET_SIZE_BYTES })
       })
     } catch (downloadError) {
       if (signal.aborted || isAbortError(downloadError)) return
