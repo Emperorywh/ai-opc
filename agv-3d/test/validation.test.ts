@@ -262,6 +262,22 @@ describe('validateRawMap — 结构规则', () => {
     const result = validateRawMap(payload)
     expect(result.some((p) => p.path === 'nodes[2].angle')).toBe(true)
   })
+
+  it('节点缺失必需数值字段被校验拒绝并定位到字段（TASK-001 异常路径）', () => {
+    const payload = validPayload()
+    delete (payload.nodes[0] as unknown as Record<string, unknown>).x
+    const result = validateRawMap(payload)
+    expect(codes(payload)).toContain('NON_FINITE_NODE_COORDINATE')
+    expect(result.some((p) => p.path === 'nodes[0].x')).toBe(true)
+  })
+
+  it('边缺失必需引用字段被校验拒绝并定位到字段（TASK-001 异常路径）', () => {
+    const payload = validPayload()
+    delete (payload.edges[0] as unknown as Record<string, unknown>).snodeId
+    const result = validateRawMap(payload)
+    expect(codes(payload)).toContain('MISSING_NODE_REFERENCE')
+    expect(result.some((p) => p.path === 'edges[0].snodeId')).toBe(true)
+  })
 })
 
 describe('extractMapPayload / validateRawMapAsset', () => {

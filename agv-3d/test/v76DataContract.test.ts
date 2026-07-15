@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { ASSET_SHA256_HEX, ASSET_SIZE_BYTES } from '../src/features/agv-map/domain/assetContract'
-import { auditRawMap, normalizeMap } from '../src/features/agv-map/domain/normalize'
+import { auditDataIntegrity, auditRawMap, normalizeMap } from '../src/features/agv-map/domain/normalize'
 import type { RawMapAsset, RawMapPayload } from '../src/features/agv-map/domain/rawDto'
 import { extractMapPayload, validateRawMap } from '../src/features/agv-map/domain/validation'
 import { verifyAssetIntegrity } from '../src/features/agv-map/infrastructure/assetIntegrity'
@@ -64,20 +64,35 @@ describe('V76 数据契约', () => {
     expect(model.edges).toHaveLength(3045)
   })
 
-  it('边端点保留边自身坐标，不吸附节点坐标（SPEC §4.2）', () => {
+  it('规范化无损保留边自身端点坐标，不吸附节点坐标（SPEC §4.2）', () => {
     const model = normalizeMap(payload)
-    const nodeById = new Map(model.nodes.map((n) => [n.id, n]))
-    let foundMismatch = false
-    for (const edge of model.edges) {
-      if (edge.path.kind !== 'line') continue
-      const src = nodeById.get(edge.sourceNodeId)
-      if (!src) continue
-      if (src.position.x !== edge.path.start.x || src.position.y !== edge.path.start.y) {
-        foundMismatch = true
-        break
-      }
-    }
-    // SPEC §4.2 指出存在 483 条端点与节点坐标不一致的边
-    expect(foundMismatch).toBe(true)
+    // 逐条核对规范化端点与原始边坐标完全一致，证明规范化没有把端点改写或吸附到节点坐标。
+    // 结合下方完整性审计（483 条边端点与节点坐标不一致），可推出规范化结果同样保持偏差。
+    model.edges.forEach((edge, index) => {
+      const raw = payload.edges[index]
+      expect(edge.path.start.x).toBe(raw.sx)
+      expect(edge.path.start.y).toBe(raw.sy)
+      expect(edge.path.end.x).toBe(raw.ex)
+      expect(edge.path.end.y).toBe(raw.ey)
+    })
+  })
+})
+
+describe('V76 数据完整性基线', () => {
+  // SPEC §4.2 末两行：把“校验通过”拆解为可逐项核对的缺陷计数与端点偏差基线。
+  // 这些断言固定数据基线，资产有意变更时必须同步更新 SPEC §4.2 与本测试。
+  const integrity = auditDataIntegrity(payload)
+
+  it('无重复 id、无非法坐标、无缺失节点引用（SPEC §4.2）', () => {
+    expect(integrity.duplicateNodeIdCount).toBe(0)
+    expect(integrity.duplicateEdgeIdCount).toBe(0)
+    expect(integrity.invalidNodeCoordinateCount).toBe(0)
+    expect(integrity.invalidEdgeCoordinateCount).toBe(0)
+    expect(integrity.missingNodeReferenceCount).toBe(0)
+  })
+
+  it('483 条边端点与节点坐标不完全一致，最大差异 0.03 m（SPEC §4.2）', () => {
+    expect(integrity.endpointNodeMismatchCount).toBe(483)
+    expect(integrity.maxEndpointNodeDistanceM).toBeCloseTo(0.03, 5)
   })
 })
