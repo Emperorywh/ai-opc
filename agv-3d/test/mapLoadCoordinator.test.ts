@@ -9,6 +9,7 @@ import type {
   CompilationEvent,
 } from '../src/features/agv-map/domain/compilerProtocol'
 import type { RenderPacket } from '../src/features/agv-map/domain/renderPacket'
+import { getOverlayDisplay } from '../src/features/agv-map/presentation/loadDisplay'
 
 /**
  * 加载协调器验证（SPEC §5.1、§5.3、§5.4、§10.1、TASK-006）。
@@ -303,5 +304,79 @@ describe('订阅与停止幂等（SPEC §5.4）', () => {
     // a 的端口事件不影响 b。
     portA.emit(portA.lastRequest!.requestId, { kind: 'download-progress', received: 10, total: 10 })
     expect(b.getState()).toBeNull()
+  })
+})
+
+describe('终态封闭：终态后过期端口事件不改变状态与覆盖层（TASK-008）', () => {
+  /**
+   * TASK-008 终态路径验证：error 或 ready 后即使端口继续提交旧进度（requestId 仍匹配当前
+   * 未取消会话），phase 镜像与状态机双重隔离使状态不回退，覆盖层展示恒保持终态——
+   * ready 恒为空（场景保持露出），error 恒为错误展示（不回到加载态，不暴露半成品场景）。
+   */
+  it('ready 后过期 download-progress 被隔离，覆盖层恒为空', () => {
+    const { coordinator, port } = setupAtCreatingScene()
+    coordinator.scene.notifyFirstFrameRendered()
+    coordinator.scene.notifyFadeComplete()
+    expect(coordinator.getState()!.status).toBe('ready')
+    expect(getOverlayDisplay(coordinator.getState())).toBe(null)
+
+    // 过期 download-progress：requestId 仍匹配当前会话，但 phase 镜像已过 downloading，
+    // 即便绕过镜像，ready 终态也拒绝 report-progress——状态与覆盖层均不变。
+    port.emit(port.lastRequest!.requestId, { kind: 'download-progress', received: 1, total: 10 })
+    expect(coordinator.getState()!.status).toBe('ready')
+    expect(getOverlayDisplay(coordinator.getState())).toBe(null)
+  })
+
+  it('ready 后过期 success 被状态机拒绝，覆盖层恒为空', () => {
+    const { coordinator, port, packet } = setupAtCreatingScene()
+    coordinator.scene.notifyFirstFrameRendered()
+    coordinator.scene.notifyFadeComplete()
+    expect(getOverlayDisplay(coordinator.getState())).toBe(null)
+
+    // 过期 success：attach-packet 仅在 compiling-paths 允许，ready 终态被状态机拒绝。
+    port.emit(port.lastRequest!.requestId, { kind: 'success', packet })
+    expect(coordinator.getState()!.status).toBe('ready')
+    expect(getOverlayDisplay(coordinator.getState())).toBe(null)
+  })
+
+  it('error 后过期 download-progress 被隔离，覆盖层恒为错误展示', () => {
+    const coordinator = createMapLoadCoordinator()
+    const port = new FakeCompilerPort()
+    coordinator.start(port, 'fake://map.json')
+    const rid = port.lastRequest!.requestId
+    // 下载阶段即失败 → error(ASSET_DOWNLOAD_FAILED, stage=downloading)。
+    port.emit(rid, {
+      kind: 'error',
+      code: 'DOWNLOAD_FAILED',
+      message: '网络中断',
+      details: ['status 503'],
+    })
+    expect(coordinator.getState()!.status).toBe('error')
+    expect(getOverlayDisplay(coordinator.getState())?.kind).toBe('error')
+
+    // 过期 download-progress：phase 镜像仍为 downloading 会尝试 report-progress，
+    // 但状态机拒绝在 error 终态上写入，状态与覆盖层恒为错误展示，不回到加载态。
+    port.emit(rid, { kind: 'download-progress', received: 5, total: 10 })
+    expect(coordinator.getState()!.status).toBe('error')
+    expect(getOverlayDisplay(coordinator.getState())?.kind).toBe('error')
+  })
+
+  it('error 后过期 success 被状态机拒绝，覆盖层恒为错误展示', () => {
+    const coordinator = createMapLoadCoordinator()
+    const port = new FakeCompilerPort()
+    coordinator.start(port, 'fake://map.json')
+    const rid = port.lastRequest!.requestId
+    port.emit(rid, {
+      kind: 'error',
+      code: 'DOWNLOAD_FAILED',
+      message: '网络中断',
+      details: ['status 503'],
+    })
+    expect(getOverlayDisplay(coordinator.getState())?.kind).toBe('error')
+
+    // 过期 success：attach-packet 在 error 终态被状态机拒绝，不暴露半成品场景。
+    port.emit(rid, { kind: 'success', packet: emptyPacket() })
+    expect(coordinator.getState()!.status).toBe('error')
+    expect(getOverlayDisplay(coordinator.getState())?.kind).toBe('error')
   })
 })
