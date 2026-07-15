@@ -1,16 +1,17 @@
+import type { MapCompilerPort } from '../application/mapCompilerPort'
 import type {
   CompileRequest,
   CompilationEvent,
   ToWorkerMessage,
   FromWorkerMessage,
-} from '../worker/mapCompilerProtocol'
+} from '../domain/compilerProtocol'
 
 /**
- * 后台地图编译 Worker 的主线程适配器（SPEC §5.1 infrastructure、§5.4、TASK-007）。
+ * 后台地图编译 Worker 的主线程适配器（SPEC §5.1 infrastructure、§5.4、TASK-006/007）。
  *
  * 职责：创建并持有编译 Worker、发送编译请求、把 Worker 消息翻译为事件回调、
- * 在取消或销毁时终止 Worker。适配器是展示层与 Worker 协议之间的边界：
- * 调用方只依赖 request 编译与接收事件，不直接接触 Worker API。
+ * 在取消或销毁时终止 Worker。适配器实现应用层 MapCompilerPort 端口，是编译协议的具体载体：
+ * 应用层加载用例只依赖端口抽象，由展示层组合根把本适配器注入应用层协调器。
  *
  * 不变量：
  * - 单 Worker 生命期：一个适配器实例对应一个 Worker；terminate 后不再可用。
@@ -19,7 +20,9 @@ import type {
  * - 取消即终止：取消下载的唯一可靠方式是 terminate Worker（终止其 fetch 流与微任务），
  *   随后由调用方重建新适配器开启新会话，保证后台执行单元归零（SPEC §5.4、TASK-007）。
  *
- * 依赖方向（SPEC §5.1）：位于 infrastructure，引用 worker 协议（仅类型）与 application/domain。
+ * 依赖方向（SPEC §5.1、TASK-006）：位于 infrastructure，引用 application（端口契约）
+ * 与 domain（编译协议），不再反向引用 worker 层——编译协议已收敛到 domain，
+ * 使 infrastructure 单向依赖 application/domain。
  */
 
 /** 编译事件回调：接收 requestId 与事件，便于上层做会话隔离。 */
@@ -46,7 +49,7 @@ function createDefaultWorker(): Worker {
  * start() 发送请求并注册一次性事件回调；返回的句柄提供 cancel() 与 done 标记，
  * 供加载用例在会话结束或组件卸载时统一回收。
  */
-export class MapCompilerClient {
+export class MapCompilerClient implements MapCompilerPort {
   private readonly worker: Worker
   private readonly factory: MapCompilerWorkerFactory
   private listener: MapCompilerEventListener | null = null

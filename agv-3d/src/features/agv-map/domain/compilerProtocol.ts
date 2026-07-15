@@ -1,16 +1,23 @@
-import type { CompileProgressReport, RenderPacket } from '../domain/renderPacket'
+import type { CompileProgressReport, RenderPacket } from './renderPacket'
 
 /**
- * 后台地图编译的 Worker 通信契约（SPEC §5.2、TASK-007）。
+ * 地图编译通信契约（SPEC §5.1、§5.2、TASK-006）。
  *
- * 该模块定义主线程适配器与编译 Worker 之间的消息协议。全部消息为纯数据，
- * 不携带函数或 Three.js 实例，可安全跨 Worker 边界结构化克隆；其中的 TypedArray
- * 通过 postMessage 的 transfer 列表转移所有权，避免大地图字节复制（SPEC §5.4）。
+ * 该模块定义主线程（应用层加载用例 + 基础设施 Worker 适配器）与编译 Worker 之间的消息协议。
+ * 全部消息为纯数据，不携带函数或 Three.js 实例，可安全跨 Worker 边界结构化克隆；其中的
+ * TypedArray 通过 postMessage 的 transfer 列表转移所有权，避免大地图字节复制（SPEC §5.4）。
  *
- * 依赖方向（SPEC §5.1）：协议位于 worker 层，仅依赖 domain（RenderPacket 等）。
- * Worker 与主线程适配器共同引用同一套消息类型；适配器以 `import type` 引入，
- * 不产生运行时耦合。Worker 自身的错误码独立于应用层 MapLoadErrorCode，
- * 由应用层加载用例做稳定映射，避免 worker → application 反向依赖。
+ * 依赖方向与层归属（SPEC §5.1）：
+ * 协议是编译流程的共享数据契约，被 application、infrastructure、worker 三层共同引用。
+ * SPEC 的单向依赖图中，只有 domain 可同时被这三层到达
+ * （application→domain、infrastructure→application/domain、worker→domain/geometry），
+ * 因此协议必须归属 domain，否则 application 将被迫反向依赖 worker 或 infrastructure 具体实现。
+ * 此前协议位于 worker 层，导致 application/loadMapUseCase 与 infrastructure/mapCompilerWorker
+ * 都要反向引用 worker；TASK-006 将其收敛到 domain，消除跨层反向依赖。CompileProgressReport
+ * 已先行迁入 domain/renderPacket，本次迁移与其一致。
+ *
+ * Worker 自身的错误码独立于应用层 MapLoadErrorCode（application/loadState），由应用层加载用例
+ * 做稳定映射，避免 worker → application 反向依赖。
  */
 
 /** 编译请求：主线程 → Worker。携带资产 URL 与会话 requestId 用于过期隔离。 */

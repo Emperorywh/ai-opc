@@ -4,7 +4,7 @@ import { normalizeMap } from '../domain/normalize'
 import { validateRawMapAsset } from '../domain/validation'
 import { GeometryCompileError } from '../geometry/pathSampling'
 import { compileRenderPacket, type SceneCompileConfigs } from '../geometry/sceneCompile'
-import type { CompilationEvent, CompilationErrorCode } from './mapCompilerProtocol'
+import type { CompilationEvent, CompilationErrorCode } from '../domain/compilerProtocol'
 
 /**
  * 后台地图编译核心编排（SPEC §5.2、§10.1、TASK-007）。

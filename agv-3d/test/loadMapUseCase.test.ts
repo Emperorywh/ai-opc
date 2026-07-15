@@ -1,22 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { LoadSessionController } from '../src/features/agv-map/application/loadSession'
 import { startBackgroundMapLoad } from '../src/features/agv-map/application/loadMapUseCase'
+import type { MapCompilerPort } from '../src/features/agv-map/application/mapCompilerPort'
 import type { RenderPacket } from '../src/features/agv-map/domain/renderPacket'
 import type {
   CompileRequest,
   CompilationEvent,
-} from '../src/features/agv-map/worker/mapCompilerProtocol'
+} from '../src/features/agv-map/domain/compilerProtocol'
 
 /**
- * 后台地图加载用例验证（SPEC §5.2、§5.3、§5.4、TASK-007）。
+ * 后台地图加载用例验证（SPEC §5.2、§5.3、§5.4、TASK-006/007）。
  *
- * 用例把 Worker 编译事件流翻译为状态机命令。这里用一个伪造客户端直接注入事件，
- * 在不启动 Worker 与浏览器的前提下验证：阶段顺序与进度单调、成功挂载数据包、
- * 错误映射、过期会话隔离与 dispose 取消/终止。
+ * 用例把后台编译事件流翻译为状态机命令。这里用一个实现 MapCompilerPort 端口的伪造客户端
+ * 直接注入事件，在不启动 Worker 与浏览器的前提下验证：阶段顺序与进度单调、成功挂载数据包、
+ * 错误映射、过期会话隔离与 dispose 取消/终止。用例只依赖端口抽象，伪造客户端印证该边界。
  */
 
-/** 伪造编译客户端：捕获监听器供测试主动 emit 事件，并记录是否被终止。 */
-class FakeCompilerClient {
+/** 伪造编译客户端：实现应用层端口 MapCompilerPort，捕获监听器供测试主动 emit 事件并记录终止。 */
+class FakeCompilerClient implements MapCompilerPort {
   listener: ((requestId: number, event: CompilationEvent) => void) | null = null
   lastRequest: CompileRequest | null = null
   terminateCount = 0

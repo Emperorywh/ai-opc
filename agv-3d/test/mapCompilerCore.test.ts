@@ -12,7 +12,7 @@ import {
   runMapCompilation,
   type CompilationDeps,
 } from '../src/features/agv-map/worker/mapCompilerCore'
-import type { CompilationEvent } from '../src/features/agv-map/worker/mapCompilerProtocol'
+import type { CompilationEvent } from '../src/features/agv-map/domain/compilerProtocol'
 
 /**
  * 后台地图编译核心验证（SPEC §5.2、§10.1、TASK-007）。

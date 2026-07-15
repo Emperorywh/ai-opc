@@ -1,15 +1,19 @@
-import type { MapCompilerClient } from '../infrastructure/mapCompilerWorker'
-import type { CompilationErrorCode, CompilationEvent } from '../worker/mapCompilerProtocol'
+import type { CompilationErrorCode, CompilationEvent } from '../domain/compilerProtocol'
 import type { MapLoadErrorCode } from './loadState'
 import { LoadSessionController } from './loadSession'
+import type { MapCompilerPort } from './mapCompilerPort'
 
 /**
- * 后台地图加载用例（SPEC §5.2、§5.3、§5.4、TASK-007）。
+ * 后台地图加载用例（SPEC §5.2、§5.3、§5.4、TASK-006/007）。
  *
- * 该用例是 application 层的"加载用例与显式状态机驱动"：把 Worker 编译事件流
+ * 该用例是 application 层的"加载用例与显式状态机驱动"：把后台编译事件流
  * 翻译为状态机命令，驱动 LoadSessionController 从 downloading 推进到 ready 或 error。
- * 它是展示层与（Worker 适配器 + 纯状态机）之间的编排者，本身不持有 React 状态、
+ * 它是协调器与（编译端口 + 纯状态机）之间的编排者，本身不持有 React 状态、
  * 不直接接触 Worker API 或原始 JSON。
+ *
+ * 依赖方向（SPEC §5.1、TASK-006）：用例只依赖 domain（编译协议）与应用层自身
+ * （状态机、会话控制器、编译端口）。它通过 MapCompilerPort 抽象地使用后台编译能力，
+ * 不反向依赖 infrastructure 的具体适配器；具体适配器由展示层组合根注入。
  *
  * 不变量：
  * - 会话隔离：仅当事件携带的 requestId 等于当前会话且会话仍活跃时才写入状态；
@@ -41,17 +45,17 @@ export interface BackgroundMapLoadHandle {
 /**
  * 启动一次后台地图加载，返回可 dispose 的句柄。
  *
- * 调用方负责在组件卸载或显式取消时调用 handle.dispose()，以中止下载、终止 Worker
- * 并隔离后续过期结果。Worker 编译与状态机推进全部在事件回调中异步发生，调用方
+ * 调用方负责在组件卸载或显式取消时调用 handle.dispose()，以中止下载、终止编译端口
+ * 并隔离后续过期结果。后台编译与状态机推进全部在事件回调中异步发生，调用方
  * 通过订阅 LoadSessionController 观察状态变化。
  *
  * @param controller 加载会话控制器（单一有效会话、取消与过期隔离）。
- * @param client 编译 Worker 客户端；用例完成后由 dispose 终止。
+ * @param port 后台编译端口；用例完成后由 dispose 终止。具体适配器由调用方在组合根注入。
  * @param assetUrl 自托管地图资产 URL。
  */
 export function startBackgroundMapLoad(
   controller: LoadSessionController,
-  client: MapCompilerClient,
+  port: MapCompilerPort,
   assetUrl: string,
 ): BackgroundMapLoadHandle {
   // 启动新会话：递增 requestId、重置状态为 downloading 初始态，隔离旧会话结果。
@@ -60,7 +64,7 @@ export function startBackgroundMapLoad(
   // 仅在命令成功采纳后更新，保证镜像与状态机一致。
   let phase: LoadPhase = 'downloading'
 
-  client.start({ type: 'compile', requestId, assetUrl }, (rid, event) => {
+  port.start({ type: 'compile', requestId, assetUrl }, (rid, event) => {
     // 过期或已取消的会话结果一律丢弃，绝不覆盖当前状态（SPEC §5.4）。
     if (rid !== requestId || !controller.isActive(requestId)) return
     applyEvent(controller, requestId, event, (next) => {
@@ -71,9 +75,9 @@ export function startBackgroundMapLoad(
   return {
     requestId,
     dispose() {
-      // 先取消会话（冻结状态、拒绝后续写入），再终止 Worker（中止下载与微任务）。
+      // 先取消会话（冻结状态、拒绝后续写入），再终止编译端口（中止下载与微任务）。
       controller.cancel()
-      client.terminate()
+      port.terminate()
     },
   }
 }

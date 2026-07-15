@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Canvas, type RootState } from '@react-three/fiber'
-import type { LoadSessionController } from '../../application/loadSession'
+import type { SceneLifecyclePort } from '../../application/mapLoadCoordinator'
 import { FRAMING_REFERENCE_ASPECT } from '../../config/cameraConfig'
 import type { RenderPacket } from '../../domain/renderPacket'
 import { CameraRig } from './CameraRig'
@@ -30,10 +30,12 @@ import './sceneView.css'
  * - 路径扁带与流光（TASK-010）：PathLayer 渲染合并后的单一扁带 Mesh，材质声明 fog:true，
  *   待 TASK-012 接入场景雾后自动生效，无需修改本图层。
  *
- * 生命周期（SPEC §10.1）：
+ * 生命周期（SPEC §10.1、TASK-006）：
  * 1. 组件在 preparing/creating-scene 挂载，Canvas 以 opacity:0 创建场景资源。
- * 2. onCreated（首帧提交后）推进状态机到 fading，并触发 500 ms 淡入（尊重 reduced-motion）。
- * 3. 淡入结束调用 complete → ready，覆盖层随之卸载，露出已淡入完成的场景。
+ * 2. onCreated（首帧提交后）经场景生命周期窄边界提交"首帧成功"事实，由应用层协调器推进
+ *    creating-scene → fading，并触发 500 ms 淡入（尊重 reduced-motion）。
+ * 3. 淡入结束提交"淡入完成"事实 → ready，覆盖层随之卸载，露出已淡入完成的场景。
+ * 组件不持有会话控制器，只提交外部事实；状态转换由应用层决定。
  */
 
 /** 场景淡入时长（SPEC §10.1：500 ms）。 */
@@ -44,11 +46,13 @@ const SCENE_BACKGROUND = '#05080F'
 export interface MapSceneViewProps {
   /** 渲染数据包（preparing 或 ready 状态持有）。 */
   readonly packet: RenderPacket
-  /** 加载会话控制器，用于驱动 creating-scene → fading → ready。 */
-  readonly controller: LoadSessionController
+  /** 场景生命周期窄边界：提交首帧成功、淡入完成或创建失败等外部事实（TASK-006）。 */
+  readonly scene: SceneLifecyclePort
+  /** 挂载时是否已处于 ready（如重挂/HMR）：直接显示，不重复驱动淡入生命周期。 */
+  readonly initiallyReady: boolean
 }
 
-export function MapSceneView({ packet, controller }: MapSceneViewProps) {
+export function MapSceneView({ packet, scene, initiallyReady }: MapSceneViewProps) {
   const [opacity, setOpacity] = useState(0)
   const [fadeStarted, setFadeStarted] = useState(false)
 
@@ -59,23 +63,21 @@ export function MapSceneView({ packet, controller }: MapSceneViewProps) {
     [packet.renderBounds],
   )
 
-  // onCreated 推进到 fading。相机姿态由 CameraRig（OrbitControls）接管，此处不再手动 lookAt。
+  // onCreated 经窄边界提交"首帧成功"事实。相机姿态由 CameraRig（OrbitControls）接管，此处不再手动 lookAt。
   // 已 ready（如重挂）时直接显示，不重复驱动生命周期。
   const handleCreated = useCallback(
     (_state: RootState) => {
-      const state = controller.getState()
-      if (state?.status === 'ready') {
+      if (initiallyReady) {
         setOpacity(1)
         return
       }
-      const requestId = controller.getCurrentRequestId()
-      controller.apply({ type: 'advance', to: 'fading' }, requestId)
+      scene.notifyFirstFrameRendered()
       setFadeStarted(true)
     },
-    [controller],
+    [scene, initiallyReady],
   )
 
-  // fading：opacity 0→1 过渡，结束后 complete。
+  // fading：opacity 0→1 过渡，结束后提交"淡入完成"事实。
   useEffect(() => {
     if (!fadeStarted) return
     // 下一帧置 1 以触发 CSS 过渡（从 0 起始）。
@@ -83,13 +85,13 @@ export function MapSceneView({ packet, controller }: MapSceneViewProps) {
     const reduce = prefersReducedMotion()
     const ms = reduce ? 0 : SCENE_FADE_MS
     const timer = window.setTimeout(() => {
-      controller.apply({ type: 'complete' }, controller.getCurrentRequestId())
+      scene.notifyFadeComplete()
     }, ms)
     return () => {
       window.cancelAnimationFrame(raf)
       window.clearTimeout(timer)
     }
-  }, [fadeStarted, controller])
+  }, [fadeStarted, scene])
 
   return (
     <div className="agv-map-scene" style={{ opacity }}>

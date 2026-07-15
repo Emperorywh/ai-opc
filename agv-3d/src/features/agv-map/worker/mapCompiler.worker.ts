@@ -13,7 +13,7 @@ import type {
   CompilationEvent,
   FromWorkerMessage,
   ToWorkerMessage,
-} from './mapCompilerProtocol'
+} from '../domain/compilerProtocol'
 
 /**
  * 后台地图编译 Worker 入口（SPEC §5.2、§5.4、TASK-007）。
