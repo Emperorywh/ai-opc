@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Canvas, type RootState } from '@react-three/fiber'
 import type { SceneLifecyclePort } from '../../application/mapLoadCoordinator'
-import { FRAMING_REFERENCE_ASPECT } from '../../config/cameraConfig'
+import { CAMERA_FOV_DEG, CAMERA_NEAR_M, FRAMING_REFERENCE_ASPECT } from '../../config/cameraConfig'
 import type { RenderPacket } from '../../domain/renderPacket'
 import { CameraRig } from './CameraRig'
 import { PixelBudgetDpr } from './PixelBudgetDpr'
@@ -103,8 +103,10 @@ export function MapSceneView({ packet, scene, initiallyReady }: MapSceneViewProp
         // SPEC §8.5：Canvas 原生抗锯齿关闭，由 TASK-013 的 SMAA 负责。
         gl={{ antialias: false, powerPreference: 'high-performance' }}
         camera={{
-          fov: 45,
-          near: 0.1,
+          // SPEC §9.1：FOV 45°、near 0.1 m 固定；far 由 framing 推导。数值取自 cameraConfig，
+          // 不在组件内散落重复常量（§12、TASK-011）。
+          fov: CAMERA_FOV_DEG,
+          near: CAMERA_NEAR_M,
           far: frame.far,
           position: [frame.position[0], frame.position[1], frame.position[2]],
         }}

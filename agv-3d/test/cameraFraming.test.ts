@@ -168,6 +168,37 @@ describe('computeCameraFrame — 自动框选（SPEC §9.1）', () => {
     expect(Number.isFinite(peak.maxAbsY)).toBe(true)
   })
 
+  it('极端竖屏（运行期 aspect 远小于 16:9）下 framing 参数有限且场景未整体丢失（TASK-011 一致安全策略）', () => {
+    // framing 距离以 16:9 参考求解、固定不变；运行期遇到极窄竖屏时水平方向可能被裁，
+    // 但相机参数恒有限、垂直方向仍完整容纳，场景不会整体丢失，也不触发重算（§9.3）。
+    const f = computeCameraFrame(v76LikeBounds, FRAMING_REFERENCE_ASPECT)
+    for (const v of [...f.position, ...f.target, f.far, f.distance]) {
+      expect(Number.isFinite(v)).toBe(true)
+    }
+    const basis = computeCameraBasis(f.polarRad, f.azimuthRad)
+    const portraitPeak = computeBoundsCornerNdcPeak(
+      v76LikeBounds,
+      f.target,
+      basis,
+      f.distance,
+      CAMERA_HALF_FOV_RAD,
+      9 / 16, // 竖屏：水平更紧
+    )
+    expect(Number.isFinite(portraitPeak.maxAbsX)).toBe(true)
+    expect(Number.isFinite(portraitPeak.maxAbsY)).toBe(true)
+    // 垂直方向与 aspect 无关，仍位于安全区内；水平方向可能超出（允许 letterbox/裁切，§9.3）。
+    expect(portraitPeak.maxAbsY).toBeLessThanOrEqual(1 + 1e-9)
+  })
+
+  it('退化零尺寸边界（min=max）下 framing 不产生 NaN/负距离（仅稳健性，上游不触发）', () => {
+    const f = computeCameraFrame({ min: [5, 0, 7], max: [5, 0, 7] }, FRAMING_REFERENCE_ASPECT)
+    for (const v of [...f.position, ...f.target, f.far, f.distance]) {
+      expect(Number.isFinite(v)).toBe(true)
+    }
+    expect(f.distance).toBeGreaterThan(0)
+    expect(f.far).toBeGreaterThanOrEqual(1000)
+  })
+
   it('所有相机参数为有限值', () => {
     const f = computeCameraFrame({ min: [-1, 0, -1], max: [1, 0.5, 1] }, 16 / 9)
     for (const v of [...f.position, ...f.target, f.far, f.distance]) {
