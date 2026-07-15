@@ -136,6 +136,20 @@ describe('groupLanes — 容差边界', () => {
     expect(groups[0].kind).toBe('bidirectional')
   })
 
+  it('反向候选偏差恰为容差 0.02 m（闭区间 ≤）仍配对为双向组', () => {
+    // SPEC §7.4：偏差"不超过"0.02 m 即成组，语义为闭区间 ≤。
+    // 反向边在 y 方向整体偏移 0.02 m，等弧长对应点偏差恰为 0.02 m。
+    // 该用例守护容差判定的闭区间边界，确保实现不通过四舍五入、吸附或放宽阈值过关
+    // （TASK-003 实现约束）。
+    const edges = [
+      sampledEdge('e1', 'a', 'b', horizontalLine(10, 0)),
+      sampledEdge('e2', 'b', 'a', horizontalLine(10, 0.02).reverse()),
+    ]
+    const groups = groupLanes(edges, STRICT_CONFIG)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].kind).toBe('bidirectional')
+  })
+
   it('反向候选偏差 0.05 m（超容差）不配对', () => {
     const edges = [
       sampledEdge('e1', 'a', 'b', horizontalLine(10, 0)),
@@ -186,6 +200,31 @@ describe('groupLanes — 贝塞尔曲线配对', () => {
     const groups = groupLanes(edges, DEFAULT_LANE_GROUPING_CONFIG)
     expect(groups).toHaveLength(1)
     expect(groups[0].kind).toBe('bidirectional')
+  })
+})
+
+describe('groupLanes — 比较采样独立于渲染密度（SPEC §7.4）', () => {
+  it('同一条几何中心线以截然不同的采样密度表达仍稳定配对', () => {
+    // SPEC §7.4：33 点等参数比较与渲染自适应采样相互独立。
+    // 正向边以 2 点直线（最粗渲染采样）表达，反向边以 41 点密集折线（高细分）
+    // 表达同一条 10 m 水平线。内部 33 点等弧长重采样应归一化密度差异，
+    // 对应点偏差为 0（浮点误差远低于 0.02 m 容差），稳定配对为双向组。
+    // 该用例验证配对判定不随上游采样密度变化——这正是"独立于渲染采样"的语义。
+    const coarse = horizontalLine(10, 0)
+    const fine: Point2[] = []
+    for (let i = 0; i <= 40; i += 1) {
+      fine.push({ x: (10 * i) / 40, y: 0 })
+    }
+    const edges = [
+      sampledEdge('e1', 'a', 'b', coarse),
+      sampledEdge('e2', 'b', 'a', [...fine].reverse()),
+    ]
+    const groups = groupLanes(edges, DEFAULT_LANE_GROUPING_CONFIG)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].kind).toBe('bidirectional')
+    // 规范方向仍为 a→b，中心线取规范方向边（2 点粗采样）的原始点。
+    expect(groups[0].canonicalSourceNodeId).toBe('a')
+    expect(groups[0].centerline.points).toEqual(coarse)
   })
 })
 
