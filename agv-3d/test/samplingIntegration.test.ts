@@ -6,6 +6,7 @@ import type { RawMapAsset, RawMapPayload } from '../src/features/agv-map/domain/
 import { extractMapPayload, validateRawMap } from '../src/features/agv-map/domain/validation'
 import { sampleEdges } from '../src/features/agv-map/geometry/pathSampling'
 import { computeMapSpace, mapToWorld } from '../src/features/agv-map/geometry/worldCoords'
+import { denseCurve, distToPolyline } from './helpers/curveGeometry'
 
 // 直接读取根目录 map.json 源文件作为 V76 基线事实来源。
 const mapJsonUrl = new URL('../map.json', import.meta.url)
@@ -75,6 +76,26 @@ describe('V76 路径采样', () => {
           se.path.points[i].y - se.path.points[i - 1].y,
         )
         expect(d, `edge=${edge.id} 弦长超限`).toBeLessThanOrEqual(0.25 + 1e-9)
+      }
+    }
+  })
+
+  it('贝塞尔折线对真实曲线的逼近误差不超过 0.01 m（平坦度约束，SPEC §7.3）', () => {
+    // SPEC §7.3：细分同时受最大平坦度误差 0.01 m 约束。
+    // 对每条贝塞尔等参数密集采样真实曲线，校验曲线上每点到采样折线的最近距离 ≤ 0.01 m。
+    // 若任一边触达递归深度上限 12 而非平坦度终止，此处会暴露超限——
+    // 该断言同时验证深度 12 对 V76 全部 109 条贝塞尔足够（无需以深度上限兜底）。
+    // 1001 点/条足以捕捉最大偏差（实测最大 0.0066 m，远低于阈值），且保持批量测试在时限内。
+    for (const edge of model.edges) {
+      if (edge.path.kind !== 'cubic-bezier') continue
+      const se = sampled.find((s) => s.edgeId === edge.id)
+      if (!se) continue
+      const { start: p0, control1: p1, control2: p2, end: p3 } = edge.path
+      for (const pt of denseCurve(p0, p1, p2, p3, 1000)) {
+        expect(
+          distToPolyline(pt, se.path.points),
+          `贝塞尔 ${edge.id} 逼近误差超限`,
+        ).toBeLessThanOrEqual(0.01 + 1e-9)
       }
     }
   })
