@@ -5,6 +5,7 @@ import { auditRawMap, normalizeMap } from '../src/features/agv-map/domain/normal
 import type { RawMapAsset, RawMapPayload } from '../src/features/agv-map/domain/rawDto'
 import { extractMapPayload, validateRawMap } from '../src/features/agv-map/domain/validation'
 import { verifyAssetIntegrity } from '../src/features/agv-map/infrastructure/assetIntegrity'
+import { MAP_ASSET_URL } from '../src/features/agv-map/infrastructure/mapAssetUrl'
 
 // 直接读取根目录 map.json 源文件，作为 V76 数据基线的事实来源。
 const mapJsonUrl = new URL('../map.json', import.meta.url)
@@ -24,6 +25,20 @@ describe('V76 资产指纹', () => {
     expect(result.actualSize).toBe(ASSET_SIZE_BYTES)
     expect(result.actualSha256).toBe(ASSET_SHA256_HEX)
     expect(result.ok).toBe(true)
+  })
+})
+
+describe('V76 资产自托管', () => {
+  it('资产 URL 为同源相对路径，加载不请求 CDN（SPEC §4.1、TASK-001）', () => {
+    // SPEC §4.1：资产随构建产物自托管，不使用 CDN。
+    // Vite `?url` 把 map.json 原样输出到 dist/assets，开发与构建期均返回同源路径；
+    // 自托管 URL 必然以 "/" 起首（path-absolute，同源），且不含 http/https scheme。
+    // 任何绝对外链（http(s)://）都意味着脱离构建产物走 CDN，违反契约——
+    // 该断言作为回归护栏，防止后续把资产 URL 改为 CDN。
+    expect(typeof MAP_ASSET_URL).toBe('string')
+    expect(MAP_ASSET_URL.length).toBeGreaterThan(0)
+    expect(MAP_ASSET_URL.startsWith('/')).toBe(true)
+    expect(/^https?:\/\//i.test(MAP_ASSET_URL)).toBe(false)
   })
 })
 
