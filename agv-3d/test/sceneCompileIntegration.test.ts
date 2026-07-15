@@ -7,12 +7,13 @@ import {
   DEFAULT_SAMPLING_CONFIG,
 } from '../src/features/agv-map/config/geometryConfig'
 import { normalizeMap } from '../src/features/agv-map/domain/normalize'
+import type { MapModel } from '../src/features/agv-map/domain/domainModel'
 import type { RawMapAsset, RawMapPayload, RawNodeType } from '../src/features/agv-map/domain/rawDto'
 import { extractMapPayload, validateRawMap } from '../src/features/agv-map/domain/validation'
-import { compileRenderPacket } from '../src/features/agv-map/geometry/sceneCompile'
+import { compileRenderPacket, type SceneCompileConfigs } from '../src/features/agv-map/geometry/sceneCompile'
 import { mapToWorld, computeMapSpace } from '../src/features/agv-map/geometry/worldCoords'
 import { computeNodePlacement, NODE_MATRIX_FLOATS } from '../src/features/agv-map/geometry/nodeInstances'
-import { sampleEdges } from '../src/features/agv-map/geometry/pathSampling'
+import { GeometryCompileError, sampleEdges } from '../src/features/agv-map/geometry/pathSampling'
 
 // 直接读取根目录 map.json 源文件作为 V76 基线事实来源。
 const mapJsonUrl = new URL('../map.json', import.meta.url)
@@ -252,5 +253,68 @@ describe('V76 场景编译 — 确定性与一致性（TASK-005）', () => {
       totalFloats += packet.nodeInstances[type].matrices.length
     }
     expect(totalFloats).toBe(1768 * NODE_MATRIX_FLOATS)
+  })
+})
+
+describe('场景编译 — 关键异常路径（TASK-005）', () => {
+  const baseConfigs: SceneCompileConfigs = {
+    sampling: DEFAULT_SAMPLING_CONFIG,
+    laneGrouping: DEFAULT_LANE_GROUPING_CONFIG,
+    ribbon: DEFAULT_PATH_RIBBON_CONFIG,
+    nodeDimensions: DEFAULT_NODE_DIMENSIONS_CONFIG,
+  }
+
+  /**
+   * 输入无法形成有限边界：空模型（无节点、无采样点）使 computeMapSpace 无法建立
+   * 地图空间基准，抛出 EMPTY_COMPUTE_BOUNDS。compileRenderPacket 为同步纯函数，
+   * 任一子步骤抛出即整体失败；此处用 produced 标志反证其不产出任何 RenderPacket 引用，
+   * 即不返回部分数据包（SPEC §10.2、TASK-005 关键异常路径）。
+   */
+  it('空模型（无法形成有限边界）：整次编译抛出，不返回部分数据包', () => {
+    const emptyModel: MapModel = { nodes: [], edges: [] }
+    let produced = false
+    try {
+      compileRenderPacket(emptyModel, baseConfigs)
+      produced = true
+    } catch (error) {
+      expect(error).toBeInstanceOf(GeometryCompileError)
+      expect((error as GeometryCompileError).code).toBe('EMPTY_COMPUTE_BOUNDS')
+    }
+    expect(produced).toBe(false)
+  })
+
+  /**
+   * 子编译产生非法几何：把贝塞尔递归深度上限设为 0，根调用即不允许细分；
+   * 一条明显不平坦的贝塞尔（控制点远离弦）无法满足平坦度约束，sampleEdges 抛出
+   * BEZIER_SUBDIVISION_LIMIT_REACHED 并经 compileRenderPacket 向上传播，整次场景编译失败
+   * （SPEC §7.3、§10.2、TASK-005 关键异常路径）。该模型自身含节点与边，computeMapSpace
+   * 能成功建立基准，证明失败来自后续子编译而非前置空输入。
+   */
+  it('子编译非法几何：贝塞尔细分超限使整次编译失败', () => {
+    const model: MapModel = {
+      nodes: [
+        { id: 'n1', type: 'node', position: { x: 0, y: 0 }, angle: null },
+        { id: 'n2', type: 'node', position: { x: 10, y: 0 }, angle: null },
+      ],
+      edges: [
+        {
+          id: 'e1',
+          sourceNodeId: 'n1',
+          targetNodeId: 'n2',
+          path: {
+            kind: 'cubic-bezier',
+            start: { x: 0, y: 0 },
+            control1: { x: 0, y: 10 },
+            control2: { x: 10, y: 10 },
+            end: { x: 10, y: 0 },
+          },
+        },
+      ],
+    }
+    const limitingConfigs: SceneCompileConfigs = {
+      ...baseConfigs,
+      sampling: { ...DEFAULT_SAMPLING_CONFIG, maxRecursionDepth: 0 },
+    }
+    expect(() => compileRenderPacket(model, limitingConfigs)).toThrow(GeometryCompileError)
   })
 })
