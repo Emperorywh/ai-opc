@@ -163,7 +163,7 @@ export function compilePathGeometry(
     edgeVertexRanges: new Uint32Array(edgeVertexRanges),
   }
 
-  validateGeometry(geometry, edgeIds.length)
+  validatePathGeometry(geometry, edgeIds.length)
 
   return { geometry, edgeIds }
 }
@@ -323,9 +323,13 @@ function fillGroundNormal(vertexCount: number): Float32Array<ArrayBuffer> {
 
 /**
  * 校验扁带几何完整合法（SPEC §7.5、TASK-004）。
- * 任一位置/法线/弧长/流向非有限或索引越界，抛出可定位的几何编译错误。
+ *
+ * 作为 compilePathGeometry 输出前的强制不变量检查单独导出，使其成为可审计、可独立
+ * 测试的纯函数（SPEC §7.1 可测试的纯函数）。任一属性长度不一致、任一位置/法线/弧长/
+ * 流向非有限、任一索引或逐边顶点区间越界，均抛出携带错误码的可定位几何编译错误，
+ * 由加载状态机映射为稳定的 GEOMETRY_COMPILE_FAILED 状态（SPEC §10.2）。
  */
-function validateGeometry(geometry: PathGeometryPacket, edgeCount: number): void {
+export function validatePathGeometry(geometry: PathGeometryPacket, edgeCount: number): void {
   const vertexCount = geometry.positions.length / 3
   if (geometry.normals.length !== vertexCount * 3) {
     throw new GeometryCompileError('INVALID_RIBBON_GEOMETRY', `法线数量与顶点数不匹配`)
@@ -340,24 +344,11 @@ function validateGeometry(geometry: PathGeometryPacket, edgeCount: number): void
     throw new GeometryCompileError('INVALID_RIBBON_GEOMETRY', `边顶点区间数量与边数不匹配`)
   }
 
-  for (let i = 0; i < geometry.positions.length; i += 1) {
-    if (!Number.isFinite(geometry.positions[i])) {
-      throw new GeometryCompileError(
-        'INVALID_RIBBON_GEOMETRY',
-        `位置分量 #${i} 非有限值`,
-      )
-    }
-  }
-  for (let i = 0; i < geometry.pathU.length; i += 1) {
-    if (!Number.isFinite(geometry.pathU[i])) {
-      throw new GeometryCompileError('INVALID_RIBBON_GEOMETRY', `弧长 #${i} 非有限值`)
-    }
-  }
-  for (let i = 0; i < geometry.flowDirections.length; i += 1) {
-    if (!Number.isFinite(geometry.flowDirections[i])) {
-      throw new GeometryCompileError('INVALID_RIBBON_GEOMETRY', `流向 #${i} 非有限值`)
-    }
-  }
+  // 位置、法线、弧长、流向四类逐顶点属性必须全部为有限值（SPEC §7.5、TASK-004）。
+  assertAllFinite(geometry.positions, '位置分量')
+  assertAllFinite(geometry.normals, '法线分量')
+  assertAllFinite(geometry.pathU, '弧长')
+  assertAllFinite(geometry.flowDirections, '流向')
 
   // 索引全部落在顶点范围内。
   for (let i = 0; i < geometry.indices.length; i += 1) {
@@ -385,6 +376,15 @@ function validateGeometry(geometry: PathGeometryPacket, edgeCount: number): void
         'RIBBON_INDEX_OUT_OF_BOUNDS',
         `边 #${e} 顶点区间 [${start},${end}) 非法（顶点数 ${vertexCount}）`,
       )
+    }
+  }
+}
+
+/** 逐分量断言 TypedArray 全部为有限值，任一非有限即抛出携带定位信息的几何错误。 */
+function assertAllFinite(values: ArrayLike<number>, label: string): void {
+  for (let i = 0; i < values.length; i += 1) {
+    if (!Number.isFinite(values[i])) {
+      throw new GeometryCompileError('INVALID_RIBBON_GEOMETRY', `${label} #${i} 非有限值`)
     }
   }
 }

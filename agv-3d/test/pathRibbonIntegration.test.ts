@@ -10,8 +10,9 @@ import type { RawMapAsset, RawMapPayload } from '../src/features/agv-map/domain/
 import { extractMapPayload, validateRawMap } from '../src/features/agv-map/domain/validation'
 import { sampleEdges } from '../src/features/agv-map/geometry/pathSampling'
 import { groupLanes } from '../src/features/agv-map/geometry/laneGrouping'
-import { compilePathGeometry } from '../src/features/agv-map/geometry/pathRibbon'
+import { compilePathGeometry, validatePathGeometry } from '../src/features/agv-map/geometry/pathRibbon'
 import { computeMapSpace } from '../src/features/agv-map/geometry/worldCoords'
+import { typedArrayBytesEqual } from './helpers/typedArrayBytes'
 
 // 直接读取根目录 map.json 源文件作为 V76 基线事实来源。
 const mapJsonUrl = new URL('../map.json', import.meta.url)
@@ -69,6 +70,11 @@ describe('V76 路径扁带编译计数（SPEC §7.5、TASK-004）', () => {
 
 describe('V76 路径扁带几何合法性', () => {
   const { geometry } = compiled
+
+  it('完整数据包通过 validatePathGeometry 契约校验（SPEC §7.5、TASK-004）', () => {
+    // 全量 V76 编译产物必须满足输出前的全部属性与索引契约，不抛出任何几何错误。
+    expect(() => validatePathGeometry(geometry, compiled.edgeIds.length)).not.toThrow()
+  })
 
   it('全部位置/法线/弧长/流向为有限值', () => {
     for (let i = 0; i < geometry.positions.length; i += 1) {
@@ -183,32 +189,22 @@ describe('V76 路径扁带 — 流向与车道布局', () => {
 })
 
 describe('V76 路径扁带 — 确定性', () => {
-  it('相同输入与配置两次编译字节级一致', () => {
+  it('相同输入与配置两次编译逐字节一致（所有 TypedArray）', () => {
     const again = compilePathGeometry(
       groupLanes(sampleEdges(model.edges, DEFAULT_SAMPLING_CONFIG), DEFAULT_LANE_GROUPING_CONFIG),
       space,
       DEFAULT_PATH_RIBBON_CONFIG,
       DEFAULT_LANE_GROUPING_CONFIG,
     )
-    // 逐缓冲比较，避免 JSON 对 TypedArray 的对象包装差异。
+    // 逐字节比较所有可转移 TypedArray（TASK-004 验证方式）。
     const a = compiled.geometry
     const b = again.geometry
-    expect(b.positions.length).toBe(a.positions.length)
-    for (let i = 0; i < a.positions.length; i += 1) {
-      expect(b.positions[i]).toBe(a.positions[i])
-    }
-    expect(b.indices.length).toBe(a.indices.length)
-    for (let i = 0; i < a.indices.length; i += 1) {
-      expect(b.indices[i]).toBe(a.indices[i])
-    }
-    expect(b.pathU.length).toBe(a.pathU.length)
-    for (let i = 0; i < a.pathU.length; i += 1) {
-      expect(b.pathU[i]).toBe(a.pathU[i])
-    }
-    expect(b.flowDirections.length).toBe(a.flowDirections.length)
-    for (let i = 0; i < a.flowDirections.length; i += 1) {
-      expect(b.flowDirections[i]).toBe(a.flowDirections[i])
-    }
+    expect(typedArrayBytesEqual(b.positions, a.positions)).toBe(true)
+    expect(typedArrayBytesEqual(b.normals, a.normals)).toBe(true)
+    expect(typedArrayBytesEqual(b.pathU, a.pathU)).toBe(true)
+    expect(typedArrayBytesEqual(b.flowDirections, a.flowDirections)).toBe(true)
+    expect(typedArrayBytesEqual(b.indices, a.indices)).toBe(true)
+    expect(typedArrayBytesEqual(b.edgeVertexRanges, a.edgeVertexRanges)).toBe(true)
     expect(again.edgeIds).toEqual(compiled.edgeIds)
   })
 })

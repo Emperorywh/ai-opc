@@ -5,10 +5,12 @@ import {
   type PathRibbonConfig,
 } from '../src/features/agv-map/config/geometryConfig'
 import type { Point2 } from '../src/features/agv-map/domain/domainModel'
+import type { PathGeometryPacket } from '../src/features/agv-map/domain/renderPacket'
 import { groupLanes } from '../src/features/agv-map/geometry/laneGrouping'
-import type { SampledEdge } from '../src/features/agv-map/geometry/pathSampling'
-import { compilePathGeometry } from '../src/features/agv-map/geometry/pathRibbon'
+import { GeometryCompileError, type SampledEdge } from '../src/features/agv-map/geometry/pathSampling'
+import { compilePathGeometry, validatePathGeometry } from '../src/features/agv-map/geometry/pathRibbon'
 import { computeMapSpace } from '../src/features/agv-map/geometry/worldCoords'
+import { typedArrayBytesEqual } from './helpers/typedArrayBytes'
 
 /** 构造采样边工厂。 */
 function sampledEdge(id: string, source: string, target: string, points: Point2[]): SampledEdge {
@@ -365,7 +367,7 @@ describe('compilePathGeometry — 有限性与确定性', () => {
     }
   })
 
-  it('相同输入与配置产生字节级稳定输出', () => {
+  it('相同输入与配置产生字节级稳定输出（逐字节比较所有 TypedArray）', () => {
     const a = compilePathGeometry(
       groups,
       originSpace(),
@@ -379,7 +381,107 @@ describe('compilePathGeometry — 有限性与确定性', () => {
         DEFAULT_PATH_RIBBON_CONFIG,
         DEFAULT_LANE_GROUPING_CONFIG,
       )
-      expect(JSON.stringify(b)).toEqual(JSON.stringify(a))
+      // edgeIds 为字符串数组，直接值比较。
+      expect(b.edgeIds).toEqual(a.edgeIds)
+      // 所有 TypedArray 逐字节比较（TASK-004 验证方式：逐字节比较所有 TypedArray）。
+      expect(typedArrayBytesEqual(b.geometry.positions, a.geometry.positions)).toBe(true)
+      expect(typedArrayBytesEqual(b.geometry.normals, a.geometry.normals)).toBe(true)
+      expect(typedArrayBytesEqual(b.geometry.pathU, a.geometry.pathU)).toBe(true)
+      expect(typedArrayBytesEqual(b.geometry.flowDirections, a.geometry.flowDirections)).toBe(true)
+      expect(typedArrayBytesEqual(b.geometry.indices, a.geometry.indices)).toBe(true)
+      expect(typedArrayBytesEqual(b.geometry.edgeVertexRanges, a.geometry.edgeVertexRanges)).toBe(true)
     }
+  })
+})
+
+describe('validatePathGeometry — 异常路径拒绝（SPEC §7.5、TASK-004）', () => {
+  /**
+   * 构造一份最小合法扁带数据包：1 条边、4 顶点（2 横截面）、2 三角形。
+   * 各属性长度严格匹配，位置/法线/弧长/流向全部有限，索引与逐边区间均不越界。
+   */
+  function validPacket(): PathGeometryPacket {
+    return {
+      positions: new Float32Array([
+        0, 0.015, 0,
+        0, 0.015, -0.22,
+        5, 0.015, 0,
+        5, 0.015, -0.22,
+      ]),
+      normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]),
+      pathU: new Float32Array([0, 0, 5, 5]),
+      flowDirections: new Float32Array([1, 1, 1, 1]),
+      indices: new Uint32Array([0, 1, 2, 1, 3, 2]),
+      edgeVertexRanges: new Uint32Array([0, 4]),
+    }
+  }
+
+  /** 断言给定数据包以指定错误码抛出 GeometryCompileError。 */
+  function expectReject(
+    packet: PathGeometryPacket,
+    edgeCount: number,
+    code: 'INVALID_RIBBON_GEOMETRY' | 'RIBBON_INDEX_OUT_OF_BOUNDS',
+  ): void {
+    try {
+      validatePathGeometry(packet, edgeCount)
+      throw new Error('expected validatePathGeometry to throw')
+    } catch (error) {
+      expect(error).toBeInstanceOf(GeometryCompileError)
+      expect((error as GeometryCompileError).code).toBe(code)
+    }
+  }
+
+  it('合法数据包通过校验，不抛出', () => {
+    expect(() => validatePathGeometry(validPacket(), 1)).not.toThrow()
+  })
+
+  it('属性长度不一致被拒绝（INVALID_RIBBON_GEOMETRY）', () => {
+    const base = validPacket()
+    // 法线少一个分量。
+    expectReject({ ...base, normals: new Float32Array(11) }, 1, 'INVALID_RIBBON_GEOMETRY')
+    // 弧长多一个分量。
+    expectReject({ ...base, pathU: new Float32Array(5) }, 1, 'INVALID_RIBBON_GEOMETRY')
+    // 流向少一个分量。
+    expectReject({ ...base, flowDirections: new Float32Array(3) }, 1, 'INVALID_RIBBON_GEOMETRY')
+    // 边顶点区间数与边数不匹配（边数=2 但只有 1 条区间）。
+    expectReject({ ...base, edgeVertexRanges: new Uint32Array([0, 4]) }, 2, 'INVALID_RIBBON_GEOMETRY')
+  })
+
+  it('非有限位置/法线/弧长/流向被拒绝（INVALID_RIBBON_GEOMETRY）', () => {
+    const nanPositions = new Float32Array(validPacket().positions)
+    nanPositions[0] = Number.NaN
+    expectReject({ ...validPacket(), positions: nanPositions }, 1, 'INVALID_RIBBON_GEOMETRY')
+
+    const infNormals = new Float32Array(validPacket().normals)
+    infNormals[1] = Number.POSITIVE_INFINITY
+    expectReject({ ...validPacket(), normals: infNormals }, 1, 'INVALID_RIBBON_GEOMETRY')
+
+    const nanPathU = new Float32Array(validPacket().pathU)
+    nanPathU[2] = Number.NaN
+    expectReject({ ...validPacket(), pathU: nanPathU }, 1, 'INVALID_RIBBON_GEOMETRY')
+
+    const infFlow = new Float32Array(validPacket().flowDirections)
+    infFlow[0] = Number.NEGATIVE_INFINITY
+    expectReject({ ...validPacket(), flowDirections: infFlow }, 1, 'INVALID_RIBBON_GEOMETRY')
+  })
+
+  it('索引越界被拒绝（RIBBON_INDEX_OUT_OF_BOUNDS）', () => {
+    const base = validPacket()
+    // 索引等于顶点数 4（合法范围为 [0,4)）。
+    const overIndex = new Uint32Array([0, 1, 4, 1, 3, 2])
+    expectReject({ ...base, indices: overIndex }, 1, 'RIBBON_INDEX_OUT_OF_BOUNDS')
+    // 索引为 0 时合法，不抛出。
+    expect(() => validatePathGeometry({ ...base, indices: new Uint32Array([0]) }, 1)).not.toThrow()
+  })
+
+  it('逐边顶点区间非法被拒绝（RIBBON_INDEX_OUT_OF_BOUNDS）', () => {
+    const base = validPacket()
+    // start >= end（空区间）。
+    expectReject({ ...base, edgeVertexRanges: new Uint32Array([2, 2]) }, 1, 'RIBBON_INDEX_OUT_OF_BOUNDS')
+    // start > end 的倒序区间同样非法。
+    expectReject({ ...base, edgeVertexRanges: new Uint32Array([3, 1]) }, 1, 'RIBBON_INDEX_OUT_OF_BOUNDS')
+    // end 超出顶点数。
+    expectReject({ ...base, edgeVertexRanges: new Uint32Array([0, 5]) }, 1, 'RIBBON_INDEX_OUT_OF_BOUNDS')
+    // 合法区间不抛出。
+    expect(() => validatePathGeometry(base, 1)).not.toThrow()
   })
 })
