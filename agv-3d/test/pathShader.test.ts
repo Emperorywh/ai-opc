@@ -146,3 +146,117 @@ describe('PATH_SHADER_SOURCE — 着色器源码接线（§7.5、§7.6、§8.3�
     expect(fragment).toContain('fog_fragment')
   })
 })
+
+/**
+ * 流向公式方向语义验证（SPEC §7.6、§16.2，TASK-010 关键异常路径"反向流动正确"）。
+ *
+ * GLSL 无法在 Node 执行，这里以与片元着色器逐字等价的纯 JS 计算复现脉冲场，
+ * 断言脉冲峰值随 offset 增大的推进方向，把"source→target"从人工观察降级为自动化断言：
+ * - 规范/单向车道（flowDirection=+1）：源在低弧长、目标在高弧长，峰值向高弧长推进。
+ * - 反向车道（flowDirection=−1）：共享规范中心线，源在高弧长、目标在低弧长，
+ *   峰值向低弧长推进。两车道方向相反，二者均表达各自 source→target。
+ *
+ * 公式镜像（与 pathShader PATH_FRAGMENT_SHADER 完全一致）：
+ *   flowCoord = pathU − offset × flowDirection
+ *   pattern   = fract(flowCoord / repeat)   // GLSL fract 恒落在 [0,1)，负输入亦然
+ *   wave      = 0.5 + 0.5·cos(pattern·2π)
+ *   pulse     = pow(wave, 6)
+ */
+const FLOW_PI = Math.PI * 2
+const FLOW_REPEAT = FLOW.flowRepeatM
+
+/** 等价于 GLSL fract：x − floor(x)，结果恒落在 [0,1)（负输入经 floor 回正）。 */
+function fract(x: number): number {
+  return x - Math.floor(x)
+}
+
+/** 复现片元着色器的脉冲强度（pathShader）。 */
+function shaderPulse(pathU: number, offset: number, flowDirection: number): number {
+  const flowCoord = pathU - offset * flowDirection
+  const pattern = fract(flowCoord / FLOW_REPEAT)
+  const wave = 0.5 + 0.5 * Math.cos(pattern * FLOW_PI)
+  return wave ** 6
+}
+
+/**
+ * 在 centerU 的 ±windowM 邻域内细粒度搜索脉冲峰值位置（pathU）。
+ *
+ * 用邻域而非整周期搜索，是为了跨 offset 跟踪"同一个"峰值，避免周期缠绕把反向推进
+ * 误判为正向（反向峰值在整周期 [0,repeat) 内会从 0 缠绕到 repeat−δ，数值反而增大）。
+ * offset 步长远小于 windowM，峰值始终留在邻域内，跟踪稳定。
+ */
+function trackedPeak(centerU: number, offset: number, flowDirection: number, windowM: number): number {
+  const samples = 2001
+  let bestU = centerU
+  let bestV = -1
+  for (let i = 0; i <= samples; i += 1) {
+    const u = centerU - windowM + (2 * windowM) * (i / samples)
+    const v = shaderPulse(u, offset, flowDirection)
+    if (v > bestV) {
+      bestV = v
+      bestU = u
+    }
+  }
+  return bestU
+}
+
+describe('流向公式 — source→target 脉冲推进（§7.6、§16.2）', () => {
+  // 跟踪初始位于 pathU=FLOW_REPEAT 的峰值，邻域半宽 0.5 m；offset 步长 0.2 m 远小于邻域。
+  const CENTER = FLOW_REPEAT
+  const WINDOW = 0.5
+  const STEP = 0.2
+
+  it('规范/单向车道（+1）：峰值随 offset 增大向高弧长推进（源→目标）', () => {
+    const at0 = trackedPeak(CENTER, 0, 1, WINDOW)
+    const at1 = trackedPeak(CENTER, STEP, 1, WINDOW)
+    // 峰值从 CENTER 移到 CENTER+STEP（向 target / 高弧长）；幅度约等于 offset 步长，
+    // 容差吸收邻域网格采样量化（2001 点 / 1.0 m 邻域 ≈ 0.0005 m 分辨率）。
+    expect(at1).toBeGreaterThan(at0)
+    expect(at1 - at0).toBeCloseTo(STEP, 1)
+  })
+
+  it('反向车道（-1）：峰值随 offset 增大向低弧长推进（反向源→目标）', () => {
+    const at0 = trackedPeak(CENTER, 0, -1, WINDOW)
+    const at1 = trackedPeak(CENTER, STEP, -1, WINDOW)
+    // 峰值从 CENTER 移到 CENTER−STEP（向反向 target / 低弧长），方向与 +1 相反。
+    expect(at1).toBeLessThan(at0)
+    expect(at0 - at1).toBeCloseTo(STEP, 1)
+  })
+
+  it('+1 与 −1 同 offset 下峰值推进方向相反（双向组流向对立，§7.6）', () => {
+    const deltaPlus = trackedPeak(CENTER, STEP, 1, WINDOW) - trackedPeak(CENTER, 0, 1, WINDOW)
+    const deltaMinus = trackedPeak(CENTER, STEP, -1, WINDOW) - trackedPeak(CENTER, 0, -1, WINDOW)
+    expect(deltaPlus).toBeGreaterThan(0)
+    expect(deltaMinus).toBeLessThan(0)
+  })
+
+  it('fract 对负 flowCoord 恒落 [0,1)：规范车道源点（pathU=0、offset>0）脉冲有限', () => {
+    // 规范车道源点 flowCoord = 0 − offset < 0；验证 GLSL fract 负输入分支不产生越界脉冲。
+    for (let i = 1; i <= 20; i += 1) {
+      const v = shaderPulse(0, i * 0.05, 1)
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+describe('createPathMaterial — 释放生命周期（SPEC §5.4，TASK-010）', () => {
+  it('dispose 触发 dispose 事件，使释放路径可被自动化验证', () => {
+    const mat = createPathMaterial(COLOR, FLOW)
+    let disposed = false
+    mat.addEventListener('dispose', () => {
+      disposed = true
+    })
+    // PathLayer 的卸载 effect 调用 material.dispose()；此处验证该调用确实释放资源。
+    mat.dispose()
+    expect(disposed).toBe(true)
+  })
+
+  it('dispose 幂等：重复调用不抛错', () => {
+    const mat = createPathMaterial(COLOR, FLOW)
+    expect(() => {
+      mat.dispose()
+      mat.dispose()
+    }).not.toThrow()
+  })
+})

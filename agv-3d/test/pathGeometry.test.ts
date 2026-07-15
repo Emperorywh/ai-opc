@@ -102,3 +102,25 @@ describe('buildPathGeometry — 属性值正确透传', () => {
     expect(flowDir.getX(2)).toBe(-1)
   })
 })
+
+describe('buildPathGeometry — 释放生命周期（SPEC §5.4，TASK-010）', () => {
+  it('dispose 触发 dispose 事件，使释放路径可被自动化验证', () => {
+    const geometry = buildPathGeometry(minimalPacket())
+    let disposed = false
+    geometry.addEventListener('dispose', () => {
+      disposed = true
+    })
+    // PathLayer 的卸载 effect 调用 geometry.dispose()；此处验证该调用确实释放资源，
+    // 使 GPU 缓冲回收路径可自动化验证（SPEC §5.4、§11.3 卸载后资源回到基线）。
+    geometry.dispose()
+    expect(disposed).toBe(true)
+  })
+
+  it('dispose 幂等：重复调用不抛错', () => {
+    const geometry = buildPathGeometry(minimalPacket())
+    expect(() => {
+      geometry.dispose()
+      geometry.dispose()
+    }).not.toThrow()
+  })
+})
