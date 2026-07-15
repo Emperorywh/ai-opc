@@ -9,18 +9,17 @@ project:
     - AGENTS.md
 
 defaults:
-  maxAttempts: 3
-  taskTimeoutMinutes: 45
-  maxTurns: 80
+  # 新系统让实现、续跑和修复持续到任务收敛，只接受外部显式中断。
+  # 不设置会把同一业务任务切碎并最终终止的尝试、时长或轮数硬上限。
   model: sonnet
   effort: high
 
 review:
   enabled: true
-  maxAttempts: 2
+  # 审核与实现采用相同的持续收敛策略，避免复杂候选因固定审核轮数被误判为终态失败。
+  # Reviewer 仍保持只读边界，是否通过继续由结构化审核结果决定。
   model: sonnet
   effort: high
-  maxTurns: 30
 
 git:
   commitMessagePrefix: task
