@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Canvas, type RootState } from '@react-three/fiber'
 import type { SceneLifecyclePort } from '../../application/mapLoadCoordinator'
 import { CAMERA_FOV_DEG, CAMERA_NEAR_M, FRAMING_REFERENCE_ASPECT } from '../../config/cameraConfig'
+import { COLOR_PIPELINE } from '../../config/visualTheme'
 import type { RenderPacket } from '../../domain/renderPacket'
 import { CameraRig } from './CameraRig'
 import { PixelBudgetDpr } from './PixelBudgetDpr'
@@ -9,6 +10,7 @@ import { computeCameraFrame } from './cameraFraming'
 import { EnvironmentLayer } from './EnvironmentLayer'
 import { NodeLayer } from './NodeLayer'
 import { PathLayer } from './PathLayer'
+import { PostEffects } from './PostEffects'
 import { SceneErrorBoundary } from './SceneErrorBoundary'
 import './sceneView.css'
 
@@ -36,8 +38,10 @@ import './sceneView.css'
  * 边界说明（后续任务接入点）：
  * - 真实平面反射（TASK-013）：EnvironmentLayer 通过 PlaneReflectionGround 挂载唯一地面，反射目标
  *   固定 1024×1024、平面范围由 renderBounds 推导，不随主画布 DPR/分辨率膨胀（SPEC §8.4、§11.1）。
- * - 后处理（Bloom/SMAA）属 TASK-014，此处不接入 EffectComposer；R3F 默认的 ACES 色调映射与
- *   sRGB 输出已与 SPEC §8.5 一致，节点基础色可辨识。
+ * - 唯一色彩输出与后处理（TASK-014，SPEC §8.5）：Canvas 经 COLOR_PIPELINE 写入 sRGB 输出、
+ *   ACES 色调映射与曝光 1.0，原生 antialias 关闭；PostEffects 接入唯一 Bloom → SMAA 链，
+ *   Composer multisampling 为 0、Bloom 阈值 1.0 仅触发流动高亮与高发光节点，基础路径与背景不 Bloom。
+ *   着色器与后处理之间不重复 tone mapping 或色彩空间转换（详见 PostEffects）。
  *
  * 生命周期（SPEC §10.1、TASK-006）：
  * 1. 组件在 preparing/creating-scene 挂载，Canvas 以 opacity:0 创建场景资源。
@@ -72,8 +76,14 @@ export function MapSceneView({ packet, scene, initiallyReady }: MapSceneViewProp
 
   // onCreated 经窄边界提交"首帧成功"事实。相机姿态由 CameraRig（OrbitControls）接管，此处不再手动 lookAt。
   // 已 ready（如重挂）时直接显示，不重复驱动生命周期。
+  // 同时经 COLOR_PIPELINE 把唯一色彩管线写入 renderer：sRGB 输出、ACES 色调映射、曝光 1.0
+  // （SPEC §8.5）。此处在 Canvas 创建后显式写入，锁定 SPEC 契约不依赖 R3F 默认值；EffectComposer
+  // 渲染期会临时把 toneMapping 置 NoToneMapping 供 Bloom 阈值触发，卸载时恢复此处的 ACES。
   const handleCreated = useCallback(
-    (_state: RootState) => {
+    (state: RootState) => {
+      state.gl.outputColorSpace = COLOR_PIPELINE.outputColorSpace
+      state.gl.toneMapping = COLOR_PIPELINE.toneMapping
+      state.gl.toneMappingExposure = COLOR_PIPELINE.toneMappingExposure
       if (initiallyReady) {
         setOpacity(1)
         return
@@ -106,7 +116,8 @@ export function MapSceneView({ packet, scene, initiallyReady }: MapSceneViewProp
         // 初始 DPR 占位为 1，PixelBudgetDpr 在挂载后立即按像素预算精算并写入（§9.3、§11.1）。
         // 淡入期间画布 opacity:0，DPR 切换的潜在首帧重排对用户不可见。
         dpr={1}
-        // SPEC §8.5：Canvas 原生抗锯齿关闭，由 TASK-013 的 SMAA 负责。
+        // SPEC §8.5：Canvas 原生抗锯齿关闭，由 TASK-014 的 SMAA 负责（Composer multisampling 同为 0，
+        // 抗锯齿唯一由 SMAA 承担，不叠加 MSAA）。
         gl={{ antialias: false, powerPreference: 'high-performance' }}
         // SPEC §8.3、§11.1：启用阴影（PCFSoft），仅节点 castShadow；阴影贴图 2048×2048。
         shadows
@@ -135,6 +146,12 @@ export function MapSceneView({ packet, scene, initiallyReady }: MapSceneViewProp
         </SceneErrorBoundary>
         {/* SPEC §8.1 CameraRig：受控 OrbitControls，提供旋转/缩放/平移与自动框选目标。 */}
         <CameraRig bounds={packet.renderBounds} frame={frame} />
+        {/*
+          SPEC §8.1 PostEffects、§8.5（TASK-014）：唯一后处理链 Bloom → SMAA，接管渲染循环。
+          放在 CameraRig 之后、作为场景级管线（非数据驱动图层）；其色彩职责与 renderer 的
+          COLOR_PIPELINE 协作，不在链中重复 tone mapping 或色彩空间转换（详见 PostEffects）。
+        */}
+        <PostEffects />
       </Canvas>
     </div>
   )

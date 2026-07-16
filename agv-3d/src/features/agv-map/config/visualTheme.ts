@@ -1,16 +1,20 @@
+import { ACESFilmicToneMapping, SRGBColorSpace } from 'three'
+import type { ToneMapping } from 'three'
 import type { RawNodeType } from '../domain/rawDto'
 
 /**
- * 视觉主题集中配置（SPEC §8.2、§12）。
+ * 视觉主题集中配置（SPEC §8.2、§8.5、§12）。
  *
- * 颜色、Emissive 与材质参数必须集中定义，禁止组件内散落色值（SPEC §8.2 末条）。
- * 本文件只承载纯数据（HSL 元组与标量），不依赖 Three.js、React 或任何浏览器对象，
- * 因此可在 Node 环境下直接验证色值与 SPEC §8.2 调色板一致；展示层负责把 HSL 元组
- * 转换为 THREE.Color（见 NodeLayer）。
+ * 颜色、Emissive、材质、灯光与 Bloom 参数必须集中定义，禁止组件内散落色值或阈值
+ * （SPEC §8.2 末条、§8.5、§12 visualTheme 承载颜色/材质/灯光/Bloom）。本文件承载 HSL 元组、
+ * 标量与色彩管线常量；色彩管线部分引用 Three.js 的渲染状态常量（SRGBColorSpace、
+ * ACESFilmicToneMapping），它们是纯标量值（字符串/数字），不触达 WebGL 上下文或任何浏览器
+ * 对象，因此整体仍可在 Node 环境直接验证色值、Bloom 参数与色彩管线目标与 SPEC 一致；展示层
+ * 负责把 HSL 元组转换为 THREE.Color（见 NodeLayer）、把色彩管线常量写入 renderer（见 MapSceneView）。
  *
  * Emissive 目标（SPEC §8.2）：node 低于 Bloom 阈值、work 接近阈值、charge/park 高于阈值。
- * 当前 emissiveIntensity 为无后处理下的可见度初值，按该目标排序（node < work < park ≈ charge）；
- * TASK-013 将按 Bloom 亮度阈值（1.0）与色调映射最终精调，届时只需修改本表数值。
+ * emissiveIntensity 按"低于/接近/高于 Bloom 阈值"的目标排序（node < work < park ≈ charge）；
+ * Bloom 亮度阈值（1.0，见 BLOOM_THEME）确定后，发光层次由本表与路径流光强度共同表达。
  */
 
 /** HSL 颜色：H 为 0～360 度，S/L 为 0～1。 */
@@ -283,3 +287,74 @@ export const ENVIRONMENT_THEME: Readonly<{
     top: { h: 210, s: 0.6, l: 0.18 },
   },
 }
+
+/**
+ * 唯一色彩管线配置（SPEC §8.5，TASK-014）。
+ *
+ * 整个场景的色彩在唯一一处定义并写入 renderer：输出色彩空间 sRGB、色调映射 ACESFilmic、
+ * 曝光 1.0。该配置由展示层在 Canvas 创建时写入 gl（见 MapSceneView），是 SPEC §8.5 的唯一
+ * 色彩契约；着色器与后处理之间不重复执行 tone mapping 或色彩空间转换（见 BLOOM_THEME
+ * 与 PostEffects 说明）。
+ *
+ * 不变量：
+ * - 单一职责：全场景只有这一处定义输出色彩空间与色调映射；组件、着色器与后处理不得散落第二套
+ *   色彩转换或阈值（SPEC §8.2 末条、§8.5、TASK-014 实现约束）。
+ * - Three.js 常量引用：outputColorSpace / toneMapping 取自 three.js 的渲染状态常量（纯标量值，
+ *   非浏览器对象），保证展示层写入的值与测试断言的值同源（SPEC §8.5）。
+ * - 与后处理的协作：EffectComposer（@react-three/postprocessing）在渲染期临时把 renderer.toneMapping
+ *   置为 NoToneMapping，使材质输出线性 HDR 供 Bloom 亮度阈值（1.0）触发；这不是"第二套"色调映射，
+ *   而是后处理库的 HDR 机制。Composer 卸载时恢复本配置的 ACES（TASK-014 正常路径）。
+ */
+export interface ColorPipelineTheme {
+  /** 输出色彩空间（SPEC §8.5：SRGBColorSpace）。 */
+  readonly outputColorSpace: string
+  /** 色调映射算法（SPEC §8.5：ACESFilmicToneMapping）。 */
+  readonly toneMapping: ToneMapping
+  /** 色调映射曝光（SPEC §8.5：1.0）。 */
+  readonly toneMappingExposure: number
+}
+
+export const COLOR_PIPELINE: ColorPipelineTheme = {
+  outputColorSpace: SRGBColorSpace,
+  toneMapping: ACESFilmicToneMapping,
+  toneMappingExposure: 1.0,
+}
+
+/**
+ * Bloom 后处理视觉参数（SPEC §8.5、§8.2，TASK-014）。
+ *
+ * 不变量：
+ * - 亮度阈值 1.0：只有线性空间亮度高于 1.0 的像素进入 Bloom。配合 EffectComposer 的 HDR 渲染
+ *   （渲染期 NoToneMapping），流动高亮（峰值 ≈ 流光色线性峰值 × flowHighlightIntensity > 1.0，
+ *   见 pathShader）与 charge/park 节点的发光层次触发 Bloom；基础路径扁带、背景与普通 node 节点
+ *   线性亮度低于 1.0，不进入 Bloom（SPEC §8.5、§16.2 "基础路径和背景不得进入 Bloom"）。
+ * - mipmapBlur：启用 mipmap 金字塔模糊，形成柔和而稳定的辉光，不叠加第二套抗锯齿或自研模糊
+ *   （SPEC §8.5、TASK-014 实现约束）。
+ * - 阈值、平滑、强度集中定义，组件与着色器内不得散落（SPEC §8.2 末条、§8.5）。
+ */
+export interface BloomTheme {
+  /** 亮度阈值（SPEC §8.5：1.0）。线性亮度高于此值的像素进入 Bloom。 */
+  readonly luminanceThreshold: number
+  /** 亮度阈值平滑（SPEC §8.5：0.2）。控制阈值边界的过渡柔和度。 */
+  readonly luminanceSmoothing: number
+  /** Bloom 强度（SPEC §8.5：1.1）。辉光叠加倍率。 */
+  readonly intensity: number
+  /** 启用 mipmap blur（SPEC §8.5：启用）。 */
+  readonly mipmapBlur: boolean
+}
+
+export const BLOOM_THEME: BloomTheme = {
+  luminanceThreshold: 1.0,
+  luminanceSmoothing: 0.2,
+  intensity: 1.1,
+  mipmapBlur: true,
+}
+
+/**
+ * EffectComposer 多采样样本数（SPEC §8.5：multisampling = 0，TASK-014）。
+ *
+ * 设为 0 关闭 Composer 内部的 MSAA 管线，避免与 SMAA 叠加成第二套抗锯齿（SPEC §8.5
+ * "EffectComposer 的 multisampling 设为 0"、"不叠加第二套抗锯齿"，§3 "不启用重复的 MSAA 管线"）。
+ * Canvas 原生 antialias 同样关闭（见 MapSceneView），画面抗锯齿唯一由 SMAA 负责。
+ */
+export const COMPOSER_MULTISAMPLING = 0

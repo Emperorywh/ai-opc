@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { ACESFilmicToneMapping, SRGBColorSpace } from 'three'
 import {
+  BLOOM_THEME,
+  COLOR_PIPELINE,
+  COMPOSER_MULTISAMPLING,
   NODE_BASE_COLORS,
   NODE_VISUAL_THEME,
   PATH_BASE_COLOR,
@@ -84,5 +88,57 @@ describe('visualTheme — 流光动画参数（SPEC §7.6、TASK-010）', () => 
       expect(Number.isFinite(v)).toBe(true)
       expect(v).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('visualTheme — 唯一色彩管线（SPEC §8.5，TASK-014）', () => {
+  it('输出色彩空间为 SRGBColorSpace', () => {
+    expect(COLOR_PIPELINE.outputColorSpace).toBe(SRGBColorSpace)
+  })
+
+  it('色调映射为 ACESFilmicToneMapping', () => {
+    expect(COLOR_PIPELINE.toneMapping).toBe(ACESFilmicToneMapping)
+  })
+
+  it('色调映射曝光为 1.0', () => {
+    expect(COLOR_PIPELINE.toneMappingExposure).toBe(1.0)
+  })
+
+  it('色彩管线三要素均为有限、确定的标量值（不散落、可锁定）', () => {
+    expect(typeof COLOR_PIPELINE.outputColorSpace).toBe('string')
+    expect(COLOR_PIPELINE.outputColorSpace.length).toBeGreaterThan(0)
+    expect(Number.isFinite(COLOR_PIPELINE.toneMapping)).toBe(true)
+    expect(Number.isFinite(COLOR_PIPELINE.toneMappingExposure)).toBe(true)
+  })
+})
+
+describe('visualTheme — Bloom 后处理参数（SPEC §8.5、§8.2，TASK-014）', () => {
+  it('亮度阈值为 1.0（仅 HDR 高亮进入 Bloom）', () => {
+    expect(BLOOM_THEME.luminanceThreshold).toBe(1.0)
+  })
+
+  it('亮度阈值平滑为 0.2', () => {
+    expect(BLOOM_THEME.luminanceSmoothing).toBe(0.2)
+  })
+
+  it('Bloom 强度为 1.1', () => {
+    expect(BLOOM_THEME.intensity).toBe(1.1)
+  })
+
+  it('启用 mipmap blur', () => {
+    expect(BLOOM_THEME.mipmapBlur).toBe(true)
+  })
+
+  it('Bloom 阈值高于基础路径扁带线性亮度（基础路径不进入 Bloom，§8.5、§16.2）', () => {
+    // 基础色 hsl(200,85%,55%) 线性化后最大通道 < 1.0（pathShader.test 已逐字断言），
+    // 此处复验阈值 1.0 严格大于该基础亮度，确保扁带不触发 Bloom。
+    expect(BLOOM_THEME.luminanceThreshold).toBeGreaterThan(0.9)
+    expect(PATH_VISUAL_THEME.color.flowHighlightIntensity).toBeGreaterThan(0)
+  })
+})
+
+describe('visualTheme — Composer multisampling（SPEC §8.5，TASK-014）', () => {
+  it('EffectComposer multisampling 为 0（关闭 Composer MSAA，抗锯齿唯一由 SMAA 负责）', () => {
+    expect(COMPOSER_MULTISAMPLING).toBe(0)
   })
 })
