@@ -11,6 +11,7 @@ import { GeometryCompileError, type SampledEdge } from '../src/features/agv-map/
 import { compilePathGeometry, validatePathGeometry } from '../src/features/agv-map/geometry/pathRibbon'
 import { computeMapSpace } from '../src/features/agv-map/geometry/worldCoords'
 import { typedArrayBytesEqual } from './helpers/typedArrayBytes'
+import { cubicAt } from './helpers/curveGeometry'
 
 /** 构造采样边工厂。 */
 function sampledEdge(id: string, source: string, target: string, points: Point2[]): SampledEdge {
@@ -275,6 +276,118 @@ describe('compilePathGeometry — 折角 miter/bevel', () => {
     )
     // 折点切到 bevel → 4 横截面 → 8 顶点。
     expect(geometry.positions.length).toBe(8 * 3)
+  })
+})
+
+describe('compilePathGeometry — 平滑曲线（SPEC §7.5、TASK-004 曲线覆盖）', () => {
+  /**
+   * 对三次贝塞尔等参数采样 count 个点，模拟采样器对 BEZIER 的输出（SPEC §7.3）。
+   * 采用平缓 S 曲线（控制点单调递增），相邻段转角远小于 120° bevel 阈值，
+   * 使全部内部点使用 miter，便于断言横截面计数。
+   */
+  function sampleCubicPoints(
+    p0: Point2,
+    p1: Point2,
+    p2: Point2,
+    p3: Point2,
+    count: number,
+  ): Point2[] {
+    const pts: Point2[] = []
+    for (let i = 0; i < count; i += 1) {
+      pts.push(cubicAt(p0, p1, p2, p3, i / (count - 1)))
+    }
+    return pts
+  }
+
+  /** 平缓 S 曲线的 21 点采样。 */
+  function smoothCurve(): Point2[] {
+    return sampleCubicPoints(
+      { x: 0, y: 0 },
+      { x: 3, y: 4 },
+      { x: 7, y: 4 },
+      { x: 10, y: 0 },
+      21,
+    )
+  }
+
+  it('平滑曲线全部使用 miter：顶点数 = 2×采样点数，无 bevel 触发', () => {
+    const curve = smoothCurve()
+    const groups = groupLanes(
+      [sampledEdge('e1', 'a', 'b', curve)],
+      DEFAULT_LANE_GROUPING_CONFIG,
+    )
+    const { geometry } = compilePathGeometry(
+      groups,
+      originSpace(),
+      DEFAULT_PATH_RIBBON_CONFIG,
+      DEFAULT_LANE_GROUPING_CONFIG,
+    )
+    // 21 点全部 miter/端点 → 21 横截面 → 42 顶点 → 20 Quad = 40 三角形 = 120 索引。
+    expect(geometry.positions.length).toBe(42 * 3)
+    expect(geometry.indices.length).toBe(120)
+    // 全部位置有限（无 NaN/Infinity）。
+    for (let i = 0; i < geometry.positions.length; i += 1) {
+      expect(Number.isFinite(geometry.positions[i])).toBe(true)
+    }
+  })
+
+  it('平滑曲线 pathU 按各段折线长度累计，末值等于折线总长', () => {
+    const curve = smoothCurve()
+    const groups = groupLanes(
+      [sampledEdge('e1', 'a', 'b', curve)],
+      DEFAULT_LANE_GROUPING_CONFIG,
+    )
+    const { geometry } = compilePathGeometry(
+      groups,
+      originSpace(),
+      DEFAULT_PATH_RIBBON_CONFIG,
+      DEFAULT_LANE_GROUPING_CONFIG,
+    )
+    // 首横截面 pathU = 0。
+    expect(geometry.pathU[0]).toBe(0)
+    // 独立累计折线总长（双精度），与 Float32 存储的末顶点弧长比较（容差 1e-5）。
+    let totalLen = 0
+    for (let i = 1; i < curve.length; i += 1) {
+      totalLen += Math.hypot(curve[i].x - curve[i - 1].x, curve[i].y - curve[i - 1].y)
+    }
+    expect(Math.abs(geometry.pathU[geometry.pathU.length - 1] - totalLen)).toBeLessThan(1e-5)
+    // 全程单调不减。
+    for (let i = 1; i < geometry.pathU.length; i += 1) {
+      expect(geometry.pathU[i]).toBeGreaterThanOrEqual(geometry.pathU[i - 1] - 1e-9)
+    }
+  })
+
+  it('平滑曲线全部顶点被引用、索引不越界、流向恒 +1', () => {
+    const curve = sampleCubicPoints(
+      { x: 0, y: 0 },
+      { x: 3, y: 4 },
+      { x: 7, y: 4 },
+      { x: 10, y: 0 },
+      15,
+    )
+    const groups = groupLanes(
+      [sampledEdge('e1', 'a', 'b', curve)],
+      DEFAULT_LANE_GROUPING_CONFIG,
+    )
+    const { geometry } = compilePathGeometry(
+      groups,
+      originSpace(),
+      DEFAULT_PATH_RIBBON_CONFIG,
+      DEFAULT_LANE_GROUPING_CONFIG,
+    )
+    const vertexCount = geometry.positions.length / 3
+    const referenced = new Set<number>()
+    for (let i = 0; i < geometry.indices.length; i += 1) {
+      expect(geometry.indices[i]).toBeGreaterThanOrEqual(0)
+      expect(geometry.indices[i]).toBeLessThan(vertexCount)
+      referenced.add(geometry.indices[i])
+    }
+    for (let v = 0; v < vertexCount; v += 1) {
+      expect(referenced.has(v), `顶点 ${v} 未被引用`).toBe(true)
+    }
+    for (let i = 0; i < geometry.flowDirections.length; i += 1) {
+      expect(geometry.flowDirections[i]).toBe(1)
+    }
   })
 })
 
