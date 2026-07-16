@@ -145,3 +145,104 @@ export const PATH_BASE_COLOR: HslColor = { h: 200, s: 0.85, l: 0.55 }
 
 /** SPEC §8.2 流动高亮色，供测试与展示层共享断言基准。 */
 export const PATH_FLOW_HIGHLIGHT_COLOR: HslColor = { h: 185, s: 1.0, l: 0.75 }
+
+/**
+ * 深色沙盘环境视觉主题（SPEC §8.2 背景、§8.3 材质与灯光、§8.4 地面/网格/雾，TASK-012）。
+ *
+ * 颜色、材质与灯光等"看起来如何"的视觉参数集中于此（SPEC §8.2 末条禁止组件内散落色值、
+ * §8.3 所有材质参数由主题配置统一提供、§12 visualTheme 承载颜色/材质/灯光/Bloom）。
+ * 环境的空间布局参数（边距、距离因子、单元尺寸）不属视觉，集中于 environmentConfig。
+ *
+ * 不变量：
+ * - 背景与雾色取 SPEC §8.2 背景 #05080F；雾色与背景一致使远端拓扑无缝融入、不出现色带。
+ * - 地面为本期深色不透明基线（SPEC §8.4 反射地面属后续任务，TASK-012 不混入平面反射）；
+ *   粗糙度高、金属度低，配合本地 PMREM 呈现深色哑光沙盘底。
+ * - 网格使用细/粗双色与低基础透明度，避免遮蔽路径与节点；径向衰减距离取自 environmentConfig。
+ * - 方向光高色温低强度塑形、环境光低强度补底（SPEC §8.3 一个带阴影方向光 + 低强度环境光）。
+ */
+
+/** 场景背景色（SPEC §8.2：#05080F）。CSS hex 字符串，供 R3F <color attach="background"> 直接消费。 */
+export const ENVIRONMENT_BACKGROUND_HEX = '#05080F'
+
+/** 线性雾色（SPEC §8.4，与背景一致以无缝融入远端）。 */
+export const ENVIRONMENT_FOG_HEX = '#05080F'
+
+/** 环境方向光视觉参数（SPEC §8.3 一个带阴影方向光）。颜色为 sRGB HSL，由展示层线性化。 */
+export interface DirectionalLightTheme {
+  /** 光色（SPEC §8.3 集中定义；取冷白偏蓝与深色科技底协调）。 */
+  readonly color: HslColor
+  /** 光强（SPEC §8.3 由主题统一提供；配合 ACES 色调映射塑形节点体积感）。 */
+  readonly intensity: number
+}
+
+/** 环境光视觉参数（SPEC §8.3 低强度环境光补底）。 */
+export interface AmbientLightTheme {
+  /** 环境光色（取冷蓝底色，与深色沙盘一致）。 */
+  readonly color: HslColor
+  /** 环境光强（SPEC §8.3 低强度补光，不喧宾夺主）。 */
+  readonly intensity: number
+}
+
+/** 地面材质视觉参数（SPEC §8.3、§8.4 深色不透明基线，本期非反射）。 */
+export interface GroundMaterialTheme {
+  /** 基础色（深色沙盘底，略高于纯背景以接收阴影可辨）。 */
+  readonly color: HslColor
+  /** 粗糙度（高粗糙度呈哑光，配合 PMREM 柔和反射环境光）。 */
+  readonly roughness: number
+  /** 金属度（低金属度，避免镜面高光喧宾夺主）。 */
+  readonly metalness: number
+}
+
+/** 网格视觉参数（SPEC §8.4 独立网格图层）。径向衰减距离取自 environmentConfig。 */
+export interface GridTheme {
+  /** 细网格线色（较低明度，作为底层参考格）。 */
+  readonly sectionColor: HslColor
+  /** 粗网格线色（略亮，强调大尺度划分）。 */
+  readonly centerColor: HslColor
+  /** 基础透明度（叠加在径向衰减之上，低值避免遮蔽拓扑，§16.2 不遮蔽拓扑）。 */
+  readonly baseOpacity: number
+}
+
+/** 程序化 PMREM 渐变球面色（SPEC §8.3 本地程序化环境）。底色与顶色在球面垂直方向线性插值。 */
+export interface PmremGradientTheme {
+  /** 渐变底部色（球面下方，对应地面反射方向，取近背景深色）。 */
+  readonly bottom: HslColor
+  /** 渐变顶部色（球面上方，对应天空反射方向，略亮冷蓝提供柔和顶光）。 */
+  readonly top: HslColor
+}
+
+/** 环境视觉主题初值（SPEC §8.2、§8.3、§8.4）。 */
+export const ENVIRONMENT_THEME: Readonly<{
+  readonly backgroundHex: string
+  readonly fogHex: string
+  readonly directionalLight: DirectionalLightTheme
+  readonly ambientLight: AmbientLightTheme
+  readonly ground: GroundMaterialTheme
+  readonly grid: GridTheme
+  readonly pmremGradient: PmremGradientTheme
+}> = {
+  backgroundHex: ENVIRONMENT_BACKGROUND_HEX,
+  fogHex: ENVIRONMENT_FOG_HEX,
+  directionalLight: {
+    color: { h: 210, s: 0.3, l: 0.85 },
+    intensity: 2.4,
+  },
+  ambientLight: {
+    color: { h: 220, s: 0.4, l: 0.35 },
+    intensity: 0.35,
+  },
+  ground: {
+    color: { h: 225, s: 0.4, l: 0.05 },
+    roughness: 0.85,
+    metalness: 0.1,
+  },
+  grid: {
+    sectionColor: { h: 210, s: 0.5, l: 0.3 },
+    centerColor: { h: 200, s: 0.6, l: 0.45 },
+    baseOpacity: 0.22,
+  },
+  pmremGradient: {
+    bottom: { h: 225, s: 0.5, l: 0.03 },
+    top: { h: 210, s: 0.6, l: 0.18 },
+  },
+}

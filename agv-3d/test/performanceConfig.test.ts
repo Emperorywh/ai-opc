@@ -5,6 +5,7 @@ import {
   MAX_RENDER_HEIGHT_PX,
   MAX_RENDER_PIXELS,
   MAX_RENDER_WIDTH_PX,
+  SHADOW_MAP_SIZE_PIXELS,
 } from '../src/features/agv-map/config/performanceConfig'
 
 /**
@@ -123,5 +124,9 @@ describe('像素预算常量（SPEC §11.1）', () => {
     expect(MAX_RENDER_WIDTH_PX).toBe(3840)
     expect(MAX_RENDER_HEIGHT_PX).toBe(2160)
     expect(MAX_RENDER_PIXELS).toBe(3840 * 2160)
+  })
+
+  it('阴影贴图分辨率为 2048×2048（SPEC §8.3、§11.1，TASK-012）', () => {
+    expect(SHADOW_MAP_SIZE_PIXELS).toBe(2048)
   })
 })

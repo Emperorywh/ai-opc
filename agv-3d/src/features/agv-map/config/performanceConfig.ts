@@ -5,9 +5,9 @@
  * 有效 DPR 计算逻辑：在任意 CSS 尺寸与设备像素比下，把实际渲染像素限制在 4K 预算内，
  * 避免操作系统缩放使 4K 目标画布膨胀到 6K/8K（SPEC §11.1）。
  *
- * 阴影贴图与反射 RenderTarget 分辨率同样属于性能预算，但其使用方（阴影贴图、反射地面）
- * 由 TASK-012 接入；本期不预留空字段或占位值（§2.3 不创建未实现能力的空模块），
- * TASK-012 落地时在本文件追加 SHADOW_MAP_SIZE_PIXELS 与 REFLECTION_TARGET_SIZE_PIXELS。
+ * 阴影贴图与反射 RenderTarget 分辨率同样属于性能预算，按所属任务随用随加（§2.3 不创建未实现
+ * 能力的空模块）：TASK-012 落地阴影贴图分辨率（SHADOW_MAP_SIZE_PIXELS，SPEC §8.3、§11.1）；
+ * 反射 RenderTarget 分辨率属后续平面反射任务，落地时再追加，不预留占位。
  *
  * 不变量：
  * - effectiveDpr 为纯函数：相同输入产生相同输出，不读取 DOM 以外的隐式状态；
@@ -25,6 +25,15 @@ export const MAX_RENDER_HEIGHT_PX = 2160
 
 /** 主画布最大物理像素总数（SPEC §11.1：3840 × 2160）。 */
 export const MAX_RENDER_PIXELS = MAX_RENDER_WIDTH_PX * MAX_RENDER_HEIGHT_PX
+
+/**
+ * 阴影贴图分辨率，单位像素（SPEC §8.3、§11.1：固定 2048×2048）。
+ *
+ * 方向光阴影贴图宽高同取该值；只有节点投射阴影（SPEC §8.3），贴图只需覆盖节点足迹，
+ * 2048 在 V76 基线下兼顾边缘清晰度与显存（§11.1 性能预算）。由 EnvironmentLayer 消费，
+ * 不在组件内散落（§12 性能预算集中）。
+ */
+export const SHADOW_MAP_SIZE_PIXELS = 2048
 
 /**
  * 瞬态/非法输入的安全默认 DPR（SPEC §9.3、TASK-011 异常路径）。
