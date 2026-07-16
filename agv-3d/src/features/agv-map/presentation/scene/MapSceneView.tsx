@@ -120,12 +120,15 @@ export function MapSceneView({ packet, scene, initiallyReady }: MapSceneViewProp
         onCreated={handleCreated}
       >
         <PixelBudgetDpr />
-        {/* SPEC §8.1 图层顺序：EnvironmentLayer（背景、雾、光照、地面、网格）位于拓扑之下。 */}
-        <EnvironmentLayer bounds={packet.renderBounds} />
-        {/* SPEC §8.1 图层顺序：PathLayer 位于 NodeLayer 之下（扁带离地 0.015 m，节点贴地）。 */}
-        {/* 数据驱动 GPU 图层纳入场景错误边界：任一图层渲染期抛错（如节点包不自洽、GPU 创建失败）
-            经 notifySceneCreateFailed 进入统一 error 状态，不展示半成品场景（SPEC §10.2、TASK-009）。 */}
+        {/* 数据驱动 GPU 图层（环境/路径/节点）统一纳入场景错误边界：任一图层渲染期或 effect 期
+            抛错（GPU 创建失败、PMREM 烘焙失败、节点包不自洽等）经 notifySceneCreateFailed 进入
+            统一 error 状态，不展示半成品场景（SPEC §10.2、TASK-009/012）。
+            EnvironmentLayer 同样在边界内：其地面/网格材质构造与 LocalEnvironment 的 PMREM 烘焙
+            均属 GPU 资源创建，失败时与路径/节点图层走同一错误链（§10.2 "不显示半张地图"）。 */}
         <SceneErrorBoundary scene={scene}>
+          {/* SPEC §8.1 图层顺序：EnvironmentLayer（背景、雾、光照、地面、网格）位于拓扑之下。 */}
+          <EnvironmentLayer bounds={packet.renderBounds} />
+          {/* SPEC §8.1 图层顺序：PathLayer 位于 NodeLayer 之下（扁带离地 0.015 m，节点贴地）。 */}
           <PathLayer geometry={packet.pathGeometry} />
           <NodeLayer instances={packet.nodeInstances} />
         </SceneErrorBoundary>

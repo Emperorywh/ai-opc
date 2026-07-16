@@ -8,8 +8,6 @@ import {
   FOG_NEAR_FACTOR,
   GRID_FADE_INNER_FACTOR,
   GRID_FADE_OUTER_FACTOR,
-  SHADOW_CAMERA_FAR_FACTOR,
-  SHADOW_CAMERA_NEAR_M,
 } from '../../config/environmentConfig'
 
 /**
@@ -93,14 +91,15 @@ function horizontalRadius(bounds: Bounds3Data): number {
 /**
  * 把 renderBounds 各轴外扩统一边距得到环境 AABB（SPEC §6.3）。
  *
- * Y 轴同样外扩，使阴影正交相机与环境包围球覆盖地面以上的体积；min[1] 取 max(0, …) 保证
- * 环境底部不低于地面（renderBounds.min[1] 本就贴地 ≈ 0）。
+ * Y 轴顶部外扩完整边距，使阴影正交相机与环境包围球覆盖地面以上的体积；Y 轴底部取
+ * max(0, min[1] − margin)，保证环境底部不低于地面 y=0（renderBounds.min[1] 本就贴地 ≈ 0，
+ * 对负输入也钳到 0，语义明确不依赖外层 Math.min）。
  */
 function expandBounds(bounds: Bounds3Data, margin: number): Bounds3Data {
   return {
     min: [
       bounds.min[0] - margin,
-      Math.min(bounds.min[1], Math.max(0, bounds.min[1] - margin)),
+      Math.max(0, bounds.min[1] - margin),
       bounds.min[2] - margin,
     ],
     max: [
@@ -120,7 +119,8 @@ function expandBounds(bounds: Bounds3Data, margin: number): Bounds3Data {
  * 3. 雾近/远 = environmentBounds 包围球半径 × FOG_NEAR/FAR_FACTOR（随统一边距推导）。
  * 4. 方向光位置 = 中心 + 距离 × 单位朝向（仰角/方位角来自 environmentConfig）；
  *    距离 = environmentBounds 包围球半径 × DIRECTIONAL_LIGHT_DISTANCE_FACTOR。
- * 5. 阴影正交水平半范围 = max(environmentBounds X/Z 半跨度)，近面固定，远面 = 光距 × 因子。
+ * 5. 阴影正交水平半范围 = max(environmentBounds X/Z 半跨度)；近/远面 = 光距 ∓ envRadius，
+ *    紧贴场景前后缘以集中阴影深度精度。
  * 6. 网格径向衰减内/外半径 = renderBounds 水平半径 × 因子（基于拓扑足迹而非相机，§8.4）。
  *
  * @param bounds 渲染边界（世界空间 AABB，来自 RenderPacket.renderBounds）。
@@ -155,12 +155,18 @@ export function computeEnvironmentLayout(bounds: Bounds3Data): EnvironmentLayout
   ]
   const lightTarget: readonly [number, number, number] = [center[0], 0, center[1]]
 
-  // 阴影正交相机：正方形水平范围覆盖 environmentBounds XZ 外接，远面随光距推导。
+  // 阴影正交相机：正方形水平范围覆盖 environmentBounds XZ 外接；深度方向紧贴场景前后缘
+  // （光距 ± envRadius）。envRadius 是包围 environmentBounds（已含 ENVIRONMENT_MARGIN_M）的球半径，
+  // 对 AABB 略有高估，正好为前后缘留出安全余量；同时把 24bit 阴影深度精度集中到实际场景段，
+  // 避免 [0, 光距−envRadius] 空白段稀释精度、加剧阴影量化条纹（SPEC §8.3 阴影覆盖完整节点足迹）。
+  // lightDistance = envRadius × DIRECTIONAL_LIGHT_DISTANCE_FACTOR（因子 3 > 1），故
+  //   near = lightDistance − envRadius = 2 × envRadius > 0、far = lightDistance + envRadius = 4 × envRadius，
+  //   对任意有限边界恒有 0 < near < far，无需额外近面下限常量。
   const halfX = groundWidthM / 2
   const halfZ = groundDepthM / 2
   const shadowExtentM = Math.max(halfX, halfZ)
-  const shadowCameraNearM = SHADOW_CAMERA_NEAR_M
-  const shadowCameraFarM = lightDistance * SHADOW_CAMERA_FAR_FACTOR
+  const shadowCameraNearM = lightDistance - envRadius
+  const shadowCameraFarM = lightDistance + envRadius
 
   // 网格径向衰减：以 renderBounds（拓扑足迹）水平半径为基准，不依赖相机（§8.4）。
   const topoRadius = horizontalRadius(bounds)

@@ -10,8 +10,6 @@ import {
   FOG_NEAR_FACTOR,
   GRID_FADE_INNER_FACTOR,
   GRID_FADE_OUTER_FACTOR,
-  SHADOW_CAMERA_FAR_FACTOR,
-  SHADOW_CAMERA_NEAR_M,
 } from '../src/features/agv-map/config/environmentConfig'
 
 /**
@@ -129,9 +127,8 @@ describe('computeEnvironmentLayout — 阴影正交相机范围（SPEC §8.3、�
     expect(layout.shadowExtentM).toBeGreaterThanOrEqual(halfZ - 1e-6)
   })
 
-  it('阴影近面取配置常量、远面 = 光距 × SHADOW_CAMERA_FAR_FACTOR', () => {
+  it('阴影近/远面紧贴场景前后缘（光距 ∓ envRadius），near < far 且 near > 0', () => {
     const layout = computeEnvironmentLayout(V76_LIKE)
-    expect(layout.shadowCameraNearM).toBe(SHADOW_CAMERA_NEAR_M)
     const env = layout.environmentBounds
     const envRadius = Math.hypot(
       env.max[0] - env.min[0],
@@ -139,8 +136,12 @@ describe('computeEnvironmentLayout — 阴影正交相机范围（SPEC §8.3、�
       env.max[2] - env.min[2],
     ) / 2
     const dist = envRadius * DIRECTIONAL_LIGHT_DISTANCE_FACTOR
-    expect(layout.shadowCameraFarM).toBeCloseTo(dist * SHADOW_CAMERA_FAR_FACTOR, 6)
+    // near/far 紧贴场景前后缘，把深度精度集中到实际场景段（TASK-012：替代固定 near=0.5）。
+    expect(layout.shadowCameraNearM).toBeCloseTo(dist - envRadius, 6)
+    expect(layout.shadowCameraFarM).toBeCloseTo(dist + envRadius, 6)
     expect(layout.shadowCameraFarM).toBeGreaterThan(layout.shadowCameraNearM)
+    // 光距因子 > 1 保证 lightDistance > envRadius，故近面恒正。
+    expect(layout.shadowCameraNearM).toBeGreaterThan(0)
   })
 })
 

@@ -58,6 +58,7 @@ const NODE_LAYER = readScene('NodeLayer.tsx')
 const PATH_LAYER = readScene('PathLayer.tsx')
 const LOCAL_ENVIRONMENT = readScene('LocalEnvironment.tsx')
 const LOCAL_ENV_SCENE = readScene('localEnvironmentScene.ts')
+const LOCAL_ENV_PMREM = readScene('localEnvironmentPmrem.ts')
 
 describe('TASK-012 静态契约 — 单一灯光配置（SPEC §8.3）', () => {
   it('环境图层仅声明一个 <directionalLight> 与一个 <ambientLight>', () => {
@@ -117,7 +118,7 @@ describe('TASK-012 静态契约 — 阴影贴图预算（SPEC §11.1：2048×204
 
 describe('TASK-012 静态契约 — 无远程环境资源（SPEC §8.3、TASK-012 实现约束）', () => {
   it('环境光照源码不出现 http(s) URL、HDR 文件或 CDN 域名', () => {
-    const sources = [ENVIRONMENT_LAYER, LOCAL_ENVIRONMENT, LOCAL_ENV_SCENE].join('\n')
+    const sources = [ENVIRONMENT_LAYER, LOCAL_ENVIRONMENT, LOCAL_ENV_SCENE, LOCAL_ENV_PMREM].join('\n')
     expect(sources).not.toMatch(/https?:\/\//i)
     expect(sources).not.toMatch(/\.hdr\b/i)
     expect(sources).not.toMatch(/poly\.haven|cdn\./i)
@@ -133,10 +134,17 @@ describe('TASK-012 静态契约 — 无远程环境资源（SPEC §8.3、TASK-01
     }
   })
 
-  it('PMREM 由本地 PMREMGenerator.fromScene 烘焙程序化场景', () => {
-    expect(LOCAL_ENVIRONMENT).toContain('PMREMGenerator')
-    expect(LOCAL_ENVIRONMENT).toContain('fromScene')
-    expect(LOCAL_ENVIRONMENT).toContain('buildEnvironmentScene')
+  it('PMREM 由本地 PMREMGenerator.fromScene 烘焙程序化场景（烘焙逻辑集中于 localEnvironmentPmrem）', () => {
+    expect(LOCAL_ENV_PMREM).toContain('PMREMGenerator')
+    expect(LOCAL_ENV_PMREM).toContain('fromScene')
+    expect(LOCAL_ENV_PMREM).toContain('buildEnvironmentScene')
+  })
+
+  it('LocalEnvironment 通过 bakeLocalPmremSession 挂载 PMREM 且烘焙失败不静默吞错', () => {
+    // 组件委托 bakeLocalPmremSession 管理生命周期；失败重抛交由场景错误边界，不再以 try/catch 吞错。
+    expect(LOCAL_ENVIRONMENT).toContain('bakeLocalPmremSession')
+    // 不存在实际的 catch 子句（catch 后跟 ( 或 {）；注释中提及 catch 不影响该判定。
+    expect(LOCAL_ENVIRONMENT).not.toMatch(/catch\s*[({]/)
   })
 })
 
@@ -155,6 +163,20 @@ describe('TASK-012 静态契约 — Canvas 启用阴影（SPEC §8.3）', () => 
   it('MapSceneView 挂载 EnvironmentLayer 并传入 renderBounds', () => {
     expect(MAP_SCENE_VIEW).toContain('<EnvironmentLayer')
     expect(MAP_SCENE_VIEW).toContain('bounds={packet.renderBounds}')
+  })
+})
+
+describe('TASK-012 静态契约 — 环境层纳入场景错误边界（SPEC §10.2）', () => {
+  it('EnvironmentLayer 位于 SceneErrorBoundary 内（PMREM/材质构造失败可进入统一 error 链）', () => {
+    // 环境/路径/节点三类数据驱动 GPU 图层须在同一 SceneErrorBoundary 内，任一渲染期或 effect 期
+    // 抛错均经 notifySceneCreateFailed 进入统一 error 状态，不展示半成品场景（§10.2、TASK-012）。
+    const openIdx = MAP_SCENE_VIEW.indexOf('<SceneErrorBoundary')
+    const closeIdx = MAP_SCENE_VIEW.indexOf('</SceneErrorBoundary>')
+    expect(openIdx).toBeGreaterThan(-1)
+    expect(closeIdx).toBeGreaterThan(openIdx)
+    const envIdx = MAP_SCENE_VIEW.indexOf('<EnvironmentLayer')
+    expect(envIdx).toBeGreaterThan(openIdx)
+    expect(envIdx).toBeLessThan(closeIdx)
   })
 })
 

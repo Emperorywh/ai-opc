@@ -35,7 +35,7 @@ export const ENVIRONMENT_MARGIN_M = 10
  * 方向光的空间朝向（SPEC §8.3 一个带阴影的方向光）。
  *
  * 方向光位置由 renderBounds 中心加该朝向与距离推导（见 environmentLayout），不写死世界坐标。
- * 光的颜色与强度属视觉参数，集中于 visualTheme.ENVIRONMENT_LIGHTS。
+ * 光的颜色与强度属视觉参数，集中于 visualTheme.ENVIRONMENT_THEME.directionalLight / ambientLight。
  *
  * - elevationDeg：光源仰角，自地平面向上度数。越大越接近顶光、阴影越短；取 55° 形成稳定斜影。
  * - azimuthDeg：光源方位角，自世界 +X 起、朝 +Z 为正（与相机方位角同约定，SPEC §6.2）。
@@ -75,19 +75,16 @@ export const FOG_NEAR_FACTOR = 1.0
 export const FOG_FAR_FACTOR = 5.0
 
 /**
- * 阴影正交相机近面，单位米（SPEC §8.3、§11.1）。
+ * 阴影正交相机深度范围（SPEC §8.3、§11.1）。
  *
- * 方向光阴影相机以正交投影覆盖 environmentBounds；近面取小值确保场景前缘入贴图。
+ * 阴影相机以正交投影覆盖 environmentBounds；近/远面由 environmentLayout 紧贴场景前后缘推导：
+ *   near = lightDistance − envRadius，far = lightDistance + envRadius，
+ * 其中 lightDistance = envRadius × DIRECTIONAL_LIGHT_DISTANCE_FACTOR（因子 3）。该范围把 24bit
+ * 阴影深度精度集中到实际场景段，避免 [0, 光距−envRadius] 空白段稀释精度、加剧阴影量化条纹
+ * （TASK-012：此前近面固定 0.5、远面 = 光距 × 2，在 V76 量级下 [0.5, 78] 段空白占用深度缓冲，
+ * 实际场景段精度被稀释）。envRadius 是包围 environmentBounds（已含 ENVIRONMENT_MARGIN_M）的
+ * 球半径，对 AABB 略有高估，正好为前后缘留出安全余量，无需额外近面下限或远面因子常量。
  */
-export const SHADOW_CAMERA_NEAR_M = 0.5
-
-/**
- * 阴影正交相机远面因子（相对方向光光距，SPEC §8.3）。
- *
- * 远面 = 光距 × 该因子，保证从光源穿过整个 environmentBounds 深度均落在 [near, far] 内，
- * 阴影贴图不裁切远端节点。光距已位于场景之外，× 2 远面充分覆盖。
- */
-export const SHADOW_CAMERA_FAR_FACTOR = 2.0
 
 /**
  * 阴影偏置（SPEC §8.3，视觉防阴影瑕疵参数）。
@@ -108,7 +105,7 @@ export const SHADOW_NORMAL_BIAS = 0.02
  *
  * 网格单元与粗倍数确定网格疏密；径向衰减内/外因子（相对 renderBounds 水平半径）控制
  * 从地图中心向外透明度衰减：fade = 1 − smoothstep(inner, outer, dist)。
- * 网格颜色与基础透明度属视觉参数，集中于 visualTheme.ENVIRONMENT_GRID。
+ * 网格颜色与基础透明度属视觉参数，集中于 visualTheme.ENVIRONMENT_THEME.grid。
  *
  * 衰减以 renderBounds 水平半径（拓扑足迹）为基准：inner = 0.5 × R 在中心半半径内满透明度，
  * outer = 1.5 × R 在拓扑外缘外完成衰减，使网格随拓扑而非相机衰减（§8.4 不依赖相机）。
@@ -128,7 +125,7 @@ export const GRID_FADE_OUTER_FACTOR = 1.5
  * 本地程序化 PMREM 环境生成参数（SPEC §8.3 本地程序化环境，不请求远程 HDR）。
  *
  * PMREM 由 PMREMGenerator.fromScene 烘焙一个程序化渐变球面场景得到，不下载任何远程资源。
- * 梯度颜色属视觉参数，集中于 visualTheme.ENVIRONMENT_PMREM_GRADIENT。
+ * 梯度颜色属视觉参数，集中于 visualTheme.ENVIRONMENT_THEME.pmremGradient。
  *
  * - resolution：PMREM 立方体贴图单面分辨率（像素）。SPEC 未规定 PMREM 预算，取 128 兼顾
  *   质量与显存（three.js 默认 256；128 对纯环境光照足够）。

@@ -17,8 +17,6 @@ import {
   PMREM_RESOLUTION,
   PMREM_SCENE_RADIUS_M,
   SHADOW_BIAS,
-  SHADOW_CAMERA_FAR_FACTOR,
-  SHADOW_CAMERA_NEAR_M,
   SHADOW_NORMAL_BIAS,
 } from '../src/features/agv-map/config/environmentConfig'
 
@@ -66,15 +64,7 @@ describe('environmentConfig — 线性雾距因子（SPEC §8.4）', () => {
   })
 })
 
-describe('environmentConfig — 阴影正交相机与偏置（SPEC §8.3、§11.1）', () => {
-  it('阴影相机近面为正', () => {
-    expect(SHADOW_CAMERA_NEAR_M).toBeGreaterThan(0)
-  })
-
-  it('阴影相机远面因子 > 1（远面充分覆盖场景深度）', () => {
-    expect(SHADOW_CAMERA_FAR_FACTOR).toBeGreaterThan(1)
-  })
-
+describe('environmentConfig — 阴影偏置（SPEC §8.3）', () => {
   it('阴影偏置为负（消除自阴影痤），法线偏置非负', () => {
     expect(SHADOW_BIAS).toBeLessThan(0)
     expect(SHADOW_NORMAL_BIAS).toBeGreaterThanOrEqual(0)
