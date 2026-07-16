@@ -41,9 +41,14 @@ import {
  *   或相机姿态，resize 不重建会话（SPEC §11.1、TASK-013 resize 不变性）。
  * - 零逐帧分配：镜像反射所需的 Plane/Vector3/Vector4/Matrix4/PerspectiveCamera 等临时对象在会话
  *   内创建一次并复用，renderReflection 每帧只更新其分量（SPEC §11.1 不产生逐帧临时对象）。
- * - 确定性释放：dispose 释放反射 RenderTarget、深度纹理、模糊 RenderTarget 与 BlurPass 内部的
- *   两张中间 RenderTarget、卷积材质及其全屏三角 BufferGeometry（BlurPass 自身无 dispose，由本
- *   会话逐一释放，SPEC §5.4"必须显式释放 Geometry"）；幂等。
+ * - 创建失败安全：反射资源按依赖顺序分配，每分配一个即经 allocate 登记其释放函数到 cleanup；
+ *   任一分配抛错时逆序调用已登记的 cleanup 后重抛（SPEC §5.4"创建失败时必须释放已经创建的 GPU
+ *   资源"），与 bakeLocalPmremSession 同构——重抛由 PlaneReflectionGround layout effect 冒泡到
+ *   场景错误边界，进入统一 error 状态（§1、§10.2 WEBGL_RESOURCE_FAILED，TASK-013 关键异常路径）。
+ * - 确定性释放：dispose 与创建失败路径共用同一 cleanup 逆序释放序列，覆盖反射 RenderTarget、
+ *   深度纹理、模糊 RenderTarget 与 BlurPass 内部的两张中间 RenderTarget、卷积材质及其全屏三角
+ *   BufferGeometry（BlurPass 自身无 dispose，由本会话逐一释放，SPEC §5.4"必须显式释放 Geometry"）；
+ *   幂等（disposed 守卫）。
  *
  * 该模块位于展示层（创建 Three.js GPU 资源），不属 domain/geometry 纯数据层（SPEC §5.1）。
  */
@@ -103,33 +108,65 @@ export interface ReflectionSession {
 export function createReflectionSession(options: ReflectionSessionOptions): ReflectionSession {
   const { gl, resolution, blurWidth, blurHeight } = options
 
-  // 反射 RenderTarget：HalfFloat 扩展动态范围，LinearFilter 避免镜像边缘锯齿。
-  const reflectTarget = new WebGLRenderTarget(resolution, resolution, {
-    minFilter: LinearFilter,
-    magFilter: LinearFilter,
-    type: HalfFloatType,
-  })
-  // 深度缓冲与深度纹理：斜投影反射需要深度缓冲正确剔除；深度纹理与 drei 同构预留。
-  reflectTarget.depthBuffer = true
-  reflectTarget.depthTexture = new DepthTexture(resolution, resolution)
-  reflectTarget.depthTexture.format = DepthFormat
-  reflectTarget.depthTexture.type = UnsignedShortType
+  // 按依赖顺序分配反射资源；每分配一个即经 allocate 登记其释放函数到 cleanup，使创建失败路径与
+  // 正常 dispose 共用同一逆序释放序列（SPEC §5.4），避免重复书写释放逻辑。
+  const cleanup: Array<() => void> = []
+  /** 登记资源与其释放函数并返回资源本身，供后续配置/引用（释放由会话统一逆序调用）。 */
+  const allocate = <T>(resource: T, dispose: (resource: T) => void): T => {
+    cleanup.push(() => dispose(resource))
+    return resource
+  }
 
-  // 模糊输出 RenderTarget：承接 BlurPass 最终一帧模糊结果，供材质 tDiffuseBlur 采样。
-  const blurTarget = new WebGLRenderTarget(resolution, resolution, {
-    minFilter: LinearFilter,
-    magFilter: LinearFilter,
-    type: HalfFloatType,
-  })
+  let reflectTarget: WebGLRenderTarget
+  let blurTarget: WebGLRenderTarget
+  let blurPass: BlurPass
+  try {
+    // 反射 RenderTarget：HalfFloat 扩展动态范围，LinearFilter 避免镜像边缘锯齿。
+    reflectTarget = allocate(
+      new WebGLRenderTarget(resolution, resolution, {
+        minFilter: LinearFilter,
+        magFilter: LinearFilter,
+        type: HalfFloatType,
+      }),
+      (rt) => rt.dispose(),
+    )
+    // 深度缓冲与深度纹理：斜投影反射需要深度缓冲正确剔除；深度纹理与 drei 同构预留。
+    // WebGLRenderTarget.dispose 不自动释放其 depthTexture，须单独登记释放（SPEC §5.4）。
+    reflectTarget.depthBuffer = true
+    const depthTexture = allocate(new DepthTexture(resolution, resolution), (dt) => dt.dispose())
+    depthTexture.format = DepthFormat
+    depthTexture.type = UnsignedShortType
+    reflectTarget.depthTexture = depthTexture
 
-  // drei BlurPass：对反射 RenderTarget 做多次可分离高斯卷积，输出到 blurTarget（一次粗糙模糊）。
-  // BlurPass 形参含 gl 但构造期未使用；resolution 决定其内部中间 RenderTarget 尺寸（同固定预算）。
-  const blurPass = new BlurPass({
-    gl,
-    resolution,
-    width: blurWidth,
-    height: blurHeight,
-  })
+    // 模糊输出 RenderTarget：承接 BlurPass 最终一帧模糊结果，供材质 tDiffuseBlur 采样。
+    blurTarget = allocate(
+      new WebGLRenderTarget(resolution, resolution, {
+        minFilter: LinearFilter,
+        magFilter: LinearFilter,
+        type: HalfFloatType,
+      }),
+      (rt) => rt.dispose(),
+    )
+
+    // drei BlurPass：对反射 RenderTarget 做多次可分离高斯卷积，输出到 blurTarget（一次粗糙模糊）。
+    // BlurPass 形参含 gl 但构造期未使用；resolution 决定其内部中间 RenderTarget 尺寸（同固定预算）。
+    // BlurPass 自身无 dispose；其内部两张中间 RenderTarget、卷积材质与全屏三角 BufferGeometry 须由
+    // 会话逐一释放（screen.geometry 在 render 期上传 GPU，计入 geometries 计数，SPEC §5.4、§11.3）。
+    blurPass = allocate(
+      new BlurPass({ gl, resolution, width: blurWidth, height: blurHeight }),
+      (bp) => {
+        bp.renderTargetA.dispose()
+        bp.renderTargetB.dispose()
+        bp.convolutionMaterial.dispose()
+        bp.screen.geometry?.dispose()
+      },
+    )
+  } catch (error) {
+    // 创建失败：逆序释放已登记资源后重抛，避免半开放 RenderTarget/深度纹理/BlurPass 内部资源泄漏
+    // （SPEC §5.4）。BlurPass 构造抛错时其 cleanup 尚未登记，自然跳过；已登记资源按逆序逐一释放。
+    for (let i = cleanup.length - 1; i >= 0; i -= 1) cleanup[i]()
+    throw error
+  }
 
   // 镜像反射临时对象：会话内创建一次，renderReflection 每帧复用、只更新分量（SPEC §11.1）。
   const tmp = {
@@ -242,18 +279,11 @@ export function createReflectionSession(options: ReflectionSessionOptions): Refl
   const dispose = (): void => {
     if (disposed) return
     disposed = true
-    // 释放顺序：反射 RenderTarget 的深度纹理（WebGLRenderTarget.dispose 不自动释放其 depthTexture，
-    // 须显式释放避免深度纹理泄漏）→ 反射/模糊 RenderTarget（含其颜色纹理）→ BlurPass 内部两张中间
-    // RenderTarget、卷积材质及其全屏三角 BufferGeometry（BlurPass 自身无 dispose，逐一显式释放）。
-    // screen.geometry 在 BlurPass 构造期创建、render 期上传 GPU（计入 renderer.info.memory.geometries），
-    // 必须显式释放以使卸载后 geometry 计数归零（SPEC §5.4"必须显式释放 Geometry"、§11.3 卸载回基线）。
-    reflectTarget.depthTexture?.dispose()
-    reflectTarget.dispose()
-    blurTarget.dispose()
-    blurPass.renderTargetA.dispose()
-    blurPass.renderTargetB.dispose()
-    blurPass.convolutionMaterial.dispose()
-    blurPass.screen.geometry?.dispose()
+    // 逆序释放全部已登记资源，与创建失败路径共用同一释放序列（SPEC §5.4，避免重复书写释放逻辑）。
+    // 释放顺序为 allocate 登记的逆序：BlurPass 内部（两张中间 RenderTarget、卷积材质、全屏三角
+    // geometry）→ 模糊 RenderTarget → 反射 RenderTarget 的深度纹理 → 反射 RenderTarget。幂等：
+    // disposed 守卫保证整段释放序列只执行一次（重复 dispose 不二次派发事件）。
+    for (let i = cleanup.length - 1; i >= 0; i -= 1) cleanup[i]()
   }
 
   return {

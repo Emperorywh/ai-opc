@@ -245,17 +245,27 @@ describe('TASK-013 静态契约 — 反射资源确定性释放（SPEC §5.4、�
     expect(PLANE_REFLECTION_GROUND).toContain('session.dispose()')
   })
 
-  it('反射会话 dispose 释放反射深度纹理、反射/模糊 RenderTarget 与 BlurPass 内部资源（不遗留 RenderTarget）', () => {
-    // 反射 RenderTarget 的深度纹理须显式释放（WebGLRenderTarget.dispose 不自动释放 depthTexture）。
-    expect(REFLECTION_SESSION).toContain('reflectTarget.depthTexture?.dispose()')
-    expect(REFLECTION_SESSION).toContain('reflectTarget.dispose()')
-    expect(REFLECTION_SESSION).toContain('blurTarget.dispose()')
-    // BlurPass 自身无 dispose，须由会话显式释放其内部两张中间 RenderTarget、卷积材质及其全屏三角
-    // BufferGeometry（screen.geometry 在 render 期上传 GPU，计入 geometries 计数，SPEC §5.4）。
-    expect(REFLECTION_SESSION).toContain('blurPass.renderTargetA.dispose()')
-    expect(REFLECTION_SESSION).toContain('blurPass.renderTargetB.dispose()')
-    expect(REFLECTION_SESSION).toContain('blurPass.convolutionMaterial.dispose()')
-    expect(REFLECTION_SESSION).toContain('blurPass.screen.geometry?.dispose()')
+  it('反射会话 dispose 与创建失败路径共用 cleanup 逆序释放全部资源（不遗留 RenderTarget）', () => {
+    // allocate 登记每个资源到 cleanup；dispose 与创建失败 catch 逆序调用 cleanup（SPEC §5.4，
+    // 创建失败与正常卸载共用同一释放序列，避免重复逻辑）。
+    expect(REFLECTION_SESSION).toContain('cleanup')
+    expect(REFLECTION_SESSION).toContain('allocate')
+    // 反射/模糊 RenderTarget 与深度纹理经 allocate 登记释放（rt.dispose / dt.dispose）。
+    // 反射 RenderTarget 的深度纹理须单独登记释放（WebGLRenderTarget.dispose 不自动释放 depthTexture）。
+    expect(REFLECTION_SESSION).toContain('(rt) => rt.dispose()')
+    expect(REFLECTION_SESSION).toContain('(dt) => dt.dispose()')
+    // BlurPass 自身无 dispose，须由会话经 allocate 登记其内部两张中间 RenderTarget、卷积材质及其全屏
+    // 三角 BufferGeometry 的逐一释放（screen.geometry 在 render 期上传 GPU，计入 geometries 计数，§5.4）。
+    expect(REFLECTION_SESSION).toContain('renderTargetA.dispose()')
+    expect(REFLECTION_SESSION).toContain('renderTargetB.dispose()')
+    expect(REFLECTION_SESSION).toContain('convolutionMaterial.dispose()')
+    expect(REFLECTION_SESSION).toContain('screen.geometry?.dispose()')
+  })
+
+  it('反射会话创建失败时逆序释放已登记资源后重抛（SPEC §5.4，TASK-013 关键异常路径）', () => {
+    // 构造期任一分配抛错时，catch 逆序调用 cleanup 后重抛，避免半开放 RenderTarget/BlurPass 泄漏。
+    expect(REFLECTION_SESSION).toMatch(/catch\s*\(\s*error\s*\)\s*\{[\s\S]*?cleanup/)
+    expect(REFLECTION_SESSION).toContain('throw error')
   })
 
   it('反射会话 dispose 幂等（disposed 守卫，重复挂载/卸载不二次释放）', () => {
