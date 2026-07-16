@@ -134,30 +134,30 @@ describe('compileNodeInstances — 放置与尺寸', () => {
 })
 
 describe('compileNodeInstances — 朝向约定（SPEC §6.2）', () => {
-  it('方向性节点模型 +X 为前向：四个基准角世界方向正确', () => {
+  /**
+   * TASK-009 方向路径 / SPEC §6.2：对三类方向性节点（work/charge/park）逐一应用
+   * 0、π/2、−π/2、π 的实例变换，验证模型 +X 经 TR 矩阵映射到正确的世界方向。
+   *
+   * 三类方向性节点共用同一 writeNodeMatrix（类型无关），此处对三类都穷举四基准角，
+   * 使自动化验证直接匹配 TASK-009 与 SPEC §6.2 的文字要求，而非仅凭"类型无关"的等价推理。
+   * forward() 取矩阵列 0（模型 +X 基向量变换后的世界方向），即形状尖端的世界朝向。
+   */
+  it('三类方向性节点 × 四基准角：模型 +X 经实例矩阵映射到正确世界方向', () => {
     const cases: Array<{ angle: number; expected: [number, number, number] }> = [
       { angle: 0, expected: [1, 0, 0] }, // 地图 +X → 世界 +X
       { angle: HALF_PI, expected: [0, 0, -1] }, // 地图 +Y → 世界 -Z
       { angle: -HALF_PI, expected: [0, 0, 1] }, // 地图 -Y → 世界 +Z
       { angle: PI, expected: [-1, 0, 0] }, // 地图 -X → 世界 -X
     ]
-    for (const { angle, expected } of cases) {
-      const nodes = [node('w', 'work', 0, 0, angle)]
-      const compiled = compileNodeInstances(nodes, originSpace(), DEFAULT_NODE_DIMENSIONS_CONFIG)
-      const fwd = forward(compiled.work.matrices, 0)
-      for (let i = 0; i < 3; i += 1) {
-        expect(fwd[i], `angle=${angle} 分量 ${i}`).toBeCloseTo(expected[i], 10)
-      }
-    }
-  })
-
-  it('三个方向性类型均遵循 rotationY = angle', () => {
     for (const type of ['work', 'charge', 'park'] as const) {
-      const nodes = [node('x', type, 0, 0, HALF_PI)]
-      const compiled = compileNodeInstances(nodes, originSpace(), DEFAULT_NODE_DIMENSIONS_CONFIG)
-      const fwd = forward(compiled[type].matrices, 0)
-      expect(fwd[0]).toBeCloseTo(0, 10)
-      expect(fwd[2]).toBeCloseTo(-1, 10)
+      for (const { angle, expected } of cases) {
+        const nodes = [node('x', type, 0, 0, angle)]
+        const compiled = compileNodeInstances(nodes, originSpace(), DEFAULT_NODE_DIMENSIONS_CONFIG)
+        const fwd = forward(compiled[type].matrices, 0)
+        for (let i = 0; i < 3; i += 1) {
+          expect(fwd[i], `${type} angle=${angle} 分量 ${i}`).toBeCloseTo(expected[i], 10)
+        }
+      }
     }
   })
 
