@@ -7,7 +7,7 @@
  *
  * 阴影贴图与反射 RenderTarget 分辨率同样属于性能预算，按所属任务随用随加（§2.3 不创建未实现
  * 能力的空模块）：TASK-012 落地阴影贴图分辨率（SHADOW_MAP_SIZE_PIXELS，SPEC §8.3、§11.1）；
- * 反射 RenderTarget 分辨率属后续平面反射任务，落地时再追加，不预留占位。
+ * TASK-013 落地反射 RenderTarget 分辨率（REFLECTION_TARGET_SIZE_PIXELS，SPEC §8.4、§11.1）。
  *
  * 不变量：
  * - effectiveDpr 为纯函数：相同输入产生相同输出，不读取 DOM 以外的隐式状态；
@@ -34,6 +34,20 @@ export const MAX_RENDER_PIXELS = MAX_RENDER_WIDTH_PX * MAX_RENDER_HEIGHT_PX
  * 不在组件内散落（§12 性能预算集中）。
  */
 export const SHADOW_MAP_SIZE_PIXELS = 2048
+
+/**
+ * 反射 RenderTarget 分辨率，单位像素（SPEC §8.4、§11.1：固定 1024×1024）。
+ *
+ * 平面反射的颜色 RenderTarget、深度纹理与模糊输出 RenderTarget 宽高同取该值（SPEC §11.1
+ * "反射 RenderTarget 1024×1024"）。该值为固定预算，不随主画布 DPR、CSS 尺寸、resize 或
+ * 4K 主渲染尺寸变化（SPEC §11.1、TASK-013 resize 不变性实现约束）：主画布放大或系统缩放
+ * 只改变主渲染分辨率，反射 RenderTarget 始终为 1024×1024，避免随主画布膨胀到 2K/4K。
+ *
+ * 1024 在 V76 基线下兼顾倒影清晰度与显存（HalfFloat 1024² 约 8 MiB/张；反射固定占用颜色、
+ * 深度与模糊输出 RenderTarget 共约 24 MiB，外加 BlurPass 内部两张中间目标）。由
+ * PlaneReflectionGround 消费，不在组件内散落数字（§12 性能预算集中）。
+ */
+export const REFLECTION_TARGET_SIZE_PIXELS = 1024
 
 /**
  * 瞬态/非法输入的安全默认 DPR（SPEC §9.3、TASK-011 异常路径）。

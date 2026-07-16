@@ -1,7 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { SHADOW_MAP_SIZE_PIXELS } from '../src/features/agv-map/config/performanceConfig'
+import {
+  REFLECTION_TARGET_SIZE_PIXELS,
+  SHADOW_MAP_SIZE_PIXELS,
+} from '../src/features/agv-map/config/performanceConfig'
 
 /**
  * 深色沙盘环境静态契约测试（SPEC §8.1、§8.3、§8.4、§11.1，TASK-012 静态检查）。
@@ -12,7 +15,9 @@ import { SHADOW_MAP_SIZE_PIXELS } from '../src/features/agv-map/config/performan
  *   PathLayer、地面、网格均不投射阴影。
  * - 阴影贴图预算：directionalLight 的 shadow-mapSize 取自 SHADOW_MAP_SIZE_PIXELS（2048×2048）。
  * - 无远程环境资源：环境相关源码不出现 http(s) URL、HDR 文件、CDN、<Environment preset>。
- * - 不混入平面反射：本期不引入 MeshReflectorMaterial（TASK-012 完成标准）。
+ * - 真实平面反射（TASK-013）：地面使用 drei MeshReflectorMaterial 唯一反射方案；反射目标固定
+ *   REFLECTION_TARGET_SIZE_PIXELS（1024×1024），不绑定主画布 DPR/CSS 尺寸；地面尺寸由 layout
+ *   推导；场景唯一地面；无普通材质伪反射/第二套反射 fallback；反射资源具备显式释放路径。
  * - Canvas 启用 shadows：MapSceneView 的 Canvas 声明 shadows 属性。
  */
 
@@ -59,6 +64,9 @@ const PATH_LAYER = readScene('PathLayer.tsx')
 const LOCAL_ENVIRONMENT = readScene('LocalEnvironment.tsx')
 const LOCAL_ENV_SCENE = readScene('localEnvironmentScene.ts')
 const LOCAL_ENV_PMREM = readScene('localEnvironmentPmrem.ts')
+const PLANE_REFLECTION_GROUND = readScene('PlaneReflectionGround.tsx')
+const REFLECTION_MATERIAL = readScene('reflectionMaterial.ts')
+const REFLECTION_SESSION = readScene('reflectionSession.ts')
 
 describe('TASK-012 静态契约 — 单一灯光配置（SPEC §8.3）', () => {
   it('环境图层仅声明一个 <directionalLight> 与一个 <ambientLight>', () => {
@@ -83,12 +91,13 @@ describe('TASK-012 静态契约 — 仅节点投射阴影（SPEC §8.3、§11.1�
     expect(PATH_LAYER).not.toContain('castShadow')
   })
 
-  it('EnvironmentLayer 仅在方向光上 castShadow，地面只 receiveShadow、网格不参与阴影', () => {
-    // 方向光启用 castShadow；地面 mesh 声明 receiveShadow 但无 castShadow；网格 mesh 无阴影属性。
+  it('EnvironmentLayer 仅在方向光上 castShadow；反射地面只 receiveShadow、网格不参与阴影', () => {
+    // 方向光启用 castShadow（EnvironmentLayer 内唯一一处 castShadow）。
     expect(countOccurrences(ENVIRONMENT_LAYER, 'castShadow')).toBe(1)
-    expect(ENVIRONMENT_LAYER).toMatch(/castShadow/)
-    expect(ENVIRONMENT_LAYER).toContain('receiveShadow')
-    // 网格 mesh 为 EnvironmentLayer 最后一个 <mesh（位于地面 mesh 之后），不应带 castShadow/receiveShadow。
+    // 反射地面（PlaneReflectionGround）mesh 声明 receiveShadow 但无 castShadow；接收节点阴影。
+    expect(PLANE_REFLECTION_GROUND).toContain('receiveShadow')
+    expect(PLANE_REFLECTION_GROUND).not.toContain('castShadow')
+    // 网格 mesh 为 EnvironmentLayer 最后一个 <mesh（反射地面已抽为独立组件），不应带阴影属性。
     const gridMeshStart = ENVIRONMENT_LAYER.lastIndexOf('<mesh')
     expect(gridMeshStart).toBeGreaterThan(-1)
     const gridMeshBlock = ENVIRONMENT_LAYER.slice(gridMeshStart)
@@ -148,10 +157,110 @@ describe('TASK-012 静态契约 — 无远程环境资源（SPEC §8.3、TASK-01
   })
 })
 
-describe('TASK-012 静态契约 — 不混入平面反射（TASK-012 完成标准）', () => {
-  it('环境相关源码不引入 MeshReflectorMaterial（属后续平面反射任务）', () => {
-    const sources = [ENVIRONMENT_LAYER, MAP_SCENE_VIEW].join('\n')
-    expect(sources).not.toMatch(/MeshReflectorMaterial/i)
+describe('TASK-013 静态契约 — 真实平面反射单一方案（SPEC §8.4、TASK-013 实现约束）', () => {
+  it('反射材质来自 drei MeshReflectorMaterial（非普通材质伪反射/自研替代）', () => {
+    // 反射材质工厂实例化 drei 的 MeshReflectorMaterial 类（onBeforeCompile 注入反射采样着色器）。
+    expect(REFLECTION_MATERIAL).toMatch(/from '@react-three\/drei\/materials\/MeshReflectorMaterial'/)
+    expect(REFLECTION_MATERIAL).toContain('new MeshReflectorMaterial(')
+  })
+
+  it('反射渲染使用 drei BlurPass 做一次粗糙模糊（不自研替代模糊管线）', () => {
+    expect(REFLECTION_SESSION).toMatch(/from '@react-three\/drei\/materials\/BlurPass'/)
+    expect(REFLECTION_SESSION).toContain('new BlurPass(')
+  })
+
+  it('不存在普通材质伪反射、环境贴图反射或第二套反射 fallback', () => {
+    const sources = [PLANE_REFLECTION_GROUND, REFLECTION_MATERIAL, REFLECTION_SESSION].join('\n')
+    // 不使用普通 MeshStandardMaterial 作为地面伪反射（反射地面唯一使用 MeshReflectorMaterial）。
+    expect(PLANE_REFLECTION_GROUND).not.toContain('meshStandardMaterial')
+    // 不使用屏幕截图/环境贴图/Reflector 等替代方案。
+    expect(sources).not.toMatch(/ReflectorMaterial2|ScreenSpaceReflection|envMap/i)
+  })
+})
+
+describe('TASK-013 静态契约 — 反射目标固定预算与 resize 不变（SPEC §11.1、TASK-013）', () => {
+  it('反射目标分辨率取自 REFLECTION_TARGET_SIZE_PIXELS 常量，不散落数字', () => {
+    expect(PLANE_REFLECTION_GROUND).toContain('resolution: REFLECTION_TARGET_SIZE_PIXELS')
+    expect(REFLECTION_TARGET_SIZE_PIXELS).toBe(1024)
+    // 不在反射组件内散落 1024 / 512 等数字（必须经集中常量）。
+    expect(PLANE_REFLECTION_GROUND).not.toMatch(/resolution:\s*\d+/)
+  })
+
+  it('反射目标不绑定主画布 DPR、CSS 尺寸或 size（resize 不变性）', () => {
+    // 反射组件不从 useThree 读取 size/dpr/viewport；反射会话仅随 gl 重建。
+    const sources = [PLANE_REFLECTION_GROUND, REFLECTION_SESSION].join('\n')
+    expect(sources).not.toMatch(/state\.size|state\.viewport|state\.performance|devicePixelRatio/i)
+    // 反射会话 useMemo 依赖仅 gl，不含 size/dpr。
+    expect(PLANE_REFLECTION_GROUND).toMatch(/useThree\(\(state\) => state\.gl\)/)
+  })
+
+  it('反射会话在 useLayoutEffect 内创建/释放，依赖数组含 gl 不含主画布尺寸（resize 不变、StrictMode 安全）', () => {
+    // 会话在 layout effect 内成对创建/释放（与 PMREM 会话同构），依赖 [gl, material]：
+    // 不含 size/dpr/viewport，故 resize 不重建会话；StrictMode 下每次 setup 得全新会话由其 cleanup 释放。
+    expect(PLANE_REFLECTION_GROUND).toMatch(/useLayoutEffect\(\(\) => \{[\s\S]*createReflectionSession/)
+    // useLayoutEffect 依赖数组为 [gl, material]：不含主画布尺寸相关项。
+    expect(PLANE_REFLECTION_GROUND).toMatch(/\}, \[gl, material\]\)/)
+    // 整个反射组件不读取主画布 size/viewport/dpr（resize 不变性）。
+    expect(PLANE_REFLECTION_GROUND).not.toMatch(/state\.size|state\.viewport|state\.performance|devicePixelRatio/i)
+  })
+})
+
+describe('TASK-013 静态契约 — 反射平面空间由 renderBounds 推导（SPEC §6.3、§8.4）', () => {
+  it('EnvironmentLayer 以 layout 挂载 PlaneReflectionGround（地面尺寸/中心由 renderBounds 推导）', () => {
+    expect(ENVIRONMENT_LAYER).toContain('<PlaneReflectionGround')
+    expect(ENVIRONMENT_LAYER).toContain('layout={layout}')
+  })
+
+  it('反射地面几何尺寸取自 layout.groundWidthM / groundDepthM（不写死世界坐标）', () => {
+    expect(PLANE_REFLECTION_GROUND).toContain('layout.groundWidthM')
+    expect(PLANE_REFLECTION_GROUND).toContain('layout.groundDepthM')
+    expect(PLANE_REFLECTION_GROUND).toContain('layout.center')
+  })
+
+  it('反射地面不写死绝对世界坐标（尺寸/位置全部经 layout）', () => {
+    // 不出现硬编码的 position=[<数字>, ...]（除 rotation-x 与 layout.center 引用外）。
+    expect(PLANE_REFLECTION_GROUND).not.toMatch(/position=\{\[-?\d+/)
+  })
+})
+
+describe('TASK-013 静态契约 — 唯一地面（SPEC §8.1、TASK-013）', () => {
+  it('场景中 PlaneReflectionGround 仅挂载一次（EnvironmentLayer 内唯一地面）', () => {
+    expect(countOccurrences(ENVIRONMENT_LAYER, '<PlaneReflectionGround')).toBe(1)
+  })
+
+  it('EnvironmentLayer 不再内联地面 mesh（地面职责唯一归于 PlaneReflectionGround）', () => {
+    // EnvironmentLayer 内剩余 <mesh> 只有网格（独立图层），无地面 mesh。
+    expect(countOccurrences(ENVIRONMENT_LAYER, '<mesh')).toBe(1)
+  })
+
+  it('MapSceneView 不额外声明地面（无第二个地面）', () => {
+    expect(countOccurrences(MAP_SCENE_VIEW, '<mesh')).toBe(0)
+  })
+})
+
+describe('TASK-013 静态契约 — 反射资源确定性释放（SPEC §5.4、§11.3）', () => {
+  it('PlaneReflectionGround 卸载 effect 显式 dispose 几何、材质与会话', () => {
+    expect(PLANE_REFLECTION_GROUND).toContain('geometry.dispose()')
+    expect(PLANE_REFLECTION_GROUND).toContain('material.dispose()')
+    expect(PLANE_REFLECTION_GROUND).toContain('session.dispose()')
+  })
+
+  it('反射会话 dispose 释放反射深度纹理、反射/模糊 RenderTarget 与 BlurPass 内部资源（不遗留 RenderTarget）', () => {
+    // 反射 RenderTarget 的深度纹理须显式释放（WebGLRenderTarget.dispose 不自动释放 depthTexture）。
+    expect(REFLECTION_SESSION).toContain('reflectTarget.depthTexture?.dispose()')
+    expect(REFLECTION_SESSION).toContain('reflectTarget.dispose()')
+    expect(REFLECTION_SESSION).toContain('blurTarget.dispose()')
+    // BlurPass 自身无 dispose，须由会话显式释放其内部两张中间 RenderTarget、卷积材质及其全屏三角
+    // BufferGeometry（screen.geometry 在 render 期上传 GPU，计入 geometries 计数，SPEC §5.4）。
+    expect(REFLECTION_SESSION).toContain('blurPass.renderTargetA.dispose()')
+    expect(REFLECTION_SESSION).toContain('blurPass.renderTargetB.dispose()')
+    expect(REFLECTION_SESSION).toContain('blurPass.convolutionMaterial.dispose()')
+    expect(REFLECTION_SESSION).toContain('blurPass.screen.geometry?.dispose()')
+  })
+
+  it('反射会话 dispose 幂等（disposed 守卫，重复挂载/卸载不二次释放）', () => {
+    expect(REFLECTION_SESSION).toMatch(/let disposed = false/)
+    expect(REFLECTION_SESSION).toMatch(/if \(disposed\) return/)
   })
 })
 

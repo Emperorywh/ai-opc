@@ -34,9 +34,10 @@ import './sceneView.css'
  * - 路径扁带与流光（TASK-010）：PathLayer 材质声明 fog:true，接入场景线性雾后自动参与（§8.4）。
  *
  * 边界说明（后续任务接入点）：
- * - 后处理（Bloom/SMAA）属 TASK-013，此处不接入 EffectComposer；R3F 默认的 ACES 色调映射与
+ * - 真实平面反射（TASK-013）：EnvironmentLayer 通过 PlaneReflectionGround 挂载唯一地面，反射目标
+ *   固定 1024×1024、平面范围由 renderBounds 推导，不随主画布 DPR/分辨率膨胀（SPEC §8.4、§11.1）。
+ * - 后处理（Bloom/SMAA）属 TASK-014，此处不接入 EffectComposer；R3F 默认的 ACES 色调映射与
  *   sRGB 输出已与 SPEC §8.5 一致，节点基础色可辨识。
- * - 平面反射属后续任务，EnvironmentLayer 当前给出深色不透明地面基线（TASK-012 不混入平面反射）。
  *
  * 生命周期（SPEC §10.1、TASK-006）：
  * 1. 组件在 preparing/creating-scene 挂载，Canvas 以 opacity:0 创建场景资源。

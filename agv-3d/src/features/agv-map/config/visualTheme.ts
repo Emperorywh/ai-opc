@@ -183,7 +183,7 @@ export interface AmbientLightTheme {
   readonly intensity: number
 }
 
-/** 地面材质视觉参数（SPEC §8.3、§8.4 深色不透明基线，本期非反射）。 */
+/** 地面材质视觉参数（SPEC §8.3、§8.4 深色不透明反射地面基线）。 */
 export interface GroundMaterialTheme {
   /** 基础色（深色沙盘底，略高于纯背景以接收阴影可辨）。 */
   readonly color: HslColor
@@ -191,6 +191,31 @@ export interface GroundMaterialTheme {
   readonly roughness: number
   /** 金属度（低金属度，避免镜面高光喧宾夺主）。 */
   readonly metalness: number
+}
+
+/**
+ * 平面反射视觉参数（SPEC §8.4 真实平面反射 + 一次粗糙模糊，TASK-013）。
+ *
+ * 不变量：
+ * - 反射呈现真实倒影：mirror 控制反射纹理覆盖地面基础色的比例（0=无反射、1=纯反射），
+ *   配合 mixStrength 决定反射亮度，使节点与路径在地面形成可辨识倒影（§16.2、TASK-013）。
+ * - 一次粗糙模糊：mixBlur 与地面 roughness 共同决定模糊反射与清晰反射的混合比例；
+ *   blurWidth/blurHeight 控制 BlurPass 的模糊扩散（ConvolutionMaterial 分辨率单位），
+ *   实现深色哑光地面的粗糙而非镜面倒影（SPEC §8.4 "一次粗糙模糊"）。
+ * - 反射 RenderTarget 分辨率属性能预算，集中于 performanceConfig（§12），不在此处重复。
+ * - 视觉参数集中定义，展示层禁止散落数值（§8.2 末条）。
+ */
+export interface ReflectionTheme {
+  /** 反射覆盖率 0~1：反射纹理覆盖地面基础色的比例（diffuseColor *= (1−mirror) + 反射×mixStrength）。 */
+  readonly mirror: number
+  /** 反射亮度倍率（与 mirror 共同决定反射强度，呈现真实而非发糊的倒影）。 */
+  readonly mixStrength: number
+  /** 模糊反射与清晰反射的混合比例 0~1（与地面 roughness 相乘后钳到 [0,1]）。 */
+  readonly mixBlur: number
+  /** 一次粗糙模糊的水平扩散（BlurPass ConvolutionMaterial 分辨率单位，越大越模糊）。 */
+  readonly blurWidth: number
+  /** 一次粗糙模糊的垂直扩散（与 blurWidth 共同决定各向异性模糊形态）。 */
+  readonly blurHeight: number
 }
 
 /** 网格视觉参数（SPEC §8.4 独立网格图层）。径向衰减距离取自 environmentConfig。 */
@@ -211,13 +236,14 @@ export interface PmremGradientTheme {
   readonly top: HslColor
 }
 
-/** 环境视觉主题初值（SPEC §8.2、§8.3、§8.4）。 */
+/** 环境视觉主题初值（SPEC §8.2、§8.3、§8.4、§8.4 反射，TASK-012/013）。 */
 export const ENVIRONMENT_THEME: Readonly<{
   readonly backgroundHex: string
   readonly fogHex: string
   readonly directionalLight: DirectionalLightTheme
   readonly ambientLight: AmbientLightTheme
   readonly ground: GroundMaterialTheme
+  readonly reflection: ReflectionTheme
   readonly grid: GridTheme
   readonly pmremGradient: PmremGradientTheme
 }> = {
@@ -235,6 +261,17 @@ export const ENVIRONMENT_THEME: Readonly<{
     color: { h: 225, s: 0.4, l: 0.05 },
     roughness: 0.85,
     metalness: 0.1,
+  },
+  // SPEC §8.4 真实平面反射 + 一次粗糙模糊：深色哑光地面呈现节点/路径的粗糙倒影。
+  // mirror 0.5 使深色基础色与反射各半，倒影可辨且地面不沦为纯镜面；mixStrength 1.0
+  // 保留反射真实亮度；mixBlur 与地面 roughness(0.85) 联合给出约 0.5 的模糊混合；
+  // blurWidth/blurHeight 各向异性扩散形成"粗糙"而非清晰镜面倒影（§8.4、TASK-013）。
+  reflection: {
+    mirror: 0.5,
+    mixStrength: 1.0,
+    mixBlur: 0.6,
+    blurWidth: 400,
+    blurHeight: 100,
   },
   grid: {
     sectionColor: { h: 210, s: 0.5, l: 0.3 },

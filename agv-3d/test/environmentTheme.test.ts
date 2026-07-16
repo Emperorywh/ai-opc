@@ -39,7 +39,7 @@ describe('environmentTheme — 单一灯光配置（SPEC §8.3）', () => {
   })
 })
 
-describe('environmentTheme — 地面材质（SPEC §8.3、§8.4 深色不透明基线）', () => {
+describe('environmentTheme — 地面材质（SPEC §8.3、§8.4 深色不透明反射地面基线）', () => {
   it('地面基础色为深色（明度低，略高于纯背景以接收阴影）', () => {
     expect(ENVIRONMENT_THEME.ground.color.l).toBeLessThan(0.15)
   })
@@ -48,6 +48,30 @@ describe('environmentTheme — 地面材质（SPEC §8.3、§8.4 深色不透明
     const { ground } = ENVIRONMENT_THEME
     expect(ground.roughness).toBeGreaterThan(0.5)
     expect(ground.metalness).toBeLessThan(0.3)
+  })
+})
+
+describe('environmentTheme — 平面反射（SPEC §8.4 真实平面反射 + 一次粗糙模糊，TASK-013）', () => {
+  it('mirror 落在 (0,1]：呈现真实倒影而非纯镜面或无反射', () => {
+    const { reflection } = ENVIRONMENT_THEME
+    expect(reflection.mirror).toBeGreaterThan(0)
+    expect(reflection.mirror).toBeLessThanOrEqual(1)
+  })
+
+  it('mixStrength 为正：反射亮度可辨识（节点与路径形成倒影）', () => {
+    expect(ENVIRONMENT_THEME.reflection.mixStrength).toBeGreaterThan(0)
+  })
+
+  it('mixBlur 落在 (0,1]：启用模糊反射混合（一次粗糙模糊）', () => {
+    const { mixBlur } = ENVIRONMENT_THEME.reflection
+    expect(mixBlur).toBeGreaterThan(0)
+    expect(mixBlur).toBeLessThanOrEqual(1)
+  })
+
+  it('模糊扩散为正（BlurPass 各向异性粗糙模糊形态）', () => {
+    const { blurWidth, blurHeight } = ENVIRONMENT_THEME.reflection
+    expect(blurWidth).toBeGreaterThan(0)
+    expect(blurHeight).toBeGreaterThan(0)
   })
 })
 

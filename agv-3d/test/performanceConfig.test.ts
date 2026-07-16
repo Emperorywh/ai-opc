@@ -5,6 +5,7 @@ import {
   MAX_RENDER_HEIGHT_PX,
   MAX_RENDER_PIXELS,
   MAX_RENDER_WIDTH_PX,
+  REFLECTION_TARGET_SIZE_PIXELS,
   SHADOW_MAP_SIZE_PIXELS,
 } from '../src/features/agv-map/config/performanceConfig'
 
@@ -128,5 +129,9 @@ describe('像素预算常量（SPEC §11.1）', () => {
 
   it('阴影贴图分辨率为 2048×2048（SPEC §8.3、§11.1，TASK-012）', () => {
     expect(SHADOW_MAP_SIZE_PIXELS).toBe(2048)
+  })
+
+  it('反射 RenderTarget 分辨率为 1024×1024（SPEC §8.4、§11.1，TASK-013 固定预算）', () => {
+    expect(REFLECTION_TARGET_SIZE_PIXELS).toBe(1024)
   })
 })
