@@ -12,6 +12,7 @@ import {
   runMapCompilation,
   type CompilationDeps,
 } from '../src/features/agv-map/worker/mapCompilerCore'
+import { collectPacketTransferables } from '../src/features/agv-map/worker/packetTransfer'
 import type { CompilationEvent } from '../src/features/agv-map/domain/compilerProtocol'
 
 /**
@@ -147,6 +148,23 @@ describe('成功路径：真实 V76 字节编译为完整 RenderPacket（SPEC §
     // 路径顶点非空。
     expect(packet.pathGeometry.positions.length).toBeGreaterThan(0)
     expect(packet.pathGeometry.indices.length).toBeGreaterThan(0)
+  })
+
+  it('真实编译产物的 10 个可转移 ArrayBuffer 互不重叠（避免 postMessage DataCloneError，SPEC §5.4、TASK-007）', async () => {
+    // packetTransfer.test.ts 用手工构造的合成数据包验证收集函数；本用例以真实 V76 编译产物
+    // 断言 10 个底层缓冲互不重叠。若几何层未来出现复用同一 ArrayBuffer 的字段，Worker
+    // 成功事件 postMessage 会因重复转移同一缓冲而静默抛 DataCloneError 使加载挂起，
+    // 此断言可在集成层捕获该回归。
+    const events = await runCore(REAL_BYTES)
+    const success = events.find((e) => e.kind === 'success')
+    if (success?.kind !== 'success') throw new Error('应成功')
+    const buffers = collectPacketTransferables(success.packet)
+    expect(buffers).toHaveLength(10)
+    expect(new Set(buffers).size).toBe(10)
+    // 每个缓冲均已分离前为非零字节（真实产物不应为空）。
+    for (const buf of buffers) {
+      expect(buf.byteLength).toBeGreaterThan(0)
+    }
   })
 })
 
@@ -387,6 +405,11 @@ describe('几何编译失败：超长贝塞尔触发细分上限 → COMPILE_FAI
     // 校验阶段已通过（出现过 validate-progress），但无成功数据包。
     expect(events.some((e) => e.kind === 'validate-progress')).toBe(true)
     expect(events.some((e) => e.kind === 'success')).toBe(false)
+    // 进入编译段后先发 processed=0 的节点进度再采样，故采样期失败时事件流已含 compile-progress，
+    // 应用层状态机会处于 compiling-nodes 而非 validating——error.code(GEOMETRY_COMPILE_FAILED)
+    // 与诊断阶段保持一致（SPEC §10.2、TASK-007）。
+    const compileBeforeError = events.slice(0, events.indexOf(last))
+    expect(compileBeforeError.some((e) => e.kind === 'compile-progress')).toBe(true)
   })
 })
 

@@ -148,7 +148,15 @@ export async function runMapCompilation(
     const model = normalizeMap(extractPayloadAssumingValid(parsed))
 
     // —— 几何编译（compiling-nodes 40%～55%、compiling-paths 55%～90%）——
-    // 节点进度先于路径进度上报，匹配状态机阶段顺序；采样与分组为共享前置不计入进度。
+    // 节点进度先于路径进度上报，匹配状态机阶段顺序；采样与分组为共享前置不计入进度百分比。
+    // 进入编译段先发一条 processed=0 的节点进度：使应用层状态机从 validating 跃迁到
+    // compiling-nodes。采样/分组虽不计入进度，但已属于几何编译阶段——若前置在此抛出
+    // （如贝塞尔细分上限耗尽），error.stage 应归属编译阶段而非 validating，保持
+    // error.code（GEOMETRY_COMPILE_FAILED）与诊断阶段一致（SPEC §10.1、§10.2、TASK-007）。
+    emit({
+      kind: 'compile-progress',
+      report: { phase: 'nodes', processed: 0, total: model.nodes.length },
+    })
     let packet: RenderPacket
     try {
       packet = compileRenderPacket(model, configs, (report: CompileProgressReport) => {

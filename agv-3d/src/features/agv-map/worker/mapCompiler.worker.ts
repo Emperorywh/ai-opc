@@ -5,7 +5,11 @@ import {
   DEFAULT_PATH_RIBBON_CONFIG,
   DEFAULT_SAMPLING_CONFIG,
 } from '../config/geometryConfig'
-import { verifyAssetIntegrity } from '../infrastructure/assetIntegrity'
+import {
+  ASSET_SHA256_HEX,
+  ASSET_SIZE_BYTES,
+  type AssetIntegrityResult,
+} from '../domain/assetContract'
 import { runMapCompilation, type CompilationDeps } from './mapCompilerCore'
 import { collectPacketTransferables } from './packetTransfer'
 import type {
@@ -26,6 +30,13 @@ import type {
  * - 每条回复携带请求的 requestId，主线程据此隔离过期会话（SPEC §5.4）。
  * - 下载使用 fetch 的 ReadableStream 分块读取，按已读字节数上报真实下载进度。
  * - Worker 不持有 React 状态、不读写全局可变对象；一次请求处理完即等待下一条。
+ *
+ * 组合根职责（SPEC §5.1）：本入口是 Worker 的组合根，负责把浏览器运行时细节
+ * （fetch 下载、crypto.subtle 摘要）接线为核心编排所需的 CompilationDeps。
+ * SPEC 的单向依赖图只允许 worker→domain/geometry，因此 fetchBytes 与 verifyIntegrity
+ * 均在此处内联实现，不反向 import infrastructure 层——这与核心编排经 deps 注入、
+ * 只依赖 domain/geometry 的设计对称。infrastructure/assetIntegrity 保留为可复用的
+ * 真实实现，供集成测试与非 Worker 消费方引用，不进入 Worker 依赖图。
  */
 
 /** Worker 自引用（module Worker 中 self 即 DedicatedWorkerGlobalScope）。 */
@@ -76,6 +87,37 @@ const fetchBytes: CompilationDeps['fetchBytes'] = async (url, signal, onProgress
   return merged
 }
 
+/**
+ * 校验资产字节数与 SHA-256 是否匹配契约指纹（SPEC §10.1）。
+ *
+ * 与 fetchBytes 同属组合根内联实现：crypto.subtle 是浏览器运行时细节，按 SPEC §5.1
+ * 不得经 infrastructure 反向引入 Worker，故此处直接调用 globalThis.crypto.subtle.digest。
+ * 算法与 infrastructure/assetIntegrity 同源（同一条约 SHA-256 + 小写十六进制），
+ * 该基础设施实现保留供集成测试与非 Worker 消费方复用。
+ */
+const verifyIntegrity: CompilationDeps['verifyIntegrity'] = async (bytes) => {
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  const actualSha256 = bytesToHex(new Uint8Array(digest))
+  const actualSize = bytes.byteLength
+  const result: AssetIntegrityResult = {
+    ok: actualSize === ASSET_SIZE_BYTES && actualSha256 === ASSET_SHA256_HEX,
+    expectedSize: ASSET_SIZE_BYTES,
+    actualSize,
+    expectedSha256: ASSET_SHA256_HEX,
+    actualSha256,
+  }
+  return result
+}
+
+/** 把摘要字节序列转为小写十六进制字符串（与 infrastructure 实现同源）。 */
+function bytesToHex(bytes: Uint8Array): string {
+  let hex = ''
+  for (let i = 0; i < bytes.length; i += 1) {
+    hex += bytes[i].toString(16).padStart(2, '0')
+  }
+  return hex
+}
+
 /** 把编译事件包装为 Worker 消息并回传；成功事件附带全部数据包缓冲的转移列表（SPEC §5.4）。 */
 function postEvent(requestId: number, event: CompilationEvent): void {
   const message: FromWorkerMessage = { type: 'event', requestId, event }
@@ -91,7 +133,7 @@ async function handleCompile(request: CompileRequest): Promise<void> {
   const controller = new AbortController()
   // Worker 收到的消息没有内建取消指令；主线程通过 terminate() 终止整个 Worker 来中止。
   // 此处 controller 仅用于在内部链路传递取消语义（保留扩展点）。
-  const deps: CompilationDeps = { fetchBytes, verifyIntegrity: verifyAssetIntegrity }
+  const deps: CompilationDeps = { fetchBytes, verifyIntegrity }
   await runMapCompilation(
     request.assetUrl,
     controller.signal,

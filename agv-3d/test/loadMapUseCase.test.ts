@@ -218,11 +218,22 @@ describe('错误映射：Worker 错误码稳定映射到状态机错误码（SPE
     expect(state.error.stage).toBe('validating')
   })
 
-  it('COMPILE_FAILED → GEOMETRY_COMPILE_FAILED', () => {
+  it('COMPILE_FAILED → GEOMETRY_COMPILE_FAILED，推进到编译阶段后 stage 为编译阶段', () => {
     const controller = new LoadSessionController()
     const client = new FakeCompilerClient()
     const handle = startBackgroundMapLoad(controller, client, 'fake://map.json')
-    client.emit(handle.requestId, {
+    const rid = handle.requestId
+    // 真实流程：核心按顺序发出下载→解析→校验→（采样前的 processed=0 节点进度），
+    // 状态机据此推进到 compiling-nodes；随后采样失败发出 COMPILE_FAILED。
+    client.emit(rid, { kind: 'download-progress', received: 6516343, total: 6516343 })
+    client.emit(rid, { kind: 'parse', stage: 'parse-start' })
+    client.emit(rid, { kind: 'parse', stage: 'parse-done' })
+    client.emit(rid, { kind: 'validate-progress', processed: 4813, total: 4813 })
+    client.emit(rid, {
+      kind: 'compile-progress',
+      report: { phase: 'nodes', processed: 0, total: 1768 },
+    })
+    client.emit(rid, {
       kind: 'error',
       code: 'COMPILE_FAILED',
       message: '几何错误',
@@ -231,6 +242,8 @@ describe('错误映射：Worker 错误码稳定映射到状态机错误码（SPE
     const state = controller.getState()
     if (state?.status !== 'error') throw new Error('unreachable')
     expect(state.error.code).toBe('GEOMETRY_COMPILE_FAILED')
+    // 采样期几何失败时 stage 归属编译阶段，与错误码一致（SPEC §10.2、TASK-007）。
+    expect(state.error.stage).toBe('compiling-nodes')
   })
 })
 
