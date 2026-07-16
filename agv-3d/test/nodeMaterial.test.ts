@@ -7,12 +7,13 @@ import { hslToCss } from '../src/features/agv-map/presentation/scene/colorConver
 import { createNodeMaterial } from '../src/features/agv-map/presentation/scene/nodeMaterial'
 
 /**
- * 节点标准材质工厂单元测试（SPEC §8.2、§8.3、§11.1，TASK-009）。
+ * 节点标准材质工厂单元测试（SPEC §8.2、§8.3、§8.4、§11.1，TASK-009/012）。
  *
  * 不做 WebGL 渲染验证（需浏览器），只断言：
  * - 材质类型固定为 MeshStandardMaterial（SPEC §8.3 节点固定标准物理材质）。
  * - 颜色、自发光、金属度、粗糙度全部来自视觉主题（§8.2、§12 禁止组件内散落色值）。
  * - 颜色按 sRGB HSL 线性化，与共享 colorConvert 一致（§8.5）。
+ * - fog 为 true：节点标准材质参与场景线性雾（§8.4 路径与节点材质均参与雾效，TASK-012 雾效契约）。
  * - dispose 生命周期可观测（SPEC §5.4 显式释放路径可验证，不依赖后续 TASK）。
  */
 
@@ -21,6 +22,18 @@ const ALL_TYPES: readonly RawNodeType[] = ['node', 'work', 'charge', 'park']
 describe('createNodeMaterial — 材质类型（SPEC §8.3）', () => {
   it.each(ALL_TYPES)('%s 返回 MeshStandardMaterial 实例', (type) => {
     expect(createNodeMaterial(NODE_VISUAL_THEME[type])).toBeInstanceOf(MeshStandardMaterial)
+  })
+})
+
+describe('createNodeMaterial — 雾效参与（SPEC §8.4，TASK-012）', () => {
+  // SPEC §8.4 要求"路径自定义材质与节点标准材质均正确参与雾效"。路径材质的 fog 契约已在
+  // pathShader.test.ts 覆盖；此处锁定节点材质的对称契约。MeshStandardMaterial 的 fog 默认为 true，
+  // 显式断言可防止后续误设 fog:false——否则远端节点将不随距离融入背景，违反 §8.4"完整拓扑在初始
+  // framing 下仍可辨识"（fog 契约的自动化验证，TASK-012 输出"覆盖雾范围"的材质侧补齐）。
+  it.each(ALL_TYPES)('%s 的 fog 为 true（参与场景线性雾，§8.4）', (type) => {
+    const mat = createNodeMaterial(NODE_VISUAL_THEME[type])
+    expect(mat.fog).toBe(true)
+    mat.dispose()
   })
 })
 
