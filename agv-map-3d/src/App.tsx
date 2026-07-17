@@ -4,15 +4,15 @@
  * 定位（TASK-018）：
  *   - 本组件是 React 树根，唯一负责把 application 加载状态机结果桥接到 R3F 场景与 UI 覆盖层。
  *   - 装配 LoadOrchestrator（注入浏览器端口）、按状态投影 OverlayView、ready 时渲染 Canvas +
- *     StaticSceneContent（只读装配 TASK-014 资源）+ StaticCameraRig（TASK-017 相机数学）+ MapLegend。
+ *     StaticSceneContent（只读装配 TASK-014 资源）+ MapCameraController（TASK-019 相机浏览）+ MapLegend。
  *
  * 生命周期不变量（SPEC 4.3 / 任务“20 次挂载/卸载计数不增长”）：
  *   - useMapLoad 在 effect 内 new 出全新 LoadOrchestrator，卸载时 dispose（幂等）。
  *   - StrictMode setup→cleanup→setup 产生两个独立编排器实例：cleanup dispose 第一个，第二次 setup 持有全新实例。
  *
  * 按需渲染不变量（SPEC 13 / 任务约束）：
- *   - <Canvas frameloop="demand">：静止时不常驻 60 FPS 空转；资源首次提交与 resize 的 invalidate 由
- *     StaticCameraRig 发出。flat 关闭 tone mapping（SPEC 7.3 NoToneMapping）；dpr 夹在 [1,1.5]（SPEC 7.3）。
+ *   - <Canvas frameloop="demand">：静止时不常驻 60 FPS 空转；资源首次提交、resize、controls change 与
+ *     Home 的 invalidate 由 MapCameraController 发出。flat 关闭 tone mapping（SPEC 7.3 NoToneMapping）；dpr 夹在 [1,1.5]（SPEC 7.3）。
  *   - gl 固定 antialias + high-performance（SPEC 7.3 renderer）；不创建阴影资源。
  *
  * 不变量：禁止在本组件解析原始 JSON、重算几何、决定业务色或第二套加载状态（SPEC 3.3 / 任务约束）。
@@ -28,7 +28,7 @@ import { RENDERER_DPR_RANGE } from './config/mapVisualConfig'
 import { SCENE_BUILD_PHASE } from './workers/sceneBuildProtocol'
 import { createMapLoadConfig } from './mapRuntimePorts'
 import { StaticSceneContent } from './scene/StaticSceneContent'
-import { StaticCameraRig } from './StaticCameraRig'
+import { MapCameraController } from './MapCameraController'
 import { LoadOrErrorOverlay } from './ui/LoadOrErrorOverlay'
 import type { OverlayView } from './ui/LoadOrErrorOverlay'
 import { MapLegend } from './ui/MapLegend'
@@ -169,7 +169,7 @@ function App(): React.JSX.Element {
           - flat：toneMapping = NoToneMapping（SPEC 7.3）。
           - dpr=[1,1.5]：DPR 夹取（SPEC 7.3 / config RENDERER_DPR_RANGE）。
           - gl：antialias + high-performance（SPEC 7.3 renderer）；不创建阴影资源。
-          - camera：初始透视相机；位置 / 朝向 / 裁剪面由 StaticCameraRig 按 fit 覆盖。
+          - camera：初始透视相机；位置 / 朝向 / 裁剪面由 MapCameraController 按 fit 覆盖。
       */}
       <Canvas
         frameloop="demand"
@@ -179,7 +179,7 @@ function App(): React.JSX.Element {
         camera={{ fov: 50, near: 0.02, far: 1000, position: [0, 120, 120] }}
       >
         <StaticSceneContent resources={resources} groundBounds={groundBounds} />
-        <StaticCameraRig
+        <MapCameraController
           contentBounds={model.contentBounds}
           groundBounds={groundBounds}
         />

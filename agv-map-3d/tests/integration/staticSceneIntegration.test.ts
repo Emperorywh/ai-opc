@@ -152,7 +152,7 @@ describe('静态场景集成 · 实例矩阵 NaN / Infinity = 0（SPEC 15.3 / 16
 
 describe('静态场景集成 · 初始 bounds 角被裁切 = 0（SPEC 12.2 / 15.3）', () => {
   /*
-   * 用 Three PerspectiveCamera 投影 expandedBounds 八角，与 StaticCameraRig 写入相机的约定一致
+   * 用 Three PerspectiveCamera 投影 expandedBounds 八角，与 MapCameraController 写入相机的约定一致
    * （lookAt up=(0,1,0)、相同 fov/aspect）。vector.project(camera) 依次施加
    * camera.matrixWorldInverse 与 camera.projectionMatrix，等价于应用的视图 + 透视投影。
    */
