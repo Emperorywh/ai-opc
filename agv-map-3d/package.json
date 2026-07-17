@@ -10,7 +10,8 @@
   "scripts": {
     "preinstall": "node scripts/check-node-version.mjs",
     "predev": "node scripts/sync-sample.mjs",
-    "prebuild": "node scripts/sync-sample.mjs",
+    "prebuild": "node scripts/sync-sample.mjs && node scripts/check-font-glyphs.mjs",
+    "check:font-glyphs": "node scripts/check-font-glyphs.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",

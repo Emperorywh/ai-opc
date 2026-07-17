@@ -81,7 +81,13 @@ describe('可信样本供应链（TASK-002）', () => {
   test('predev / prebuild 脚本已挂载到 npm 生命周期', () => {
     const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
     expect(pkg.scripts.predev).toBe('node scripts/sync-sample.mjs')
-    expect(pkg.scripts.prebuild).toBe('node scripts/sync-sample.mjs')
+    // TASK-015：prebuild 在样本同步后追加字形门禁，缺字直接失败。
+    expect(pkg.scripts.prebuild).toBe(
+      'node scripts/sync-sample.mjs && node scripts/check-font-glyphs.mjs',
+    )
+    expect(pkg.scripts['check:font-glyphs']).toBe(
+      'node scripts/check-font-glyphs.mjs',
+    )
   })
 
   test('成功路径：哈希通过后按原始字节生成副本', async () => {

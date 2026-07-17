@@ -1,0 +1,564 @@
+{
+  "format": "noto-sans-sc-bold-subset-v1",
+  "fontAsset": "NotoSansSC-Bold.sample.woff",
+  "fontAssetSha256": "896DFECA90A19E46BF5DC0C1CC7B1B567256BD874DDF8699D702925D787F6EDE",
+  "source": {
+    "family": "Noto Sans SC",
+    "weight": 700,
+    "distribution": "Google Fonts (gstatic)",
+    "license": "SIL Open Font License 1.1",
+    "upstream": "https://github.com/notofonts/noto-cjk",
+    "url": "https://fonts.gstatic.com/s/notosanssc/v40/k3kCo84MPvpLmixcA63oeAL7Iqp5IZJF9bmaGzjCnYw.ttf",
+    "sha256": "0066A522A1AC007C1D72BC4FCCB114F80FF7294641C78CEAD9715BD14D43B9EA"
+  },
+  "subset": {
+    "asciiRange": [
+      "U+0020",
+      "U+007E"
+    ],
+    "chineseCharset": "丝充制口抛桩点电碱站绒网门",
+    "codePointCount": 108
+  },
+  "codePoints": [
+    {
+      "codePoint": 32,
+      "hex": "U+0020",
+      "char": " "
+    },
+    {
+      "codePoint": 33,
+      "hex": "U+0021",
+      "char": "!"
+    },
+    {
+      "codePoint": 34,
+      "hex": "U+0022",
+      "char": "\""
+    },
+    {
+      "codePoint": 35,
+      "hex": "U+0023",
+      "char": "#"
+    },
+    {
+      "codePoint": 36,
+      "hex": "U+0024",
+      "char": "$"
+    },
+    {
+      "codePoint": 37,
+      "hex": "U+0025",
+      "char": "%"
+    },
+    {
+      "codePoint": 38,
+      "hex": "U+0026",
+      "char": "&"
+    },
+    {
+      "codePoint": 39,
+      "hex": "U+0027",
+      "char": "'"
+    },
+    {
+      "codePoint": 40,
+      "hex": "U+0028",
+      "char": "("
+    },
+    {
+      "codePoint": 41,
+      "hex": "U+0029",
+      "char": ")"
+    },
+    {
+      "codePoint": 42,
+      "hex": "U+002A",
+      "char": "*"
+    },
+    {
+      "codePoint": 43,
+      "hex": "U+002B",
+      "char": "+"
+    },
+    {
+      "codePoint": 44,
+      "hex": "U+002C",
+      "char": ","
+    },
+    {
+      "codePoint": 45,
+      "hex": "U+002D",
+      "char": "-"
+    },
+    {
+      "codePoint": 46,
+      "hex": "U+002E",
+      "char": "."
+    },
+    {
+      "codePoint": 47,
+      "hex": "U+002F",
+      "char": "/"
+    },
+    {
+      "codePoint": 48,
+      "hex": "U+0030",
+      "char": "0"
+    },
+    {
+      "codePoint": 49,
+      "hex": "U+0031",
+      "char": "1"
+    },
+    {
+      "codePoint": 50,
+      "hex": "U+0032",
+      "char": "2"
+    },
+    {
+      "codePoint": 51,
+      "hex": "U+0033",
+      "char": "3"
+    },
+    {
+      "codePoint": 52,
+      "hex": "U+0034",
+      "char": "4"
+    },
+    {
+      "codePoint": 53,
+      "hex": "U+0035",
+      "char": "5"
+    },
+    {
+      "codePoint": 54,
+      "hex": "U+0036",
+      "char": "6"
+    },
+    {
+      "codePoint": 55,
+      "hex": "U+0037",
+      "char": "7"
+    },
+    {
+      "codePoint": 56,
+      "hex": "U+0038",
+      "char": "8"
+    },
+    {
+      "codePoint": 57,
+      "hex": "U+0039",
+      "char": "9"
+    },
+    {
+      "codePoint": 58,
+      "hex": "U+003A",
+      "char": ":"
+    },
+    {
+      "codePoint": 59,
+      "hex": "U+003B",
+      "char": ";"
+    },
+    {
+      "codePoint": 60,
+      "hex": "U+003C",
+      "char": "<"
+    },
+    {
+      "codePoint": 61,
+      "hex": "U+003D",
+      "char": "="
+    },
+    {
+      "codePoint": 62,
+      "hex": "U+003E",
+      "char": ">"
+    },
+    {
+      "codePoint": 63,
+      "hex": "U+003F",
+      "char": "?"
+    },
+    {
+      "codePoint": 64,
+      "hex": "U+0040",
+      "char": "@"
+    },
+    {
+      "codePoint": 65,
+      "hex": "U+0041",
+      "char": "A"
+    },
+    {
+      "codePoint": 66,
+      "hex": "U+0042",
+      "char": "B"
+    },
+    {
+      "codePoint": 67,
+      "hex": "U+0043",
+      "char": "C"
+    },
+    {
+      "codePoint": 68,
+      "hex": "U+0044",
+      "char": "D"
+    },
+    {
+      "codePoint": 69,
+      "hex": "U+0045",
+      "char": "E"
+    },
+    {
+      "codePoint": 70,
+      "hex": "U+0046",
+      "char": "F"
+    },
+    {
+      "codePoint": 71,
+      "hex": "U+0047",
+      "char": "G"
+    },
+    {
+      "codePoint": 72,
+      "hex": "U+0048",
+      "char": "H"
+    },
+    {
+      "codePoint": 73,
+      "hex": "U+0049",
+      "char": "I"
+    },
+    {
+      "codePoint": 74,
+      "hex": "U+004A",
+      "char": "J"
+    },
+    {
+      "codePoint": 75,
+      "hex": "U+004B",
+      "char": "K"
+    },
+    {
+      "codePoint": 76,
+      "hex": "U+004C",
+      "char": "L"
+    },
+    {
+      "codePoint": 77,
+      "hex": "U+004D",
+      "char": "M"
+    },
+    {
+      "codePoint": 78,
+      "hex": "U+004E",
+      "char": "N"
+    },
+    {
+      "codePoint": 79,
+      "hex": "U+004F",
+      "char": "O"
+    },
+    {
+      "codePoint": 80,
+      "hex": "U+0050",
+      "char": "P"
+    },
+    {
+      "codePoint": 81,
+      "hex": "U+0051",
+      "char": "Q"
+    },
+    {
+      "codePoint": 82,
+      "hex": "U+0052",
+      "char": "R"
+    },
+    {
+      "codePoint": 83,
+      "hex": "U+0053",
+      "char": "S"
+    },
+    {
+      "codePoint": 84,
+      "hex": "U+0054",
+      "char": "T"
+    },
+    {
+      "codePoint": 85,
+      "hex": "U+0055",
+      "char": "U"
+    },
+    {
+      "codePoint": 86,
+      "hex": "U+0056",
+      "char": "V"
+    },
+    {
+      "codePoint": 87,
+      "hex": "U+0057",
+      "char": "W"
+    },
+    {
+      "codePoint": 88,
+      "hex": "U+0058",
+      "char": "X"
+    },
+    {
+      "codePoint": 89,
+      "hex": "U+0059",
+      "char": "Y"
+    },
+    {
+      "codePoint": 90,
+      "hex": "U+005A",
+      "char": "Z"
+    },
+    {
+      "codePoint": 91,
+      "hex": "U+005B",
+      "char": "["
+    },
+    {
+      "codePoint": 92,
+      "hex": "U+005C",
+      "char": "\\"
+    },
+    {
+      "codePoint": 93,
+      "hex": "U+005D",
+      "char": "]"
+    },
+    {
+      "codePoint": 94,
+      "hex": "U+005E",
+      "char": "^"
+    },
+    {
+      "codePoint": 95,
+      "hex": "U+005F",
+      "char": "_"
+    },
+    {
+      "codePoint": 96,
+      "hex": "U+0060",
+      "char": "`"
+    },
+    {
+      "codePoint": 97,
+      "hex": "U+0061",
+      "char": "a"
+    },
+    {
+      "codePoint": 98,
+      "hex": "U+0062",
+      "char": "b"
+    },
+    {
+      "codePoint": 99,
+      "hex": "U+0063",
+      "char": "c"
+    },
+    {
+      "codePoint": 100,
+      "hex": "U+0064",
+      "char": "d"
+    },
+    {
+      "codePoint": 101,
+      "hex": "U+0065",
+      "char": "e"
+    },
+    {
+      "codePoint": 102,
+      "hex": "U+0066",
+      "char": "f"
+    },
+    {
+      "codePoint": 103,
+      "hex": "U+0067",
+      "char": "g"
+    },
+    {
+      "codePoint": 104,
+      "hex": "U+0068",
+      "char": "h"
+    },
+    {
+      "codePoint": 105,
+      "hex": "U+0069",
+      "char": "i"
+    },
+    {
+      "codePoint": 106,
+      "hex": "U+006A",
+      "char": "j"
+    },
+    {
+      "codePoint": 107,
+      "hex": "U+006B",
+      "char": "k"
+    },
+    {
+      "codePoint": 108,
+      "hex": "U+006C",
+      "char": "l"
+    },
+    {
+      "codePoint": 109,
+      "hex": "U+006D",
+      "char": "m"
+    },
+    {
+      "codePoint": 110,
+      "hex": "U+006E",
+      "char": "n"
+    },
+    {
+      "codePoint": 111,
+      "hex": "U+006F",
+      "char": "o"
+    },
+    {
+      "codePoint": 112,
+      "hex": "U+0070",
+      "char": "p"
+    },
+    {
+      "codePoint": 113,
+      "hex": "U+0071",
+      "char": "q"
+    },
+    {
+      "codePoint": 114,
+      "hex": "U+0072",
+      "char": "r"
+    },
+    {
+      "codePoint": 115,
+      "hex": "U+0073",
+      "char": "s"
+    },
+    {
+      "codePoint": 116,
+      "hex": "U+0074",
+      "char": "t"
+    },
+    {
+      "codePoint": 117,
+      "hex": "U+0075",
+      "char": "u"
+    },
+    {
+      "codePoint": 118,
+      "hex": "U+0076",
+      "char": "v"
+    },
+    {
+      "codePoint": 119,
+      "hex": "U+0077",
+      "char": "w"
+    },
+    {
+      "codePoint": 120,
+      "hex": "U+0078",
+      "char": "x"
+    },
+    {
+      "codePoint": 121,
+      "hex": "U+0079",
+      "char": "y"
+    },
+    {
+      "codePoint": 122,
+      "hex": "U+007A",
+      "char": "z"
+    },
+    {
+      "codePoint": 123,
+      "hex": "U+007B",
+      "char": "{"
+    },
+    {
+      "codePoint": 124,
+      "hex": "U+007C",
+      "char": "|"
+    },
+    {
+      "codePoint": 125,
+      "hex": "U+007D",
+      "char": "}"
+    },
+    {
+      "codePoint": 126,
+      "hex": "U+007E",
+      "char": "~"
+    },
+    {
+      "codePoint": 19997,
+      "hex": "U+4E1D",
+      "char": "丝"
+    },
+    {
+      "codePoint": 20805,
+      "hex": "U+5145",
+      "char": "充"
+    },
+    {
+      "codePoint": 21046,
+      "hex": "U+5236",
+      "char": "制"
+    },
+    {
+      "codePoint": 21475,
+      "hex": "U+53E3",
+      "char": "口"
+    },
+    {
+      "codePoint": 25243,
+      "hex": "U+629B",
+      "char": "抛"
+    },
+    {
+      "codePoint": 26729,
+      "hex": "U+6869",
+      "char": "桩"
+    },
+    {
+      "codePoint": 28857,
+      "hex": "U+70B9",
+      "char": "点"
+    },
+    {
+      "codePoint": 30005,
+      "hex": "U+7535",
+      "char": "电"
+    },
+    {
+      "codePoint": 30897,
+      "hex": "U+78B1",
+      "char": "碱"
+    },
+    {
+      "codePoint": 31449,
+      "hex": "U+7AD9",
+      "char": "站"
+    },
+    {
+      "codePoint": 32466,
+      "hex": "U+7ED2",
+      "char": "绒"
+    },
+    {
+      "codePoint": 32593,
+      "hex": "U+7F51",
+      "char": "网"
+    },
+    {
+      "codePoint": 38376,
+      "hex": "U+95E8",
+      "char": "门"
+    }
+  ]
+}
