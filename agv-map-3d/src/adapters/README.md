@@ -3,7 +3,7 @@
 ## 职责
 - 提供 `unknown → RawMap` 的唯一边界 `parseSampleEnvelope`，逐字段严格校验样本响应包。
 - 提供跨实体语义完整性校验 `validateMapSemantics`：在字段级校验通过后，校验范围门禁、mapId 全链路一致、引用存在、无自环、弦长下界与端点偏差门限。
-- 后续将一次性完成坐标转换与场景重心平移，输出适配后的不可变 `SceneMap`（`normalizeSceneMap`，后续 TASK）。
+- 一次性完成坐标转换与场景重心平移，输出适配后的不可变 `SceneMap`（`normalizeSceneMap`）。
 - 实现唯一坐标函数 `toScenePoint(mapX, mapY, origin)`，`origin` 由已验证的 source bounds 计算并以显式 `MapTransform` 传递。
 
 ## 依赖方向（SPEC 3.3）
