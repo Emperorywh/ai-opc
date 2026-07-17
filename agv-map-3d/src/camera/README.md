@@ -12,7 +12,10 @@
   速度固定参数 + `maxDistance = 8 × R`）、`targetClamp`（target 限制到地面、offset 保持）、
   `navigationState`（`hasUserNavigated` 与 resize / Home 分支纯决策）。OrbitControls 生命周期、
   事件接线与按需渲染 invalidate 归 app-root 的 `MapCameraController`，不在本层依赖 React / R3F。
-- 后续落地：完整键盘导航与外层可聚焦容器（SPEC 12.5）属后续 TASK；本层已暴露 Home 复位决策。
+- 实现统一键盘导航意图（SPEC 12.5，TASK-020）：`keyboardIntent`（键位 → 结构化意图、相机平面
+  平移步长、焦点边界消费决策）与 `reducedMotion`（prefers-reduced-motion → enableDamping 纯决策）。
+  事件接线、焦点边界判定与 Three 写入归 app-root 的 `MapCameraController`，不在本层依赖 React / R3F
+  或浏览器 API。
 
 ## 依赖方向（SPEC 3.3）
 - 允许依赖：`domain`、`config`、本层自身。
@@ -38,3 +41,10 @@
   camera-target offset 不变；polar ∈ [15°, 85°] + target.y = 0 保证相机始终位于地面上方。
 - 用户是否浏览由显式 `hasUserNavigated` 唯一标记决定 resize 行为；Home 复位并清零该标志。
   resize 分支：未导航重新 fit，已导航保留 target / 距离 / 朝向、仅更新 aspect / 裁剪面。
+- 键盘层只表达意图并调用已有相机用例（commitCameraState / controls.update / applyStandardFit）；
+  不复制 target clamp、fit、near/far 或矩阵计算。键位、5% 平移步长、0.9/1.1 缩放比例、5° 旋转
+  均由 `keyboardIntent` 纯函数唯一决定。平移方向来自当前相机平面，不写死世界轴。
+- 焦点边界：仅当可聚焦地图容器拥有焦点、键位被本系统消费时才 preventDefault；未聚焦 / 可编辑
+  控件来源 / 未知键一律放行，不劫持页面全局键盘输入。
+- reduced-motion：prefers-reduced-motion: reduce 时关闭 damping（`enableDamping = false`），
+  dampingFactor 保持 0.08 不变；只改变离散输入的阻尼过程，不改允许的操作、最终相机位置或视觉内容。

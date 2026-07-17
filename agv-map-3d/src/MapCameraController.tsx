@@ -1,17 +1,21 @@
 /*
- * 受约束且不打断视图的相机浏览控制器（app-root 层，SPEC §12.2~§12.4 / §13 / 任务约束）。
+ * 受约束且不打断视图的相机浏览控制器（app-root 层，SPEC §12.2~§12.5 / §13 / 任务约束）。
  *
- * 定位（TASK-019）：
+ * 定位（TASK-019 / TASK-020）：
  *   - 本组件是 Canvas 内的相机浏览唯一装配点：消费 TASK-017 的 computeCameraFit / computeClipPlanes
  *     与 TASK-017 的 computeGroundBounds 结果（groundBounds 由 app-root 计算后作为只读数值传入），
  *     把唯一内容范围 + 有限地面范围 + 当前画布尺寸推导为相机位置 / 朝向 / 裁剪面，并接入
  *     OrbitControls 提供 orbit / pan / zoom 浏览（SPEC §12.4）。替代 TASK-018 的静态相机装配。
+ *   - TASK-020 在其上叠加统一键盘导航（方向键 / +/- / Q/E / Home）与 reduced-motion 阻尼适配
+ *     （SPEC §12.5）：键盘层只表达意图并调用下列已有相机用例，不复制 clamp / fit / near-far 公式。
  *
  * 单一相机状态所有者不变量（任务约束）：
  *   - OrbitControls.target 与 camera.position 是 target / 距离 / 朝向的唯一事实来源；
  *     hasUserNavigated 标记唯一由本组件的 ref 持有。不在 controls、本组件、键盘模块中各维护第二套
  *     target、距离或导航标记。所有 clamp / fit / near-far 更新复用 TASK-017 的纯计算能力
  *     （computeCameraFit / computeClipPlanes / clampTargetToGround），不在事件回调中复制公式。
+ *   - 键盘平移 / 缩放 / 旋转 / 复位均写入同一 controls.target / camera.position，再经 commitCameraState
+ *     或 controls.update 复用同一 clamp（target 地面约束 / 距离上下限）与裁剪面更新，无第二套状态。
  *
  * target clamp 不变量（SPEC §12.4 / 任务约束）：
  *   - 每次 controls change 后把 target.x/z 限制在 Ground 范围内、target.y 固定为 0；
@@ -24,8 +28,21 @@
  *     保留 target / 距离 / 朝向（resize 不打断用户视图）。
  *   - Home 重新执行标准 3/4 fit 并把 hasUserNavigated 置回 false（与 TASK-017 标准 fit 完全一致）。
  *
+ * 键盘意图映射与焦点边界不变量（SPEC §12.5 / 任务约束）：
+ *   - 键位 → 意图由 camera/keyboardIntent 纯函数决定；事件接线（createMapKeyboardHandler）只做
+ *     “焦点边界 + 可编辑来源 + preventDefault + 派发意图”。
+ *   - 仅当地图容器（containerEl）或其内容拥有焦点、且键位被本系统消费时才 preventDefault；
+ *     未聚焦 / 可编辑控件来源 / 未知键一律放行，不劫持页面全局键盘输入。
+ *   - 每个被消费的按键在完成同一相机状态更新后由 commitCameraState / controls.update 显式
+ *     invalidate 请求 demand 帧；未消费按键不触发渲染。
+ *
+ * reduced-motion 不变量（SPEC §12.5 / 任务约束）：
+ *   - prefers-reduced-motion: reduce 时 controls.enableDamping = false，离散旋转 / 缩放单帧到位；
+ *     无偏好时保持 dampingFactor = 0.08 的阻尼过程。阻尼下旋转累计收敛到同一角度（几何级数和
+ *     = 输入角），故最终相机位置与关闭阻尼时一致，reduced-motion 只改变过程，不改操作 / 视图 / 内容。
+ *
  * 按需渲染不变量（SPEC §13 / 任务约束）：
- *   - controls change / 有效 resize / Home 后显式 invalidate 请求 demand 帧；不切换为常驻帧循环。
+ *   - controls change / 有效 resize / Home / 键盘操作后显式 invalidate 请求 demand 帧；不切换为常驻帧循环。
  *   - useFrame 仅推进 damping：update() 仅在仍有位移时 dispatch change（由 commitCameraState 接管
  *     invalidate），damping 收敛后不再 dispatch、循环自停，idle 不持续提交帧（SPEC §15.5）。
  *
@@ -41,7 +58,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { PerspectiveCamera } from 'three'
+import { PerspectiveCamera, Vector3 } from 'three'
 import type { NumericBox3 } from './domain/sceneMap'
 import { computeCameraFit, PERSPECTIVE_FOV_DEG } from './camera/cameraFit'
 import type { Vec3 } from './camera/cameraFit'
@@ -57,16 +74,32 @@ import {
   decideResizeAction,
   onUserInteractionStart,
 } from './camera/navigationState'
+import { computeKeyboardPanOffset } from './camera/keyboardIntent'
+import type {
+  PanIntent,
+  RotateIntent,
+  ZoomIntent,
+} from './camera/keyboardIntent'
+import {
+  REDUCED_MOTION_MEDIA_QUERY,
+  dampingEnabledForMotion,
+} from './camera/reducedMotion'
+import {
+  createMapKeyboardHandler,
+} from './keyboardNavigation'
 
 /*
  * 控制器入参。
  *   - contentBounds：SceneModel 的唯一数值内容范围（排除标签与地面）。
  *   - groundBounds：TASK-017 computeGroundBounds 交付的有限地面范围（参与裁剪面推导与 target clamp，
  *     不参与 fit）。
+ *   - containerEl：可聚焦的地图外层容器（SPEC §12.5），由 app-root 以回调 ref → state 注入；
+ *     键盘焦点边界以 document.activeElement 是否落在该容器内判定。null 表示尚未挂载，键盘层不消费。
  */
 export interface MapCameraControllerProps {
   readonly contentBounds: NumericBox3
   readonly groundBounds: NumericBox3
+  readonly containerEl: HTMLElement | null
 }
 
 /*
@@ -87,6 +120,7 @@ interface FitData {
 export function MapCameraController({
   contentBounds,
   groundBounds,
+  containerEl,
 }: MapCameraControllerProps): null {
   // 选择性订阅 camera / size / invalidate / gl，避免无关 R3F 状态变更触发重渲染。
   const camera = useThree((s) => s.camera)
@@ -204,6 +238,105 @@ export function MapCameraController({
   )
 
   /*
+   * 键盘平移意图应用（SPEC §12.5 / 任务约束）。
+   *   - 从当前相机姿态（camera.quaternion）提取 right / forward 基准轴，交纯函数
+   *     computeKeyboardPanOffset 投影到地面并按当前距离的 5% 推导世界 XZ 步长（不写死世界轴）。
+   *   - target 与 camera.position 同步加该步长，保持 camera-target offset；随后复用
+   *     commitCameraState 完成 target 地面 clamp（offset 保持）+ 裁剪面 + invalidate，
+   *     不复制 clamp / 裁剪面公式、不维护第二套状态。
+   *   - 平移标记为用户浏览（hasUserNavigated = true），后续 resize 进入保留分支。
+   */
+  const applyPanIntent = useCallback(
+    (intent: PanIntent) => {
+      const controls = controlsRef.current
+      if (controls === null) return
+      // 相机右轴（局部 +X）与前向（局部 -Z，视线方向），经当前姿态旋转到世界系。
+      const rightWorld = new Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
+      const forwardWorld = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
+      const distance = camera.position.distanceTo(controls.target)
+      const offset = computeKeyboardPanOffset({
+        cameraRight: {
+          x: rightWorld.x,
+          y: rightWorld.y,
+          z: rightWorld.z,
+        },
+        cameraForward: {
+          x: forwardWorld.x,
+          y: forwardWorld.y,
+          z: forwardWorld.z,
+        },
+        distance,
+        along: intent.along,
+        sign: intent.sign,
+      })
+      // 退化（距离非正 / 水平投影为零）：不提交，禁止 NaN / 零向量平移。
+      if (offset === null) return
+      controls.target.x += offset.dx
+      controls.target.z += offset.dz
+      camera.position.x += offset.dx
+      camera.position.z += offset.dz
+      hasUserNavigatedRef.current = onUserInteractionStart().flag
+      // 复用 commitCameraState：target 地面 clamp + 裁剪面 + invalidate（任务“复用 clamp 与 near/far”）。
+      commitCameraState()
+    },
+    [camera, commitCameraState],
+  )
+
+  /*
+   * 键盘缩放意图应用（SPEC §12.5 / 任务约束）。
+   *   - 沿当前视线方向把 camera-target offset 按意图 factor（0.9 / 1.1）缩放后写回 camera.position；
+   *     随后调用 controls.update()，由其 _clampDistance 把距离限制到 [minDistance, maxDistance]，
+   *     并 dispatch change → commitCameraState（裁剪面 + invalidate），不复制距离 clamp 公式。
+   *   - 缩放标记为用户浏览；距离退化（offset 长度 ≤ 1e-9）时不提交。
+   */
+  const applyZoomIntent = useCallback(
+    (intent: ZoomIntent) => {
+      const controls = controlsRef.current
+      if (controls === null) return
+      const offset = new Vector3().subVectors(camera.position, controls.target)
+      const currentDistance = offset.length()
+      if (!(currentDistance > 1e-9)) return
+      // offset × factor → 新距离 = currentDistance × factor；写回 camera.position。
+      offset.multiplyScalar(intent.factor)
+      camera.position.copy(controls.target).add(offset)
+      hasUserNavigatedRef.current = onUserInteractionStart().flag
+      // update()：rebuild spherical、_clampDistance 限制距离、dispatch change → commitCameraState。
+      controls.update()
+    },
+    [camera],
+  )
+
+  /*
+   * 键盘旋转意图应用（SPEC §12.5 / 任务约束）。
+   *   - 调用 OrbitControls 公共方法 rotateLeft(deltaRadians)：内部累积 _sphericalDelta.theta 并 update()，
+   *     复用 controls 的方位角 / polar clamp。阻尼开启时累计收敛到 deltaRadians（几何级数和 = 输入角），
+   *     关闭时单帧到位；最终旋转量恒为 deltaRadians（reduced-motion 不变量：只改变过程）。
+   *   - update() dispatch change → commitCameraState（target clamp + 裁剪面 + invalidate）。
+   */
+  const applyRotateIntent = useCallback(
+    (intent: RotateIntent) => {
+      const controls = controlsRef.current
+      if (controls === null) return
+      hasUserNavigatedRef.current = onUserInteractionStart().flag
+      controls.rotateLeft(intent.deltaRadians)
+    },
+    [],
+  )
+
+  /*
+   * 键盘 Home 复位意图应用（SPEC §12.4 / §12.5 / 任务约束）。
+   *   - 复用 decideHomeReset 清除导航标记 + applyStandardFit 执行标准 3/4 fit（与 TASK-017 一致），
+   *     不复制 fit 公式。applyStandardFit 内部完成裁剪面更新与 invalidate。
+   */
+  const applyHomeIntent = useCallback(() => {
+    const home = decideHomeReset()
+    hasUserNavigatedRef.current = home.flag
+    const current = sizeRef.current
+    const aspect = current.height > 0 ? current.width / current.height : 0
+    applyStandardFit(aspect)
+  }, [applyStandardFit])
+
+  /*
    * damping 驱动（SPEC §12.4 / §13 demand frameloop）：每个被 invalidate 的帧推进一次 update()。
    * update() 内部从 camera.position - target 重建 spherical（故 commitCameraState 的 offset 保持
    * 写法与之相容），仅在仍有位移时 dispatch change（由 commitCameraState 接管 clamp + 裁剪面 +
@@ -227,6 +360,15 @@ export function MapCameraController({
     const controls = new OrbitControls(camera, gl.domElement)
     // 写入固定契约（maxDistance 为 +∞ 占位，首次 fit 用 8 × R 覆盖）。
     applyOrbitContract(controls, buildOrbitContract())
+    // reduced-motion（SPEC §12.5）：reduce 时关闭阻尼，无偏好时保持契约的 enableDamping = true。
+    // dampingFactor 不变（0.08）；enableDamping 只决定离散输入是单帧到位还是平滑收敛，
+    // 最终相机位置一致（reducedMotion 不变量：只改变过程）。
+    const motionQuery = window.matchMedia(REDUCED_MOTION_MEDIA_QUERY)
+    controls.enableDamping = dampingEnabledForMotion(motionQuery.matches)
+    const onMotionChange = (event: MediaQueryListEvent) => {
+      controls.enableDamping = dampingEnabledForMotion(event.matches)
+    }
+    motionQuery.addEventListener('change', onMotionChange)
     controlsRef.current = controls
 
     // change：target clamp + 裁剪面 + invalidate（任务“change 后显式请求 demand 帧”）。
@@ -241,6 +383,7 @@ export function MapCameraController({
     return () => {
       controls.removeEventListener('change', onChange)
       controls.removeEventListener('start', onStart)
+      motionQuery.removeEventListener('change', onMotionChange)
       controls.dispose()
       controlsRef.current = null
     }
@@ -278,26 +421,31 @@ export function MapCameraController({
   ])
 
   /*
-   * Home 复位（SPEC §12.4）：重新执行标准 3/4 fit + 清除 hasUserNavigated。
-   * 监听 window keydown 的 Home 键；完整的键盘导航（方向键 / +/- / Q/E）与外层可聚焦容器属
-   * SPEC §12.5 后续 TASK，本任务只交付 Home 复位这一 §12.4 能力。applyStandardFit 身份稳定，
-   * 监听注册一次，cleanup 解除，成对可重复。
+   * 统一键盘导航接线（SPEC §12.5 / 任务约束）。
+   *   - createMapKeyboardHandler 把焦点边界 + 可编辑来源 + preventDefault + 意图派发集中为一处，
+   *     并通过回调把意图交回本组件的相机用例（applyPan/Zoom/Rotate/Home）。
+   *   - 监听挂在 window（与既有 Home 接线一致），但 handler 内部以 containerEl.contains(activeElement)
+   *     做焦点边界：容器未聚焦 / 可编辑来源 / 未知键一律放行，不劫持页面全局键盘输入。
+   *   - 容器或任一回调身份变化时重新订阅；cleanup 解除，成对可重复（StrictMode 安全）。
    */
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Home') return
-      event.preventDefault()
-      const home = decideHomeReset()
-      hasUserNavigatedRef.current = home.flag
-      const current = sizeRef.current
-      const aspect = current.height > 0 ? current.width / current.height : 0
-      applyStandardFit(aspect)
-    }
+    const onKey = createMapKeyboardHandler(containerEl, {
+      onPan: applyPanIntent,
+      onZoom: applyZoomIntent,
+      onRotate: applyRotateIntent,
+      onHome: applyHomeIntent,
+    })
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
     }
-  }, [applyStandardFit])
+  }, [
+    containerEl,
+    applyPanIntent,
+    applyZoomIntent,
+    applyRotateIntent,
+    applyHomeIntent,
+  ])
 
   // 本组件不渲染可见对象，只副作用装配相机浏览。
   return null

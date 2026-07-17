@@ -17,7 +17,7 @@
  *
  * 不变量：禁止在本组件解析原始 JSON、重算几何、决定业务色或第二套加载状态（SPEC 3.3 / 任务约束）。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { LoadOrchestrator } from './application/loadOrchestrator'
 import type { LoadState } from './application/loadState'
@@ -130,6 +130,14 @@ function App(): React.JSX.Element {
   const state = useMapLoad()
   const overlayView = projectOverlayView(state)
 
+  // 可聚焦容器以回调 ref → state 注入 MapCameraController（SPEC §12.5）：div 挂载时 setContainerEl
+  // 触发一次重渲染，把 DOM 元素作为只读 prop 传入 Canvas 内的控制器，使其键盘焦点边界可判定
+  // document.activeElement。Hooks 必须在任何条件 return 之前调用，保证调用顺序稳定。
+  const [containerEl, setContainerEl] = useState<HTMLElement | null>(null)
+  const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    setContainerEl(node)
+  }, [])
+
   // 未 ready：渲染加载 / 错误覆盖层，不挂载 Canvas（不显示部分地图，SPEC 14.1 / 任务异常路径）。
   if (state.kind !== 'ready') {
     return (
@@ -158,11 +166,18 @@ function App(): React.JSX.Element {
     )
   }
 
-  // a11y：外层容器 aria-label 含地图名、节点数、边数（SPEC 12.5）。
-  const ariaLabel = `${model.metadata.mapName}：${model.diagnostics.nodeCount} 个节点、${model.diagnostics.edgeArrowCount} 条边。静态只读地图查看器。`
+  // a11y（SPEC §12.5）：外层容器可聚焦，aria-label 至少含地图名、节点数、边数与完整操作提示。
+  // role="application" 告知辅助技术本区域有自定义键盘交互，应把按键直通应用而非劫持为浏览命令。
+  const ariaLabel = `${model.metadata.mapName}：${model.diagnostics.nodeCount} 个节点、${model.diagnostics.edgeArrowCount} 条边。只读三维地图查看器。键盘操作：方向键平移、加号减号缩放、Q E 旋转、Home 复位。`
 
   return (
-    <div className="app-root app-root--map" aria-label={ariaLabel}>
+    <div
+      ref={containerCallbackRef}
+      className="app-root app-root--map"
+      tabIndex={0}
+      role="application"
+      aria-label={ariaLabel}
+    >
       {/*
         Canvas（SPEC 13 / 7.3）：
           - frameloop="demand"：静止时按需渲染，不常驻帧循环（任务“静态画布使用 demand 帧模式”）。
@@ -182,6 +197,7 @@ function App(): React.JSX.Element {
         <MapCameraController
           contentBounds={model.contentBounds}
           groundBounds={groundBounds}
+          containerEl={containerEl}
         />
       </Canvas>
       <MapLegend />

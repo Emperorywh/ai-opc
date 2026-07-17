@@ -44,6 +44,16 @@ body,
 .app-root--map {
   position: relative;
   padding: 0;
+  /*
+   * 可聚焦容器（SPEC §12.5）：键盘焦点可见，告知键盘用户当前操作目标。
+   * outline 仅为可访问性可见提示，不参与几何或相机推导。
+   */
+  outline: none;
+}
+
+.app-root--map:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.55);
+  outline-offset: -2px;
 }
 
 .app-root--map canvas {
@@ -117,4 +127,32 @@ body,
   height: 0.85rem;
   border-radius: 0.2rem;
   border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+/*
+ * 纯文本操作说明列表（SPEC §12.5）：键位 + 动作两列，静态只读。
+ * 图例整体 pointer-events: none，不抢夺地图容器的键盘焦点。
+ */
+.map-legend__operations {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.map-legend__operation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.map-legend__key {
+  font-variant: small-caps;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
+.map-legend__action {
+  opacity: 0.7;
 }
