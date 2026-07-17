@@ -127,6 +127,28 @@ export interface SourceBounds2D {
 }
 
 /*
+ * 三维数值 bounds（场景坐标系，SPEC 5.2 NumericBox3）。
+ *
+ * 信任边界定位（TASK-007）：
+ *   - 这是各几何子系统（ribbon、节点、箭头）输出数值 bounds 的统一载体，
+ *     也是后续 SceneModel.contentBounds 的元素类型。
+ *   - 本类型只描述一个轴对齐包围盒的六个数值边界，不携带任何渲染语义；
+ *     合并 / fit / 裁剪面推导由上层按需在此类型上实现。
+ *
+ * 有限数不变量（SPEC 16）：
+ *   - 任一分量非有限即视为构建失败；构造方必须保证六个值均为有限数。
+ *   - min ≤ max 由调用方在合并时维护，本类型不内嵌断言以保持为纯数据。
+ */
+export interface NumericBox3 {
+  readonly minX: number
+  readonly minY: number
+  readonly minZ: number
+  readonly maxX: number
+  readonly maxY: number
+  readonly maxZ: number
+}
+
+/*
  * 场景地图元数据（SPEC 2.1 / 5.2）。
  * 来自受校验 RawMapMetadata，只保留渲染管线与诊断实际消费的字段；
  * envelopeMapId 仅用于 TASK-004 的全链路一致性校验，通过后不再下沉到本层。
