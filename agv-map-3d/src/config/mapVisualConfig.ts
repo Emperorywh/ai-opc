@@ -110,3 +110,78 @@ export const RENDER_ORDER = {
   nodeArrow: 40,
   label: 50,
 } as const
+
+/*
+ * SPEC 7.2 / 7.3：场景环境与渲染器常量（scene 装配层 / app-root 的唯一数据来源）。
+ *
+ * 定位（TASK-018）：
+ *   - 背景色、地面色、地面材质参数、半球光 / 方向光参数与渲染器 DPR 范围全部集中在此，
+ *     scene 装配层与 app-root 只消费本表，禁止在组件内出现同义魔法数字（SPEC 7.1 唯一常量表）。
+ *   - 这些常量描述“静态环境”，不随数据变化；节点 / 边颜色仍由 geometry 层一次性线性化后
+ *     写入 typed array，本表不重复定义那部分业务色。
+ *
+ * 无阴影不变量（SPEC 7.3 / 任务约束）：
+ *   - v1 不启用阴影、不创建 shadow map；方向光 castShadow 恒为 false（由 scene 装配层固定）。
+ */
+export const BACKGROUND_COLOR = '#111318'
+
+/*
+ * SPEC 7.2：有限地面颜色。
+ */
+export const GROUND_COLOR = '#1A1A1A'
+
+/*
+ * SPEC 7.3：地面材质参数（MeshStandardMaterial）。
+ *   - roughness = 1、metalness = 0：纯哑光有限平面，受半球光 / 方向光柔和照亮。
+ */
+export const GROUND_MATERIAL_PARAMS = {
+  roughness: 1,
+  metalness: 0,
+} as const
+
+/*
+ * SPEC 7.3：半球光参数。
+ *   - 天空色 #FFFFFF、地面色 #202020、强度 0.8。
+ *   - 半球光为场景提供自上而下的环境光，使受光节点圆柱呈现稳定明暗。
+ */
+export const HEMISPHERE_LIGHT_PARAMS = {
+  skyColor: '#FFFFFF',
+  groundColor: '#202020',
+  intensity: 0.8,
+} as const
+
+/*
+ * SPEC 7.3：方向光参数。
+ *   - 白色、强度 1.0、位置 (80, 120, 60)。
+ *   - 方向光为节点圆柱提供方向性高光与明暗差；v1 不投射阴影（castShadow = false）。
+ */
+export const DIRECTIONAL_LIGHT_PARAMS = {
+  color: '#FFFFFF',
+  intensity: 1.0,
+  position: [80, 120, 60] as readonly [number, number, number],
+} as const
+
+/*
+ * SPEC 7.3：渲染器 DPR 夹取范围。
+ *   - Canvas DPR 固定夹在 [1, 1.5]，禁止直接使用无限制设备 DPR。
+ *   - 由 app-root 的 <Canvas dpr={RENDERER_DPR_RANGE}> 消费，避免在高 DPR 设备上过度采样。
+ */
+export const RENDERER_DPR_RANGE: readonly [number, number] = [1, 1.5]
+
+/*
+ * SPEC 7.2：实体显示色（sRGB hex），供 UI 图例与诊断只读展示。
+ *
+ * 定位（TASK-018）：
+ *   - 这些 hex 是 SPEC §7.2 明文给出的显示色；geometry 层在更早 TASK 已用其一次性线性化后
+ *     写入 typed array，本表不替代那条数据通路，只为 UI 图例与文档提供与 SPEC 同源的只读色值。
+ *   - ui 层（图例）只依赖 config，故实体色必须在此暴露；不在 ui 层重复定义第二套 hex。
+ */
+export const ENTITY_DISPLAY_COLORS = {
+  node: '#78909C',
+  work: '#2196F3',
+  park: '#F44336',
+  charge: '#8BC34A',
+  edgeForward: '#BDBDBD',
+  edgeBack: '#E57373',
+  label: '#FFFFFF',
+} as const
