@@ -1,3 +1,4 @@
+import { ToneMappingMode } from 'postprocessing'
 import { ACESFilmicToneMapping, SRGBColorSpace } from 'three'
 import type { ToneMapping } from 'three'
 import type { RawNodeType } from '../domain/rawDto'
@@ -291,33 +292,44 @@ export const ENVIRONMENT_THEME: Readonly<{
 /**
  * 唯一色彩管线配置（SPEC §8.5，TASK-014）。
  *
- * 整个场景的色彩在唯一一处定义并写入 renderer：输出色彩空间 sRGB、色调映射 ACESFilmic、
- * 曝光 1.0。该配置由展示层在 Canvas 创建时写入 gl（见 MapSceneView），是 SPEC §8.5 的唯一
- * 色彩契约；着色器与后处理之间不重复执行 tone mapping 或色彩空间转换（见 BLOOM_THEME
- * 与 PostEffects 说明）。
+ * 整个场景的色彩在唯一一处定义：输出色彩空间 sRGB、色调映射 ACESFilmic、曝光 1.0。该配置是
+ * SPEC §8.5 的唯一色彩契约；着色器与后处理之间不重复执行 tone mapping 或色彩空间转换
+ * （见 BLOOM_THEME 与 PostEffects 说明）。
+ *
+ * ACES 由两处协作落地（同一决策，非第二套色调映射）：
+ * - renderer 状态：outputColorSpace / toneMapping / toneMappingExposure 由 MapSceneView 在 Canvas
+ *   创建时写入 gl（SPEC §8.5）。EffectComposer（@react-three/postprocessing）挂载期无条件把
+ *   renderer.toneMapping 置为 NoToneMapping（库源码 EffectComposer.tsx 的 useEffect，卸载时恢复），
+ *   使材质侧 tonemapping_fragment 在渲染期恒等、材质输出线性 HDR，供 Bloom 亮度阈值（1.0）触发。
+ * - 管线内补回：渲染期 renderer 既为 NoToneMapping，ACES 不再经 renderer 作用于任何可见帧。故在
+ *   后处理链末端经 ToneMappingEffect（mode = composerToneMappingMode）补回唯一一次 ACES（见 PostEffects）。
+ *   renderer 侧 NoToneMapping + 管线内一次 ToneMappingEffect，全管线恰一次色调映射，不重复（SPEC §8.5、
+ *   TASK-014 实现约束"不重复 tone mapping"）。
  *
  * 不变量：
  * - 单一职责：全场景只有这一处定义输出色彩空间与色调映射；组件、着色器与后处理不得散落第二套
  *   色彩转换或阈值（SPEC §8.2 末条、§8.5、TASK-014 实现约束）。
  * - Three.js 常量引用：outputColorSpace / toneMapping 取自 three.js 的渲染状态常量（纯标量值，
  *   非浏览器对象），保证展示层写入的值与测试断言的值同源（SPEC §8.5）。
- * - 与后处理的协作：EffectComposer（@react-three/postprocessing）在渲染期临时把 renderer.toneMapping
- *   置为 NoToneMapping，使材质输出线性 HDR 供 Bloom 亮度阈值（1.0）触发；这不是"第二套"色调映射，
- *   而是后处理库的 HDR 机制。Composer 卸载时恢复本配置的 ACES（TASK-014 正常路径）。
+ * - 枚举命名空间：composerToneMappingMode 取自 postprocessing.ToneMappingMode（与 three.ToneMapping
+ *   是不同枚举，值不同），此处取与 toneMapping(ACESFilmic) 同算法的 ACES_FILMIC，二者表达同一决策。
  */
 export interface ColorPipelineTheme {
   /** 输出色彩空间（SPEC §8.5：SRGBColorSpace）。 */
   readonly outputColorSpace: string
-  /** 色调映射算法（SPEC §8.5：ACESFilmicToneMapping）。 */
+  /** 色调映射算法（SPEC §8.5：ACESFilmicToneMapping）。渲染期被 EffectComposer 置 NoToneMapping，ACES 改由 composerToneMappingMode 在管线内补回。 */
   readonly toneMapping: ToneMapping
   /** 色调映射曝光（SPEC §8.5：1.0）。 */
   readonly toneMappingExposure: number
+  /** 后处理链末端 ToneMappingEffect 的模式（SPEC §8.5 ACESFilmic）。取 ToneMappingMode.ACES_FILMIC，在 EffectComposer 渲染期 NoToneMapping 下补回唯一一次 ACES。 */
+  readonly composerToneMappingMode: ToneMappingMode
 }
 
 export const COLOR_PIPELINE: ColorPipelineTheme = {
   outputColorSpace: SRGBColorSpace,
   toneMapping: ACESFilmicToneMapping,
   toneMappingExposure: 1.0,
+  composerToneMappingMode: ToneMappingMode.ACES_FILMIC,
 }
 
 /**

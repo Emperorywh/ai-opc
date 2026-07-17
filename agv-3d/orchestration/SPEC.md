@@ -64,7 +64,7 @@
 | 双车道 | 根据互为反向且几何等价的边建立 `LaneGroup`，不依赖 `isBackEdge` 分配车道 |
 | 单向边 | 沿原始中心线渲染，不做侧向偏移 |
 | 朝向约定 | 节点几何模型前向轴统一为 `+X`，世界旋转使用 `rotationY = angle` |
-| 后处理 | `@react-three/postprocessing`：Bloom + SMAA，不启用重复的 MSAA 管线 |
+| 后处理 | `@react-three/postprocessing`：Bloom + SMAA + ToneMapping（ACES），不启用重复的 MSAA 管线 |
 | 反射 | 使用单一平面反射方案，反射 RenderTarget 固定为 1024×1024 |
 | 帧循环 | 仅更新有界流光相位和相机阻尼，不产生逐帧临时对象 |
 | 资源管理 | Worker、Geometry、Material、Texture、RenderTarget 都必须具备确定性释放路径 |
@@ -475,7 +475,7 @@ Scene
 ├─ PathLayer         单个合并路径 Mesh
 ├─ NodeLayer         4 个节点 InstancedMesh
 ├─ CameraRig         PerspectiveCamera + OrbitControls
-└─ PostEffects       Bloom + SMAA
+└─ PostEffects       Bloom + SMAA + ToneMapping
 ```
 
 图层之间不得互相查询或修改内部 Three.js 对象。
@@ -514,11 +514,11 @@ Scene
 ### 8.5 色彩与后处理
 
 - 输出颜色空间：`SRGBColorSpace`。
-- Tone Mapping：`ACESFilmicToneMapping`。
+- Tone Mapping：`ACESFilmicToneMapping`。`@react-three/postprocessing` 的 EffectComposer 挂载期无条件把 `renderer.toneMapping` 置为 `NoToneMapping`（卸载时恢复），故 ACES 不经 renderer 作用于任何可见帧；ACES 必须由后处理链末端的 `ToneMappingEffect`（`mode = ACES_FILMIC`）补回唯一一次。renderer 侧 NoToneMapping 加管线内一次 ToneMapping，全管线恰一次色调映射，不重复。
 - 初始曝光：1.0。
 - Canvas 原生抗锯齿关闭。
 - EffectComposer 的 multisampling 设为 0。
-- 后处理链固定为 Bloom → SMAA，不叠加第二套抗锯齿。
+- 后处理链固定为 Bloom → SMAA → ToneMapping，不叠加第二套抗锯齿。
 - Bloom 只通过亮度阈值触发；基础路径和背景不得进入 Bloom。
 - Bloom 初始参数为 `luminanceThreshold = 1.0`、`luminanceSmoothing = 0.2`、`intensity = 1.1`，并启用 mipmap blur。
 
