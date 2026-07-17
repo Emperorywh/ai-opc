@@ -9,6 +9,8 @@
   },
   "scripts": {
     "preinstall": "node scripts/check-node-version.mjs",
+    "predev": "node scripts/sync-sample.mjs",
+    "prebuild": "node scripts/sync-sample.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",

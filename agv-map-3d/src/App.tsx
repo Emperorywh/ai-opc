@@ -8,7 +8,7 @@
  * 不变量：
  *   - 本组件是 React 树根，可依赖任意业务层，但基线阶段不引入业务占位实现。
  *   - 实际地图渲染由 scene 层图层完成；本组件只负责把 application 状态机结果桥接到 React 树。
- *   - 禁止在此读取 data/sampleMap.json 或任何边/节点原始字段。
+ *   - 禁止在此直接读取 data 下源样本或任何边/节点原始字段；运行时入口固定为 /generated/sampleMap.json。
  */
 function App() {
   return (

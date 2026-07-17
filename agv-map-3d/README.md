@@ -26,6 +26,16 @@ npm run check:layers   # 分层依赖方向验证（SPEC 3.3 自动化证据）
 
 `npm test` 仅运行 `tests/unit` 下的纯函数与架构断言，使用 node 环境，不依赖 DOM、WebGL 或浏览器。
 
+## 样本供应链（TASK-002）
+
+`data/sampleMap.json` 是唯一可编辑地图样本，其 SHA-256 由 SPEC 2.1 固定。`predev` 与 `prebuild` 生命周期钩子在 dev / build 启动前自动执行 `scripts/sync-sample.mjs`：
+
+1. 校验源样本 SHA-256 与固定值一致；失败稳定报 `SAMPLE_HASH_MISMATCH` 并以非零退出码终止。
+2. 通过后按原始字节复制到 `public/generated/sampleMap.json`（被 `.gitignore` 忽略，不是第二事实来源）。
+3. 失败时清理旧生成副本，不保留“看似有效”的可运行地图。
+
+运行时唯一允许请求 `/generated/sampleMap.json`（见 `src/workers/sampleSource.ts`）；不存在远程 API、备用 URL、内嵌样本或失败后的降级地图。
+
 ## 分层结构（SPEC 3.3）
 
 依赖方向固定为：
