@@ -40,6 +40,9 @@ import type {
 /*
  * 提取路径上每一段的字面量，集中定义避免拼写漂移。
  * 断言消息与 JSON path 都引用这些常量，使失败位置可被自动化测试稳定匹配。
+ *
+ * 这些路径常量同时是 adapters 层的共享契约：validateMapSemantics 等同层模块
+ * 通过导入复用同一份字面量，禁止在第二个模块重新拼写，避免稳定 path 漂移。
  */
 const PATH_ROOT = '$'
 const PATH_DATA = '$.data'
@@ -49,6 +52,18 @@ const FIELD_NODES = 'nodes'
 const FIELD_EDGES = 'edges'
 const FIELD_ZONES = 'zones'
 const FIELD_NODE_EDGE_GROUPS = 'nodeEdgeGroups'
+
+/*
+ * 对外共享的稳定 JSON path（SPEC 2.1 提取路径派生）。
+ * 同层跨实体语义校验、上层 worker 与测试均通过这些常量引用失败位置，
+ * 保证 path 在解析、语义、测试三处完全一致。
+ */
+export const DATA_MAP_ID_PATH = `${PATH_DATA}.mapId`
+export const VERSION_MAP_ID_PATH = `${PATH_VERSION}.mapId`
+export const NODES_COLLECTION_PATH = `${PATH_MAP_JSON}.${FIELD_NODES}`
+export const EDGES_COLLECTION_PATH = `${PATH_MAP_JSON}.${FIELD_EDGES}`
+export const ZONES_PATH = `${PATH_MAP_JSON}.${FIELD_ZONES}`
+export const NODE_EDGE_GROUPS_PATH = `${PATH_MAP_JSON}.${FIELD_NODE_EDGE_GROUPS}`
 
 /*
  * 类型守卫：普通对象（非 null、非数组）。
@@ -489,17 +504,22 @@ export function parseRawEdge(raw: unknown, path: string): RawEdge {
 }
 
 /*
- * 解析地图元数据（SPEC 2.1）。
- * 取自提取路径直接父对象 currentMapInfoVersion：
- *   mapId / mapName / mapVersion(→ version) 均必须为非空字符串。
- * 跨实体一致性（与每个节点/边的 mapId 比对）属 SPEC 5.3 第 4 项，由后续 TASK 完成。
+ * 解析地图元数据（SPEC 2.1 / 5.3 第 4 项）。
+ *
+ * 身份双通道：
+ *   - envelopeMapId 由调用方在响应元 data 上校验后传入（响应级别身份）。
+ *   - mapId / mapName / mapVersion 取自版本元 currentMapInfoVersion（版本级别身份）。
+ *
+ * 跨实体一致性（envelopeMapId / mapId 与每个节点、每条边 mapId 比对）属 SPEC 5.3 第 4 项，
+ * 由 validateMapSemantics 完成；本函数只做字段级非空字符串校验。
  */
 function parseMapMetadata(
   version: Record<string, unknown>,
+  envelopeMapId: string,
 ): RawMapMetadata {
   const mapId = requireNonEmptyString(
     version.mapId,
-    `${PATH_VERSION}.mapId`,
+    VERSION_MAP_ID_PATH,
     MapErrorCode.MAP_ENVELOPE_INVALID,
     'mapId',
     null,
@@ -518,7 +538,7 @@ function parseMapMetadata(
     'mapVersion',
     null,
   )
-  return { mapId, mapName, version: versionStr }
+  return { envelopeMapId, mapId, mapName, version: versionStr }
 }
 
 /*
@@ -592,11 +612,10 @@ export function parseSampleEnvelope(input: unknown): RawMap {
     'currentMapInfoVersion',
   )
 
-  // 地图元数据（取自提取路径父对象）。
-  const metadata = parseMapMetadata(version)
-
   // --- SPEC 5.3 第 2 项：mapJson 必须是普通对象（不是字符串、不是数组）。 ---
   // 不允许二次 JSON.parse：mapJson 在样本里就是对象字面量。
+  // 先确认 mapJson 形态，再读取响应元 data.mapId：保证“mapJson 缺失/形态错误”
+  // 这类用例仍稳定命中 mapJson 路径，不被 data.mapId 读取抢先失败。
   const mapJson = requireObject(
     version.mapJson,
     PATH_MAP_JSON,
@@ -604,8 +623,22 @@ export function parseSampleEnvelope(input: unknown): RawMap {
     'mapJson',
   )
 
+  // --- SPEC 5.3 第 4 项前置：捕获响应元 data.mapId（响应级别身份）。 ---
+  // 仅做字段级非空字符串校验；与版本元 mapId、实体 mapId 的一致性由 validateMapSemantics 比对。
+  const envelopeMapId = requireNonEmptyString(
+    data.mapId,
+    DATA_MAP_ID_PATH,
+    MapErrorCode.MAP_ENVELOPE_INVALID,
+    'mapId',
+    null,
+  )
+
+  // 地图元数据（响应元 mapId + 版本元 mapId/mapName/mapVersion）。
+  const metadata = parseMapMetadata(version, envelopeMapId)
+
   // --- SPEC 5.3 第 2 项：四个集合字段必须是数组。 ---
-  // zones / nodeEdgeGroups 的“必须为空”断言（第 3 项）属跨实体语义，由后续 TASK 完成。
+  // zones / nodeEdgeGroups 的“必须为空”门禁（第 3 项）属跨实体语义，
+  // 由同层 validateMapSemantics 完成；本函数只保证它们是数组。
   const nodesRaw = requireArray(
     mapJson[FIELD_NODES],
     `${PATH_MAP_JSON}.${FIELD_NODES}`,

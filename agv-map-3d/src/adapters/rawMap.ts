@@ -84,10 +84,19 @@ export interface RawBezierEdge extends RawEdgeBase {
 export type RawEdge = RawLineEdge | RawBezierEdge
 
 /*
- * 地图元数据（SPEC 2.1）。
- * 取自提取路径 direct 父对象 currentMapInfoVersion，跨实体一致性校验在后续 TASK。
+ * 地图元数据（SPEC 2.1 / 5.3 第 4 项）。
+ *
+ * 身份来源双通道：
+ *   - envelopeMapId：取自响应元 data.mapId（地图响应级别身份）。
+ *   - mapId：取自版本元 data.currentMapInfoVersion.mapId（版本级别身份，作为规范 mapId）。
+ *   二者在固定样本中相等；跨实体 mapId 全链路一致性校验由 validateMapSemantics 完成，
+ *   因此两个字段都必须保留到输出契约，供语义校验交叉比对。
+ *
+ * 未消费字段不搬运：floor / mapState / mapVersionId 等响应元业务字段不被渲染管线消费，
+ *   不进入本契约；样本身份回归测试若需校验它们，直接读取原始响应包即可。
  */
 export interface RawMapMetadata {
+  readonly envelopeMapId: string
   readonly mapId: string
   readonly mapName: string
   readonly version: string
