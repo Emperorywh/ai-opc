@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# 样本字节级生成副本（predev/prebuild 产出，不提交，非第二事实来源）
+public/generated
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
