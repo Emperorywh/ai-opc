@@ -46,7 +46,7 @@ const LAYER_POLICY = {
   labels: { layers: ['domain', 'labels'], external: ['node'] },
   application: { layers: ['domain', 'adapters', 'geometry', 'labels', 'workers', 'application'], external: ['node', 'react'] },
   workers: { layers: ['domain', 'adapters', 'geometry', 'labels', 'workers'], external: ['node'] },
-  rendering: { layers: ['domain', 'rendering'], external: ['node', 'three'] },
+  rendering: { layers: ['domain', 'workers', 'config', 'rendering'], external: ['node', 'three'] },
   scene: { layers: ['domain', 'application', 'rendering', 'config', 'scene'], external: ['node', 'react', 'three', 'r3f', 'troika'] },
   camera: { layers: ['domain', 'config', 'camera'], external: ['node', 'three'] },
   ui: { layers: ['domain', 'config', 'ui'], external: ['node', 'react'] },
