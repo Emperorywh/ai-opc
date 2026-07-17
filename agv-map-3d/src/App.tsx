@@ -28,6 +28,7 @@ import { RENDERER_DPR_RANGE } from './config/mapVisualConfig'
 import { SCENE_BUILD_PHASE } from './workers/sceneBuildProtocol'
 import { createMapLoadConfig } from './mapRuntimePorts'
 import { StaticSceneContent } from './scene/StaticSceneContent'
+import { LazyLabelLayer } from './scene/layers/LazyLabelLayer'
 import { MapCameraController } from './MapCameraController'
 import { LoadOrErrorOverlay } from './ui/LoadOrErrorOverlay'
 import type { OverlayView } from './ui/LoadOrErrorOverlay'
@@ -194,6 +195,14 @@ function App(): React.JSX.Element {
         camera={{ fov: 50, near: 0.02, far: 1000, position: [0, 120, 120] }}
       >
         <StaticSceneContent resources={resources} groundBounds={groundBounds} />
+        {/*
+          按需标签图层（SPEC §13 LazyLabelLayer，TASK-022）：
+            - 仅在 ready（model + resources + 字体三道门禁全通过）时挂载，故 fontReady 恒为 true。
+              fontReady 显式参数使字体门禁接入标签渲染可单测、防御性成立（任务“字体门禁接入”）。
+            - 初始标准 fit 后首屏已挂载 Text 数为 0；任意时刻不超过 400（SPEC 11.4 / 15.3）。
+            - descriptors 唯一来自 SceneModel.labels，不在本层重算锚点 / 局部偏移。
+        */}
+        <LazyLabelLayer descriptors={model.labels} fontReady />
         <MapCameraController
           contentBounds={model.contentBounds}
           groundBounds={groundBounds}

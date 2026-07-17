@@ -47,7 +47,10 @@ const LAYER_POLICY = {
   application: { layers: ['domain', 'adapters', 'geometry', 'labels', 'workers', 'application'], external: ['node', 'react'] },
   workers: { layers: ['domain', 'adapters', 'geometry', 'labels', 'workers'], external: ['node'] },
   rendering: { layers: ['domain', 'workers', 'config', 'rendering'], external: ['node', 'three'] },
-  scene: { layers: ['domain', 'application', 'rendering', 'config', 'scene'], external: ['node', 'react', 'three', 'r3f', 'troika'] },
+  // scene 允许依赖 labels 的纯计算（LabelDescriptor 类型、空间索引、可见集、调度器）：
+  // LazyLabelLayer（SPEC §13）在 scene 层消费 labels 层的纯函数与不可变描述符，
+  // 与 scene 依赖 domain / config（同为纯层）一致，是向下依赖、不形成第二套语义。
+  scene: { layers: ['domain', 'labels', 'application', 'rendering', 'config', 'scene'], external: ['node', 'react', 'three', 'r3f', 'troika'] },
   camera: { layers: ['domain', 'config', 'camera'], external: ['node', 'three'] },
   ui: { layers: ['domain', 'config', 'ui'], external: ['node', 'react'] },
   config: { layers: ['config'], external: ['node'] },
