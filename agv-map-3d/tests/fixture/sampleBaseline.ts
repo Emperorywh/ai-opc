@@ -8,9 +8,9 @@
  *     回归测试从受校验数据“推导”实际值，再与这些常量交叉比对，证明样本未被同 ID
  *     不同内容冒充。
  *
- * 适用边界（TASK-004）：
- *   - 只覆盖实体级可推导事实；SPEC 2.4 重合轨迹/双车道计数依赖轨迹 canonical 分组算法，
- *     不在本 TASK 校验（由后续几何 TASK 落地分组算法后补齐）。
+ * 适用边界：
+ *   - 实体级可推导事实在 TASK-004 落地；SPEC 2.4 重合轨迹/双车道计数在 TASK-006
+ *     （轨迹 canonical 分组算法）落地后补齐（见 SAMPLE_TRACK_COUNTS）。
  *   - 数值为 SPEC 的显示舍入值；回归断言使用 toBeCloseTo 容差比较，不在 fixture 内取整。
  *
  * 哈希常量不在此处：EXPECTED_SAMPLE_SHA256 由构建期 scripts/sample-supply-chain.mjs
@@ -123,6 +123,39 @@ export const SAMPLE_NAME_BASELINE = {
   maxNameCodePoints: 6,
   chineseCharset: '丝充制口抛桩点电碱站绒网门',
 } as const
+
+/*
+ * SPEC 2.4 重合轨迹与双车道计数基线（TASK-006 轨迹 canonical 分组算法落地后补齐）。
+ *
+ * 这些值是 SPEC 第 2.4 节明文给出的“期望”，不由样本推导回填：
+ *   - pairedTrackCount：精确反向重合轨迹组数（每组恰好两条、方向相反）。
+ *   - pairedEdgeCount：成对边数 = pairedTrackCount × 2。
+ *   - uniqueTrackCount：唯一物理轨迹数 = pairedTrackCount + 单边轨迹数。
+ *   - linePairCount / cubicPairCount：按几何类型拆分的双车道组数。
+ *   - falseTruePairCount / falseFalsePairCount / trueTruePairCount：按 isBackEdge 组合拆分
+ *     （颜色组合只用于交叉比对，不参与分组判定）。
+ *   - inexactReverseTopologyPairCount：拓扑反向但几何不精确反序的边对数（不得进入双车道组）。
+ *
+ * 回归测试从受校验数据“推导”实际计数后与这些常量交叉比对，证明分组算法未被同 ID
+ * 不同内容冒充，且 18 对非精确反序边未被误分组。
+ */
+export const SAMPLE_TRACK_COUNTS = {
+  pairedTrackCount: 979,
+  pairedEdgeCount: 1958,
+  uniqueTrackCount: 2064,
+  linePairCount: 977,
+  cubicPairCount: 2,
+  falseTruePairCount: 868,
+  falseFalsePairCount: 111,
+  trueTruePairCount: 0,
+  inexactReverseTopologyPairCount: 18,
+} as const
+
+/*
+ * SPEC 9.3：成对边单侧中心偏移（米）；成对中心线间距 = 2 × 该值。
+ */
+export const PAIRED_LANE_OFFSET = 0.03
+export const PAIRED_CENTERLINE_DISTANCE = PAIRED_LANE_OFFSET * 2
 
 /*
  * SPEC 5.3 第 12 项：端点偏差门限（米）。
