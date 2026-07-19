@@ -156,6 +156,23 @@ public/ 静态资产（fetch 本地文件，无外网）
   `scripts/places/place-catalog.ts`，地点 id 由 `${adminId}-anchor` / `${adminId}-capital` 确定性派生。
   锚点缺省 = 省会坐标；狭长省份（内蒙古 / 黑龙江 / 甘肃 / 西藏）的人工校正锚点附 `anchorAdjustmentNote`
   记录依据，**不**用组件内魔法偏移承载。重建命令见 `scripts/places/build-places.ts`（项目内维护，零外网）。
-- 尚未交付：九段线/岛礁等政治边界补充生产资产，由后续 TASK-006 产出并接入 political scope。
+- **TASK-006（管线 + 模板 + 核对记录 — 生产政治资产阻塞中，非已就绪）**：
+  ⚠ **生产可追溯政治资产尚未交付**，当前 `political` scope 暂指向
+  `tests/fixtures/legal/political-boundary.json` 增强夹具（10 段 + 全点名项的 representative 坐标，
+  仅用于驱动深度校验管线）。故 `pnpm verify:assets -- --scope political` 与 `--scope all` 均以
+  **退出码 3（BLOCKED）**结束（非 0）并打印 BLOCKED 横幅，明确区分「管线健康 + 夹具自洽」与
+  「生产政治边界已校验」——避免红线政治任务被 CI / grep 类消费方误读为已通过。直接消费政治补充数据的
+  渲染 TASK（**TASK-015 / TASK-019 仍阻塞**）；通用领域能力 TASK（TASK-007+）不阻塞。九段线几何数字化
+  与争议区边界几何需可追溯核对基准（自然资源部标准地图），人工核对未完成（见核对记录 §3 来源调查、
+  §4 阻塞收窄）。已交付的**可复用能力**（生产资产到位后即解锁，无需重建管线）：political scope
+  **资产级深度校验**（恰好 10 段九段线含台湾东侧段 / 点名岛礁钓鱼岛·赤尾屿·曾母暗沙均在 / 点名争议区
+  藏南·阿克赛钦均在 / 坐标落中国主图 / 来源强制非官方审图 isOfficialSurvey=false + 非空 disclaimer，见
+  `scripts/verify-assets/political-deep.ts`）；SPEC §6 点名必备项领域真值单一定义于
+  `scripts/political/political-catalog.ts`（REQUIRED_NINE_DASH_SEGMENT_INDICES 1..10、
+  TAIWAN_EAST_SEGMENT_INDEX=10 独立硬编码锚点、REQUIRED_ISLAND_NAMES、REQUIRED_DISPUTED_REGIONS）；
+  篡改测试基线见 `tests/assets/political-asset.test.ts`（删台湾东侧段 / 删钓鱼岛 / 删赤尾屿 /
+  删南海岛礁名 / 删争议区修正等确定性失败）。政治来源 `src-project-political` 已登记入
+  `public/geo/data-sources.json`（isOfficialSurvey=false + 非空 disclaimer + 可追溯 originUrl）。
+  人工核对记录模板见 `docs/political-review-record.md`（SPEC §6 红线逐项清单，全部 pending）。
 - 当前 `version` 仅有 `1.0.0`；后续如更换 DEM 源或修正边界，在
   `src/geo-contracts/codes.ts` 的 `KNOWN_DATA_VERSIONS` 登记新版本。

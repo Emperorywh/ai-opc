@@ -2,15 +2,23 @@
  * 资产契约校验 CLI（pnpm verify:assets）。
  *
  * 这是 TASK-001 提供的「非交互自动化验证入口」，后续 TASK 复用同一入口验证正常资产与
- * 损坏资产。sources/provinces/places/political scope 当前指向 tests/fixtures/legal 下的代表夹具
- * （对应生产资产尚未交付，由后续 TASK 接入）；terrain scope 自 TASK-003 起改为校验 public/ 下的
- * 生产高程资产，并追加 scope 专属的更深层不变量（位深/尺寸/地势抽样，见 terrain-deep.ts）。
+ * 损坏资产。terrain / provinces / places scope 自对应 TASK 起改为校验 public/ 下的生产资产
+ * （并追加 scope 专属更深层不变量）；sources scope 校验 tests/fixtures/legal 下的来源注册表代表夹具
+ * （仅验结构契约，生产注册表由各深度校验 scope 实际读取并解析来源）；political scope 自 TASK-006 起接入
+ * 资产级深度校验，但其生产可追溯资产尚未交付——当前以 tests/fixtures/legal 下的增强夹具驱动管线，
+ * 并在 scope 描述中显式声明 blocked（见下方「阻塞语义」与各 scope 的 blocked 字段）。
  *
  * 依赖方向：本脚本属于离线资产生产/校验层（scripts/，devDependency tsx 运行），
  * 只单向依赖 src/geo-contracts 契约层与同层 scripts/dem、scripts/verify-assets 模块；
  * 不进入浏览器运行时包，不被 vite 打包。
  *
- * 退出码：全部通过为 0；任一失败为 1；参数错误为 2。输出确定性文本，便于 CI 与人工定位。
+ * 退出码（输出确定性文本，便于 CI 与人工定位）：
+ * - 0：全部 scope 通过且无阻塞（所有生产资产已交付并校验）。
+ * - 1：任一 scope 出现校验失败（不变量被违反）——阻塞不豁免失败。
+ * - 2：参数错误。
+ * - 3：无校验失败，但存在「阻塞」scope（生产资产尚未交付，仅以增强夹具驱动管线）。
+ *      这不是失败，而是诚实标注「管线健康 + 夹具自洽」≠「生产资产已校验」，
+ *      避免红线政治任务被 CI / grep 类消费方误读为已通过（TASK-006 完成标准 #4：不得有绕过校验的虚假绿灯）。
  */
 
 import { readFileSync } from 'node:fs'
@@ -26,6 +34,7 @@ import {
 import { verifyTerrainAsset } from './terrain-deep'
 import { verifyProvincesAsset } from './provinces-deep'
 import { verifyPlacesAsset } from './places-deep'
+import { verifyPoliticalAsset } from './political-deep'
 
 const projectRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
 
@@ -45,6 +54,20 @@ interface ScopeDescriptor {
    * 地势抽样）时提供，返回失败计数。存在时取代默认 probe 循环。probes 仍可保留以参与 bundle 核对。
    */
   readonly customVerify?: () => number
+  /**
+   * 阻塞声明：该 scope 的生产资产尚未交付，当前 probes / customVerify 仅以 tests/fixtures 下的代表
+   * 夹具驱动管线（证明「管线健康 + 夹具自洽」），不等价于「生产资产已校验」。
+   *
+   * 设此字段后：
+   * - 该 scope 的管线校验照常运行（证明深度不变量与篡改发现能力在线）。
+   * - 管线无失败时，CLI 为该 scope 打印显著 BLOCKED 横幅，并在汇总层以退出码 3 结束（非 0），
+   *   避免 CI / grep 类消费方把「夹具自洽通过」误读为「生产政治边界已校验」（TASK-006 完成标准 #4：
+   *   不得有绕过校验的 fallback / 虚假绿灯）。
+   * - 管线出现真正失败时仍以退出码 1 结束（阻塞不豁免不变量违反）。
+   * 生产资产交付后：把 probes / customVerify 的资产路径切到 public/ 下生产资产，并移除此字段即可，
+   * 该 scope 自动回归退出码 0。
+   */
+  readonly blocked?: string
 }
 
 /**
@@ -77,6 +100,24 @@ const PRODUCTION_PLACES = {
   provenance: 'public/geo/china-places.provenance.json',
   provinceDirectory: 'public/geo/china-provinces-directory.json',
   provinceGeometry: 'public/geo/china-provinces-geometry.json',
+  sources: 'public/geo/data-sources.json',
+} as const
+
+/**
+ * 政治边界补充资产路径（相对项目根）。political scope 自 TASK-006 起接入资产级深度校验。
+ *
+ * 当前状态：生产政治边界资产（含可追溯九段线 / 岛礁 / 争议区坐标）尚未交付——九段线几何数字化与
+ * 争议区边界几何需可追溯核对基准（自然资源部标准地图 SVG / 公开标准地图衍生数据），人工核对未完成。
+ * 在生产资产交付前，PRODUCTION_POLITICAL.political 暂指向 tests/fixtures/legal 下带 10 段 + 全点名项的
+ * 增强夹具（representative 坐标，仅用于驱动深度校验管线与验证方式 2 的篡改用例）；生产 data-sources.json
+ * 已登记来源 src-project-political（非官方审图），故来源解析链路完整。
+ * 生产资产交付后：把 political 字段改为 public/geo/china-political-boundary.json 即可，校验管线无需改动。
+ *
+ * 来源注册表始终读生产 public/geo/data-sources.json（政治来源 src-project-political 已登记），
+ * 与 terrain / provinces / places scope 一致，避免来源解析走夹具注册表导致与生产脱节。
+ */
+const PRODUCTION_POLITICAL = {
+  political: 'tests/fixtures/legal/political-boundary.json',
   sources: 'public/geo/data-sources.json',
 } as const
 
@@ -115,8 +156,22 @@ const SCOPE_REGISTRY: Record<string, ScopeDescriptor> = {
     customVerify: verifyProductionPlaces,
   },
   political: {
-    label: '政治边界补充数据',
+    label: '政治边界补充资产（深度校验：十段线/台湾东侧段/点名岛礁/点名争议区/坐标范围/非官方审图来源）',
+    // probes 保留指向 tests/fixtures/legal 的增强夹具（10 段 + 全点名项），供 `--scope all` 末尾的跨契约
+    // bundle 核对（政治边界引用 src-project-political，需由来源注册表解析）使用。本 scope 实际的资产校验
+    // 由 customVerify 执行（与 terrain / provinces / places scope 同构）。
     probes: [{ path: 'tests/fixtures/legal/political-boundary.json', expectedKind: 'political-boundary' }],
+    customVerify: verifyProductionPolitical,
+    // 阻塞声明（红线政治任务诚实信号）：生产可追溯政治资产（九段线几何数字化 / 争议区国标边界）尚未交付，
+    // 当前 PRODUCTION_POLITICAL.political 指向 tests/fixtures/legal 下的增强夹具——深度校验在此夹具上通过
+    // 只证明「管线健康 + 夹具自洽」，不构成「生产政治边界已校验」。设此字段使 CLI 以退出码 3（BLOCKED）+
+    // 显著横幅结束，避免被误读为已通过；直接消费政治数据的 TASK-015 / TASK-019 因此暂停。
+    // 生产资产交付后：把 PRODUCTION_POLITICAL.political 切到 public/geo/china-political-boundary.json，
+    // 并移除本字段，该 scope 自动回归退出码 0。详见 docs/political-review-record.md §4。
+    blocked:
+      '生产可追溯政治资产（九段线几何数字化 / 争议区国标边界 / 完整南海诸岛名录）尚未交付，' +
+      '当前仅以 tests/fixtures/legal/political-boundary.json 增强夹具驱动管线；' +
+      '直接消费政治数据的 TASK-015 / TASK-019 因此暂停（详见 docs/political-review-record.md §4）。',
   },
 }
 
@@ -143,6 +198,9 @@ function parseArgs(argv: readonly string[]): string[] {
           '',
           '可选 scope：all, ' + Object.keys(SCOPE_REGISTRY).join(', '),
           '未提供 --scope 时等价于 --scope all。',
+          '',
+          '退出码：0=全部通过且无阻塞；1=存在校验失败；2=参数错误；' +
+            '3=无失败但有阻塞 scope（生产资产未交付，仅以夹具驱动管线，非校验失败）。',
           '',
         ].join('\n'),
       )
@@ -394,6 +452,63 @@ function verifyProductionPlaces(): number {
   return failures
 }
 
+/**
+ * 政治边界补充资产深度校验（TASK-006 political scope）。
+ * 加载政治边界载荷与来源注册表，调用 verifyPoliticalAsset 一次性给出十段线 / 台湾东侧段 /
+ * 点名岛礁 / 点名争议区 / 坐标范围 / 非官方审图来源的全部结论，并打印抽样摘要（段数、岛礁数、
+ * 争议区数、坐标四至）便于人工读图。
+ *
+ * 注意：当前 PRODUCTION_POLITICAL.political 暂指向 tests/fixtures/legal 的增强夹具（生产政治资产
+ * 尚未交付），provenance 暂不接入（夹具无审计 sidecar）。生产资产交付后改为读 public/geo 下
+ * 的生产资产 + provenance.json 即可，校验管线无需改动。
+ */
+function verifyProductionPolitical(): number {
+  console.log('▶ 校验 scope：political（政治边界补充资产 · 深度校验）')
+  let failures = 0
+  let political: unknown
+  let sources: unknown
+  let politicalText: string | undefined = undefined
+  try {
+    political = readJsonFile(PRODUCTION_POLITICAL.political)
+    sources = readJsonFile(PRODUCTION_POLITICAL.sources)
+    // 政治边界载荷原始文本用于复算 SHA-256 防篡改锚点（若未来 provenance 声明 sha256 时需要）；
+    // 与落盘字节同源（readFileSync 原样读出）。当前夹具无 provenance，传入仅以备未来扩展，不强制。
+    politicalText = readFileSync(resolve(projectRoot, PRODUCTION_POLITICAL.political), 'utf-8')
+  } catch (cause) {
+    failures++
+    console.error(`  ✗ 政治边界补充资产文件读取失败：${(cause as Error).message}`)
+    return failures
+  }
+
+  const outcome = verifyPoliticalAsset({
+    political,
+    sourcesRegistry: sources,
+    politicalText,
+  })
+  if (outcome.ok) {
+    console.log(`  ✓ ${PRODUCTION_POLITICAL.political}（${outcome.samples.nineDashSegmentCount} 段九段线 · ${outcome.samples.islandCount} 岛礁 · ${outcome.samples.disputedRegionCount} 争议区修正）`)
+    console.log(
+      `  · 台湾东侧段（segmentIndex=10）：${outcome.samples.hasTaiwanEastSegment ? '在' : '缺'}（SPEC §6 红线）`,
+    )
+    console.log(
+      `  · 坐标四至：经度 [${Number.isNaN(outcome.samples.observedWest) ? 'N/A' : outcome.samples.observedWest.toFixed(3)}, ${Number.isNaN(outcome.samples.observedEast) ? 'N/A' : outcome.samples.observedEast.toFixed(3)}] / 纬度 [${Number.isNaN(outcome.samples.observedSouth) ? 'N/A' : outcome.samples.observedSouth.toFixed(3)}, ${Number.isNaN(outcome.samples.observedNorth) ? 'N/A' : outcome.samples.observedNorth.toFixed(3)}]（落在中国主图 [72,3,136,54]）`,
+    )
+    console.log('  ✓ 深度不变量通过：恰好 10 段含台湾东侧段、点名岛礁（钓鱼岛/赤尾屿/曾母暗沙）均在、点名争议区（藏南/阿克赛钦）均在')
+    console.log(
+      `  ✓ ${PRODUCTION_POLITICAL.sources}（来源引用解析 · 非官方审图 isOfficialSurvey=false + 非空 disclaimer）`,
+    )
+    console.log(
+      '  ⚠ 自动校验只覆盖 SPEC §6 点名必备项；南海诸岛完整岛礁名录、九段线/争议区几何顶点与国标逐点一致性属人工核对（见 docs/political-review-record.md）。当前政治资产为增强夹具，生产可追溯资产尚未交付。',
+    )
+  } else {
+    failures++
+    for (const err of outcome.errors) {
+      console.error(`  ✗ [${err.code}] ${err.path}: ${err.message}`)
+    }
+  }
+  return failures
+}
+
 /** 校验单个 scope，返回失败计数。把所有错误一次性打印，避免逐条往复。 */
 function verifyScope(scopeName: string, descriptor: ScopeDescriptor): number {
   // 自定义校验（如 terrain 的深度校验）取代默认 probe 循环。
@@ -441,6 +556,20 @@ function verifyScope(scopeName: string, descriptor: ScopeDescriptor): number {
   return failures
 }
 
+/**
+ * 打印某「阻塞」scope 的显著横幅（管线健康、生产资产未交付）。
+ *
+ * 放在 scope 自身输出之后、汇总之前，确保即便单独运行 `--scope political` 也能立刻看到 BLOCKED，
+ * 而非被夹具自洽的 ✓ 行淹没。横幅文案含固定标记 `BLOCKED` 与 scope 名，便于 grep / CI 文本匹配；
+ * 机器可读的最终信号是退出码 3（见 main 末尾）。
+ */
+function printScopeBlockedBanner(scopeName: string, descriptor: ScopeDescriptor): void {
+  console.log(
+    `  🚫 BLOCKED · scope=${scopeName}：生产资产尚未交付，当前仅以增强夹具驱动管线。` +
+      `本 scope 通过只代表「管线健康 + 夹具自洽」，不代表「生产资产已校验」。${descriptor.blocked ?? ''}`,
+  )
+}
+
 function main(): void {
   let scopes: string[]
   try {
@@ -466,8 +595,19 @@ function main(): void {
   }
 
   let totalFailures = 0
+  // 阻塞且管线健康的 scope：生产资产未交付但管线无失败，需在汇总层以退出码 3 显式标注，
+  // 与「全部生产资产已校验」（退出码 0）区分，避免红线政治任务被误读为已通过。
+  const blockedScopes: Array<{ name: string; descriptor: ScopeDescriptor }> = []
   for (const scope of expanded) {
-    totalFailures += verifyScope(scope, SCOPE_REGISTRY[scope])
+    const descriptor = SCOPE_REGISTRY[scope]
+    const failures = verifyScope(scope, descriptor)
+    totalFailures += failures
+    // 阻塞语义：仅当 scope 显式声明 blocked 且其管线本身无失败时，才记为「阻塞待生产资产」。
+    // 管线出现真正失败时计入 totalFailures → 退出码 1，阻塞不豁免不变量违反。
+    if (descriptor.blocked !== undefined && failures === 0) {
+      blockedScopes.push({ name: scope, descriptor })
+      printScopeBlockedBanner(scope, descriptor)
+    }
   }
 
   // 末尾跨契约核对：把全部 scope 的合法夹具放在一起检查 sourceId / adminId 引用是否解析。
@@ -494,6 +634,20 @@ function main(): void {
   if (totalFailures > 0) {
     console.error(`\n校验完成，存在 ${totalFailures} 项失败。`)
     process.exit(1)
+  }
+  // 无失败但存在阻塞 scope：以退出码 3 结束。这是诚实信号——「管线健康但生产资产待交付」
+  // 既不是失败（退出码 1 会误导为代码/资产有问题），也不是全绿（退出码 0 会误导为生产资产已校验）。
+  // 红线政治任务的阻塞期必须以此中间态呈现，CI 检查 `== 0` 才不会产生虚假绿灯。
+  if (blockedScopes.length > 0) {
+    console.log(
+      `\n校验完成：管线全部通过，但 ${blockedScopes.length} 项 scope 的生产资产尚未交付（BLOCKED）。`,
+    )
+    console.log('  阻塞 scope：' + blockedScopes.map((s) => s.name).join(', '))
+    console.log(
+      '  这不是校验失败（无不变量违反），而是诚实标注生产资产待人工核对后交付；' +
+        '直接消费政治数据的 TASK-015 / TASK-019 因此暂停。详见 docs/political-review-record.md。',
+    )
+    process.exit(3)
   }
   console.log('\n校验完成，全部通过。')
 }

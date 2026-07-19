@@ -31,6 +31,16 @@
       "version": "项目维护 v1（34 省 × 2 角色，SHA-256 记录于 china-places.provenance.json）",
       "license": "内部（坐标取自公开标准地图衍生数据）",
       "disclaimer": "项目维护的省名锚点与省会/首府/直辖市中心/特别行政区中心目录，坐标取自公开标准地图衍生数据，非官方审图数据；仅供内部展示，不得作为正式出版 / 发布用途，公开发布前须取得自然资源主管部门审图号。"
+    },
+    {
+      "id": "src-project-political",
+      "name": "项目自补九段线、南海岛礁与争议区修正（衍生）",
+      "originUrl": "offline://project-maintained/china-political-boundary.json",
+      "kind": "politicalBoundarySupplement",
+      "isOfficialSurvey": false,
+      "version": "项目维护草稿 v1（十段线 + 点名岛礁 + 争议区修正，SHA-256 待生产资产交付后记录于 china-political-boundary.provenance.json）",
+      "license": "内部（坐标取自公开标准地图衍生数据 / 自然资源部标准地图服务衍生）",
+      "disclaimer": "项目自行维护的政治边界补充数据：九段线（含台湾东侧段的标准十段画法）、南海主要岛礁与钓鱼岛/赤尾屿等附属岛屿点位、藏南与阿克赛钦争议区按中国主张画法的修正。坐标取自公开标准地图衍生数据，非自然资源主管部门官方审图数据；完整南海诸岛岛礁名录与九段线/争议区几何顶点的国标逐点一致性以人工对照公开标准地图核对为准（见 docs/political-review-record.md）；仅供内部展示，不得作为正式出版 / 发布用途，公开发布前必须取得自然资源主管部门审图号。"
     }
   ]
 }
