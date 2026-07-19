@@ -35,11 +35,14 @@
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
+import { useFrame } from '@react-three/fiber'
 import { Line } from '@react-three/drei'
 import * as THREE from 'three'
 import { PROVINCE_BORDERS_CONFIG } from '../config/province-borders'
 import { PROVINCE_HOVER_CONFIG } from '../config/province-hover'
+import { ENTRANCE_DURATIONS } from '../config/entrance'
+import { computeSceneLayerOpacity, type EntranceFrame } from '../lib/entrance-state'
 import { applyLineDepthBias } from './line-depth-bias'
 import type { PreparedProvinceBorder, PreparedProvinceBorders } from '../lib/province-borders'
 
@@ -79,11 +82,17 @@ function flatEndpointsToTriplets(
 function ProvinceBorderLine({
   border,
   hoveredAdminId,
+  materialSlot,
+  materialsRef,
 }: {
   readonly border: PreparedProvinceBorder
   readonly hoveredAdminId: string | null
+  /** 本省线材质在父级 materialsRef 数组中的下标（入场淡入时由父级统一寻址写 opacity）。 */
+  readonly materialSlot: number
+  /** 父级维护的线材质数组 ref：本组件挂载时登记、卸载时清空对应槽位。 */
+  readonly materialsRef: RefObject<(THREE.Material | null)[]>
 }): null | ReactNode {
-  // drei Line 实例引用，用于挂载后在其 material 上注入 NDC 深度偏移。
+  // drei Line 实例引用，用于挂载后在其 material 上注入 NDC 深度偏移 + 登记到父级材质数组。
   const lineRef = useRef<React.ComponentRef<typeof Line>>(null)
   // 端点三元组化（挂载期一次，segments 模式按三元组两两成对解释为线段）。
   const points = useMemo(
@@ -92,12 +101,23 @@ function ProvinceBorderLine({
   )
   // 挂载后注入深度偏移：drei 在 useState 内一次性创建 LineMaterial 并经 primitive attach，故此时
   // lineRef.current.material 已就绪；needsUpdate=true 强制重编译使注入在首帧生效。
+  // 同时把该材质登记到父级 materialsRef[materialSlot]，供 ProvinceBorders 单一 useFrame 统一写入场淡入
+  // opacity（避免 34 个省界各开一个 useFrame；TASK-020「不由组件私自计时」——透明度来自共享入场帧）。
   useLayoutEffect(() => {
     const line = lineRef.current as { material: THREE.Material } | null
     if (line === null) return
     const material = line.material as THREE.ShaderMaterial
     applyLineDepthBias(material, PROVINCE_BORDERS_CONFIG.depthBiasNdc)
-  }, [])
+    // 捕获稳定的材质数组引用 + 槽位下标，使 cleanup 写「同一数组的同一槽位」（materialsRef.current 由父级
+    // useRef 一次创建、永不重新赋值，捕获安全；避免在 cleanup 直接读 ref.current 触发 exhaustive-deps 告警）。
+    const slot = materialSlot
+    const materials = materialsRef.current
+    materials[slot] = material
+    return () => {
+      // 卸载 / 重渲染清空对应槽位，避免对已释放材质写 opacity（k 切换重建边界时确定性回收）。
+      materials[slot] = null
+    }
+  }, [materialSlot, materialsRef])
 
   if (border.segmentCount === 0) return null
 
@@ -132,7 +152,7 @@ function ProvinceBorderLine({
   )
 }
 
-/** ProvinceBorders 的 props：接收领域层准备好的贴地线段 + 单一焦点状态，不取数、不计算、不持有 hover 状态。 */
+/** ProvinceBorders 的 props：接收领域层准备好的贴地线段 + 单一焦点状态 + 共享入场帧，不取数、不计算、不持有 hover 状态。 */
 export interface ProvinceBordersProps {
   /** 领域层 prepareProvinceBorders 的产物（已 densify + 贴地 + 按行政区分组）。 */
   readonly borders: PreparedProvinceBorders
@@ -142,22 +162,56 @@ export interface ProvinceBordersProps {
    * （恢复不变量）。本组件不做拾取——拾取由 ProvinceHoverPicker 单点承担，本组件只消费该状态。
    */
   readonly hoveredAdminId?: string | null
+  /**
+   * 共享入场帧（TASK-020 单一时间源）。注入时每帧由本组件单一 useFrame 把 computeSceneLayerOpacity(elapsed)
+   * 写入全部省界材质的 opacity，使省界在省名标签淡入后随水面 / 边界阶段平滑淡入（SPEC §4.3「水面、边界线
+   * 随后淡入」）。未注入（回退 TASK-020）时不写 opacity（材质 opacity 默认 1，省界加载完成即直接可见）。
+   */
+  readonly entranceFrame?: RefObject<EntranceFrame> | null
 }
 
 /**
  * 渲染全部省级贴地边界（按行政区分组，浅青白发光，NDC 深度偏移抗 z-fighting，与海面透明共存；据 hoveredAdminId
- * 加亮加粗焦点省界、压暗非焦点省界）。
+ * 加亮加粗焦点省界、压暗非焦点省界；据共享入场帧统一淡入）。
  *
  * 本组件不承担 densify / 高程采样 / 投影（领域层职责），不读取 GeoJSON / heightmap——它只是
- * PreparedProvinceBorders + 单一焦点状态的纯渲染边界。回退本 TASK（TASK-018）仅移除 hoveredAdminId 透传与
- * 焦点样式派生：把 hoveredAdminId 恒置 null 即恢复 TASK-014 的基线态（全部省份浅青白基线色 / 基线线宽），
- * 贴地描边、NDC 深度偏移、与海面透明共存全部无回归（TASK-018 回退边界）。
+ * PreparedProvinceBorders + 单一焦点状态 + 共享入场帧的纯渲染边界。回退本 TASK（TASK-018）仅移除 hoveredAdminId
+ * 透传与焦点样式派生：把 hoveredAdminId 恒置 null 即恢复 TASK-014 的基线态（全部省份浅青白基线色 / 基线线宽），
+ * 贴地描边、NDC 深度偏移、与海面透明共存全部无回归（TASK-018 回退边界）。回退 TASK-020 仅移除 entranceFrame
+ * 透传与淡入 useFrame：省界加载完成即直接可见。
  */
-export function ProvinceBorders({ borders, hoveredAdminId = null }: ProvinceBordersProps): ReactNode {
+export function ProvinceBorders({ borders, hoveredAdminId = null, entranceFrame = null }: ProvinceBordersProps): ReactNode {
+  // 全部省界线材质的登记数组（ProvinceBorderLine 挂载时按 materialSlot 登记、卸载时清空）。
+  // 单一 useFrame 据共享入场帧统一写 opacity，避免 34 个省界各开 useFrame（TASK-020「不由组件私自计时」）。
+  const materialsRef = useRef<(THREE.Material | null)[]>([])
+
+  // 入场淡入（TASK-020）：注入共享入场帧时，每帧把全部省界材质 opacity 设为 computeSceneLayerOpacity。
+  // LineMaterial 的 opacity getter/setter 写入其 uniforms.opacity.value，片元着色器按之缩放 alpha；
+  // AdditiveBlending 下 alpha 缩放加贡献，故 opacity 0→1 即省界从不可见到完全发光淡入。
+  // 与 SeaSurface / PoliticalFeatures 共用同一 computeSceneLayerOpacity（同一 elapsed、同一函数），故
+  // 水面 / 省界 / 十段线同阶段同步淡入。entranceFrame 未注入时本回调直接 return（opacity 默认 1，回退）。
+  useFrame(() => {
+    if (entranceFrame === null || entranceFrame === undefined) return
+    const frame = entranceFrame.current
+    if (frame === null || frame === undefined) return
+    const opacity = computeSceneLayerOpacity(frame.elapsedSeconds, ENTRANCE_DURATIONS)
+    for (const material of materialsRef.current) {
+      if (material !== null && material !== undefined) {
+        material.opacity = opacity
+      }
+    }
+  })
+
   return (
     <group>
-      {borders.borders.map((border) => (
-        <ProvinceBorderLine key={border.adminId} border={border} hoveredAdminId={hoveredAdminId} />
+      {borders.borders.map((border, index) => (
+        <ProvinceBorderLine
+          key={border.adminId}
+          border={border}
+          hoveredAdminId={hoveredAdminId}
+          materialSlot={index}
+          materialsRef={materialsRef}
+        />
       ))}
     </group>
   )

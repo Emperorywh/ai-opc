@@ -43,7 +43,8 @@
  */
 
 import { useMemo } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { TerrainRenderConfig } from '../config/terrain-config'
 import {
@@ -54,6 +55,8 @@ import {
   SCENE_ATMOSPHERE_CONFIG,
   hexToShaderFloat3,
 } from '../config/scene-atmosphere'
+import { ENTRANCE_DURATIONS } from '../config/entrance'
+import { computeTerrainRise, type EntranceFrame } from '../lib/entrance-state'
 import { TERRAIN_FRAGMENT_SHADER, TERRAIN_VERTEX_SHADER } from './terrain-shaders'
 import { TERRAIN_PLANE_LAYOUT } from './terrain-layout'
 import type { HeightmapTextureLoadResult } from './load-heightmap-texture'
@@ -66,9 +69,15 @@ export interface ChinaTerrainMeshProps {
   readonly config: TerrainRenderConfig
   /**
    * 入场升起进度 [0,1]（默认 1.0）。位移量 = h·k·rise；rise=0 时地形为平面。
-   * 本 TASK 默认 1.0（升起动画由后续 TASK 驱动）；暴露为 prop 使后续 TASK 无需改本组件即可接管入场。
+   * 当 entranceFrame 未注入时（回退 TASK-020），uRise 取本值（1.0 = 直接呈现夸张后真实高度）。
    */
   readonly rise?: number
+  /**
+   * 共享入场帧（TASK-020 单一时间源）。注入时每帧由 useFrame 把 computeTerrainRise(elapsed) 写入 uRise，
+   * 驱动「地形从平面升起」动画——复用 GPU 位移 uniform、不建第二套几何。未注入（null / undefined）时
+   * uRise 保持 rise prop（1.0），地形加载完成即直接可见（回退边界：回退 TASK-020 仅移除入场编排）。
+   */
+  readonly entranceFrame?: RefObject<EntranceFrame> | null
 }
 
 /**
@@ -77,7 +86,7 @@ export interface ChinaTerrainMeshProps {
  * 渲染层只在组件挂载 / props 变化时重建几何与 uniform——分段变化（如生产档↔测试档切换）会重建
  * PlaneGeometry，夸张系数变化只更新 uniform（无需重建几何），二者都走受控的 R3F 声明式路径。
  */
-export function ChinaTerrainMesh({ heightmap, config, rise = 1.0 }: ChinaTerrainMeshProps): ReactNode {
+export function ChinaTerrainMesh({ heightmap, config, rise = 1.0, entranceFrame = null }: ChinaTerrainMeshProps): ReactNode {
   const { texture, meta } = heightmap
   const segments = config.meshSegments
 
@@ -144,6 +153,19 @@ export function ChinaTerrainMesh({ heightmap, config, rise = 1.0 }: ChinaTerrain
       uFogDensity: { value: fog.enabled ? fog.density : 0 },
     }
   }, [texture, meta, rampTexture, config.exaggeration, rise])
+
+  // 入场升起驱动（TASK-020）：注入共享入场帧时，每帧由 R3F 统一帧循环把 computeTerrainRise(elapsed)
+  // 写入 uRise.value——位移量 = h·k·uRise 随之从 0（平面）升至 h·k（夸张后真实高度）。复用 GPU 位移
+  // uniform、不建第二套几何（TASK-020 实现约束「地形升起必须复用 GPU 位移，不得复制或重建几何」）。
+  // useFrame 闭包每帧由 R3F 刷新为最新渲染的 uniforms（同 SeaSurface / PlaceLabels 模式），故 uniforms
+  // 重建（k 切换 / 资产重载）后仍指向最新对象。entranceFrame 未注入时本回调直接 return（uRise 保持 rise
+  // prop = 1.0，回退边界）。每帧只写一个标量到既有 uniform 对象——零对象分配。
+  useFrame(() => {
+    if (entranceFrame === null || entranceFrame === undefined) return
+    const frame = entranceFrame.current
+    if (frame === null || frame === undefined) return
+    uniforms.uRise.value = computeTerrainRise(frame.elapsedSeconds, ENTRANCE_DURATIONS)
+  })
 
   return (
     <mesh

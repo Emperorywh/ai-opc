@@ -34,21 +34,38 @@
  */
 
 import { useMemo } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
 import { SEA_SURFACE_CONFIG } from '../config/sea-surface'
 import { SCENE_ATMOSPHERE_CONFIG, hexToShaderFloat3 } from '../config/scene-atmosphere'
+import { ENTRANCE_DURATIONS } from '../config/entrance'
+import { computeSceneLayerOpacity, type EntranceFrame } from '../lib/entrance-state'
 import { SEA_SURFACE_FRAGMENT_SHADER, SEA_SURFACE_VERTEX_SHADER } from './sea-surface-shaders'
+
+/**
+ * SeaSurface 的 props（TASK-020 起接收共享入场帧，驱动水面随后淡入）。
+ *
+ * 海面参数仍全部来自冻结配置（SEA_SURFACE_CONFIG / SCENE_ATMOSPHERE_CONFIG），entranceFrame 仅用于
+ * 入场淡入透明度调制——非视觉 / 几何参数，故不破坏「海面只依赖视觉 / 几何配置」的边界。
+ */
+export interface SeaSurfaceProps {
+  /**
+   * 共享入场帧（TASK-020 单一时间源）。注入时每帧由 useFrame 把 uOpacity 设为「配置基线透明度 ×
+   * computeSceneLayerOpacity(elapsed)」，使海面在省名标签淡入后随水面 / 边界阶段平滑淡入
+   * （SPEC §4.3「水面、边界线随后淡入」）。未注入（回退 TASK-020）时 uOpacity 保持配置基线值，
+   * 海面加载完成即直接可见（回退边界）。
+   */
+  readonly entranceFrame?: RefObject<EntranceFrame> | null
+}
 
 /**
  * 装配并渲染动态半透明海面 mesh。
  *
- * 无 props：海面参数全部来自冻结的 SEA_SURFACE_CONFIG（海面参数唯一源）与 SCENE_ATMOSPHERE_CONFIG
- * （雾参数唯一源），不接收任何运行时状态——这使海面层「只依赖视觉 / 几何配置」，与行政区 / 地点 /
- * hover / 加载状态正交（后续入场 TASK 改的是相机交互启停与升起 uniform，不影响海面装配）。
+ * 海面参数全部来自冻结的 SEA_SURFACE_CONFIG（海面参数唯一源）与 SCENE_ATMOSPHERE_CONFIG
+ * （雾参数唯一源）；entranceFrame 仅调制入场淡入透明度（单一显式状态流驱动，非组件私设计时器）。
  */
-export function SeaSurface(): ReactNode {
+export function SeaSurface({ entranceFrame = null }: SeaSurfaceProps = {}): ReactNode {
   const { colorHex, opacity, planeLayout, segments, waves } = SEA_SURFACE_CONFIG
 
   // uniforms 挂载期一次构造（useMemo 空依赖）：唯一时间输入 uTime + 静态 color/opacity/wave/fog 参数。
@@ -61,8 +78,9 @@ export function SeaSurface(): ReactNode {
       uTime: { value: 0 },
       // 深蓝青基线色（[0,1]³，字节 / 255）。
       uColor: { value: new THREE.Vector3(...hexToShaderFloat3(colorHex)) },
-      // 基线透明度（0.6）——直接成为片元输出 alpha（半透明混合）。
-      uOpacity: { value: opacity },
+      // 基线透明度（0.6）——直接成为片元输出 alpha（半透明混合）。显式标注 number 使入场淡入 useFrame
+      // 可写入「基线 × 入场场景层透明度」（配置常量为字面量 0.6，不标注会被推断为字面量类型而拒绝赋值）。
+      uOpacity: { value: opacity as number },
       // 第一层流动波动参数（静态，挂载期一次设置）。
       uLayer1FrequencyU: { value: waves.layer1.frequencyU },
       uLayer1FrequencyV: { value: waves.layer1.frequencyV },
@@ -82,9 +100,21 @@ export function SeaSurface(): ReactNode {
   }, [colorHex, opacity, waves])
 
   // 统一时钟 + 无分配循环：用 R3F 共享 clock 的 getElapsedTime()，不 new THREE.Clock() 建独立漂移时钟。
-  // 每帧只把经过时间赋给 uTime.value（原始数字赋值，零对象分配）；其余 uniform 运行循环不触碰。
+  // 每帧只把经过时间赋给 uTime.value（原始数字赋值，零对象分配）；其余静态 uniform 运行循环不触碰。
+  // 入场淡入（TASK-020）：注入共享入场帧时，每帧把 uOpacity 设为「配置基线透明度 × 入场场景层透明度」，
+  // 使海面在省名标签淡入后随水面 / 边界阶段平滑淡入（SPEC §4.3「水面、边界线随后淡入」）。该透明度由
+  // 单一显式状态流（共享入场帧）派生，非本组件私设计时器——与 uTime 同一 useFrame、同一共享 clock。
+  // entranceFrame 未注入时 uOpacity 保持配置基线值（回退 TASK-020：海面加载完成即直接可见）。
   useFrame((state) => {
     uniforms.uTime.value = state.clock.getElapsedTime()
+    if (entranceFrame !== null && entranceFrame !== undefined) {
+      const frame = entranceFrame.current
+      if (frame !== null && frame !== undefined) {
+        // 入场场景层透明度（loading / terrain-rise / labels-fade-in 期间为 0 → 海面不可见；
+        // scene-layers-fade-in 期间 0→1 → 海面随水面 / 边界淡入；其后恒 1）。
+        uniforms.uOpacity.value = opacity * computeSceneLayerOpacity(frame.elapsedSeconds, ENTRANCE_DURATIONS)
+      }
+    }
   })
 
   return (

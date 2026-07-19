@@ -65,8 +65,8 @@
  * 加载 / 错误状态文本，完整 UI 由后续 TASK 接管。
  */
 
-import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { Canvas } from '@react-three/fiber'
 import type { TerrainRenderConfig } from '../config/terrain-config'
 import {
@@ -89,7 +89,9 @@ import { PlaceLabels } from '../three/PlaceLabels'
 import { ProvinceHoverPicker } from '../three/ProvinceHoverPicker'
 import { MapOrbitControls } from '../three/MapOrbitControls'
 import { SceneAtmosphere } from '../three/SceneAtmosphere'
+import { EntranceController } from '../three/EntranceController'
 import { SouthChinaSeaInset } from '../components/SouthChinaSeaInset'
+import { Loader } from '../components/ui/Loader'
 import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from '../three/camera-constraints'
 import { SCENE_SHADOWS_ENABLED } from '../config/scene-atmosphere'
 import { createElevationProvider } from '../lib/elevation'
@@ -115,6 +117,13 @@ import {
   type PlaceLabelPrepConfig,
 } from '../lib/place-labels'
 import type { TerrainWorldYSampler } from '../lib/label-occlusion'
+import {
+  computeAssetReadiness,
+  isEntranceInteractive,
+  type EntranceFrame,
+  type EntrancePhase,
+  type TrackedAssetState,
+} from '../lib/entrance-state'
 import type {
   AdministrativeGeometryContract,
   PlaceDirectoryContract,
@@ -154,16 +163,19 @@ function useHeightmap(): HeightmapState {
 /**
  * 地形层：接收上层（唯一）加载好的 heightmap 与受控配置，就绪时渲染 GPU 位移 mesh。
  * 组件本身不取数、不自决配置——纯渲染边界。heightmap 未就绪时返回 null（不渲染平地 fallback）。
+ * entranceFrame（TASK-020）透传给 ChinaTerrainMesh 驱动「地形从平面升起」动画（复用 GPU 位移 uniform）。
  */
 function TerrainLayer({
   heightmap,
   config,
+  entranceFrame,
 }: {
   readonly heightmap: HeightmapState
   readonly config: TerrainRenderConfig
+  readonly entranceFrame: RefObject<EntranceFrame>
 }): null | ReactNode {
   if (heightmap.phase !== 'ready') return null
-  return <ChinaTerrainMesh heightmap={heightmap.heightmap} config={config} />
+  return <ChinaTerrainMesh heightmap={heightmap.heightmap} config={config} entranceFrame={entranceFrame} />
 }
 
 /** 省级行政区几何加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为空几何）。 */
@@ -221,11 +233,13 @@ function ProvinceBordersLayer({
   geometry,
   exaggeration,
   hoveredAdminId,
+  entranceFrame,
 }: {
   readonly heightmap: HeightmapState
   readonly geometry: ProvinceGeometryState
   readonly exaggeration: number
   readonly hoveredAdminId: string | null
+  readonly entranceFrame: RefObject<EntranceFrame>
 }): null | ReactNode {
   // 所有 Hook 必须无条件调用（react-hooks/rules-of-hooks）：就绪判定移入 Hook 内部，不在 Hook 前 early return。
   // 由 heightmap 的 meta + pixels 构造共享 ElevationProvider（pixels 即取数时已解码的 Uint16Array，零额外内存）。
@@ -265,7 +279,13 @@ function ProvinceBordersLayer({
   }, [heightmap, geometry, provider, exaggeration, prepConfig])
 
   if (!result.ok) return null
-  return <ProvinceBorders borders={result.borders} hoveredAdminId={hoveredAdminId} />
+  return (
+    <ProvinceBorders
+      borders={result.borders}
+      hoveredAdminId={hoveredAdminId}
+      entranceFrame={entranceFrame}
+    />
+  )
 }
 
 /** 政治边界补充契约加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为空契约——红线完整性）。 */
@@ -323,10 +343,12 @@ function PoliticalFeaturesLayer({
   heightmap,
   political,
   exaggeration,
+  entranceFrame,
 }: {
   readonly heightmap: HeightmapState
   readonly political: PoliticalBoundaryState
   readonly exaggeration: number
+  readonly entranceFrame: RefObject<EntranceFrame>
 }): null | ReactNode {
   // 所有 Hook 必须无条件调用（react-hooks/rules-of-hooks）：就绪判定移入 Hook 内部。
   // 由 heightmap 的 meta + pixels 构造 ElevationProvider（与省界层各自构造、共享同一份 pixels，零额外内存）。
@@ -371,7 +393,7 @@ function PoliticalFeaturesLayer({
   }, [heightmap, political, provider, exaggeration, prepConfig])
 
   if (!result.ok) return null
-  return <PoliticalFeatures features={result.features} />
+  return <PoliticalFeatures features={result.features} entranceFrame={entranceFrame} />
 }
 
 /** 地点目录加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为空目录——标签完整性）。 */
@@ -470,6 +492,7 @@ function PlaceLabelsLayer({
   fontManifest,
   exaggeration,
   hoveredAdminId,
+  entranceFrame,
 }: {
   readonly heightmap: HeightmapState
   readonly places: PlaceDirectoryState
@@ -477,6 +500,7 @@ function PlaceLabelsLayer({
   readonly fontManifest: LabelFontManifestState
   readonly exaggeration: number
   readonly hoveredAdminId: string | null
+  readonly entranceFrame: RefObject<EntranceFrame>
 }): null | ReactNode {
   // 所有 Hook 必须无条件调用（rules-of-hooks）：就绪判定移入 Hook 内部。
   // 由 heightmap 的 meta + pixels 构造 ElevationProvider（与省界 / 政治要素层各自构造、共享同一份 pixels）。
@@ -554,6 +578,7 @@ function PlaceLabelsLayer({
       labels={result.labels}
       terrainQuery={terrainQuery}
       hoveredAdminId={hoveredAdminId}
+      entranceFrame={entranceFrame}
     />
   )
 }
@@ -603,10 +628,36 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
     }
   }, [geometry.phase])
 
-  // 受约束相机的交互启停（TASK-011）：单一显式布尔，当前 = heightmap 就绪。后续入场状态机
-  // （升起动画）在此合并「就绪 && 升起完成」即可统一接管，无需改 MapOrbitControls。
-  // 加载 / 错误期置 false——尚无可探索地形时锁定相机，避免空场景下的无意义旋转。
-  const interactionEnabled = heightmap.phase === 'ready'
+  // 入场编排（TASK-020 单一显式状态流）：把五个资产 hook 的真实状态映射为受跟踪资产状态列表，
+  // 由 computeAssetReadiness（纯函数）聚合为 ready / failed / loadedCount / totalCount——DOM 进度只反映真实
+  // 资产，不伪造计时。entranceFrame 是 Canvas 内外共享的「同一时间源」ref：EntranceController 每帧写入
+  // phase + elapsed，各渲染层 useFrame 只读消费派生各自 rise / 透明度（不由组件私自计时）。phase 是 React
+  // state（仅阶段切换时更新，约 4 次），驱动 DOM 加载反馈与相机交互锁——非每帧 setState。
+  const trackedAssets = useMemo<readonly TrackedAssetState[]>(
+    () => [
+      { key: 'heightmap', phase: heightmap.phase, errorMessage: heightmap.phase === 'error' ? heightmap.message : null },
+      { key: 'provinceGeometry', phase: geometry.phase, errorMessage: geometry.phase === 'error' ? geometry.message : null },
+      { key: 'politicalBoundary', phase: political.phase, errorMessage: political.phase === 'error' ? political.message : null },
+      { key: 'placeDirectory', phase: places.phase, errorMessage: places.phase === 'error' ? places.message : null },
+      { key: 'labelFontManifest', phase: fontManifest.phase, errorMessage: fontManifest.phase === 'error' ? fontManifest.message : null },
+    ],
+    [heightmap, geometry, political, places, fontManifest],
+  )
+  const readiness = useMemo(() => computeAssetReadiness(trackedAssets), [trackedAssets])
+  // 入场帧 ref：初值 loading / elapsed=0；EntranceController（Canvas 内）每帧覆盖。useRef 在 StrictMode 重挂载
+  // 下保持同一对象（同 fiber），与 EntranceController 的起始时刻幂等捕获共同保证「动画只启动一次」。
+  const entranceFrameRef = useRef<EntranceFrame>({ phase: 'loading', elapsedSeconds: 0 })
+  // 入场阶段（React state，仅阶段切换更新）：初值 = 资产失败即 error、否则 loading。EntranceController 在阶段
+  // 切换帧回调 setEntrancePhase，驱动 DOM 加载反馈与相机交互锁。非每帧 setState（逐帧视觉值走 entranceFrameRef）。
+  const [entrancePhase, setEntrancePhase] = useState<EntrancePhase>(
+    readiness.failed ? 'error' : 'loading',
+  )
+
+  // 受约束相机的交互启停（TASK-011 启停契约 + TASK-020 交互锁）：单一显式布尔 = 入场到达 interactive。
+  // loading / error / 三个动画阶段均锁定相机（无意义旋转 / 探索未就绪或正在入场的场景）；只有入场完成
+  // （全部资产就绪 + 地形升起 + 标签 / 水面 / 边界淡入完成）后一次性释放 OrbitControls。阶段单调，
+  // 故交互只解锁一次（不会提前解锁 / 重复解锁）。
+  const interactionEnabled = isEntranceInteractive(entrancePhase)
 
   return (
     <div className="china-map-screen">
@@ -621,25 +672,39 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
         shadows={SCENE_SHADOWS_ENABLED}
       >
         <SceneAtmosphere />
+        {/*
+          入场编排驱动器（TASK-020 单一显式状态流 / 单一时间源）：Canvas 内每帧从 R3F 共享 clock 派生入场
+          elapsed、deriveEntrancePhase 得当前阶段，写入共享 entranceFrameRef（各渲染层 useFrame 只读消费派生
+          rise / 透明度），阶段切换时回调 setEntrancePhase 驱动 DOM 加载反馈与相机交互锁。无几何 / 无 DOM 输出。
+          重复渲染 / StrictMode 重挂载 / 资产完成顺序变化下，起始时刻幂等捕获 + 单调 elapsed 保证动画只启动
+          一次、阶段顺序固定、交互只在 interactive 启用。
+        */}
+        <EntranceController
+          readiness={readiness}
+          onPhaseChange={setEntrancePhase}
+          entranceFrame={entranceFrameRef}
+        />
         <MapOrbitControls enabled={interactionEnabled} />
-        <TerrainLayer heightmap={heightmap} config={config} />
+        <TerrainLayer heightmap={heightmap} config={config} entranceFrame={entranceFrameRef} />
         {/*
           动态海面（TASK-013）：独立渲染层，位于 y=0、覆盖主图海域、双层流动、半透明透视水下大陆架。
-          不接收 props、不读取 heightmap 加载状态——始终渲染，回退本 TASK 仅移除该层（水下负高程地形、
-          色阶、相机、氛围完整保留）。透明 + 不写深度，使水下地形透过海面可见、陆地遮挡海面（无穿插）。
+          entranceFrame（TASK-020）透传驱动「水面随后淡入」——uOpacity = 配置基线透明度 × 入场场景层透明度，
+          使海面在省名标签淡入后随水面 / 边界阶段平滑淡入。透明 + 不写深度，使水下地形透过海面可见、陆地
+          遮挡海面（无穿插）。回退 TASK-013 仅移除该层；回退 TASK-020 仅移除 entranceFrame 透传（海面直接可见）。
         */}
-        <SeaSurface />
+        <SeaSurface entranceFrame={entranceFrameRef} />
         {/*
           省级贴地边界（TASK-014）：heightmap（含 pixels，构造共享 ElevationProvider）与 province geometry 均
           就绪时 densify + 贴地 + 按行政区分组渲染。准备期异常被捕获、跳过省界不崩溃场景（回退边界）。
           浅青白发光线、NDC 深度偏移抗 z-fighting、与半透明海面共存；按行政区分组，hoveredAdminId（TASK-018）
-          命中省份加亮加粗、非焦点压暗、无焦点基线（ProvinceBordersLayer 透传 hoveredAdminId 给 ProvinceBorders）。
+          命中省份加亮加粗、非焦点压暗、无焦点基线。entranceFrame（TASK-020）驱动「边界随后淡入」。
         */}
         <ProvinceBordersLayer
           heightmap={heightmap}
           geometry={geometry}
           exaggeration={config.exaggeration}
           hoveredAdminId={hoveredAdminId}
+          entranceFrame={entranceFrameRef}
         />
         {/*
           省级悬停拾取（TASK-018）：geometry 就绪时挂载不可见拾取面，把指针命中的世界 (x,z) 经 invertWorld
@@ -658,20 +723,23 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
           十段线与岛礁点位（TASK-015）：heightmap（含 pixels，构造共享 ElevationProvider）与政治边界补充契约
           均就绪时红线完整性校验 + densify + 海平面贴合 + 按段分组渲染。准备期异常（缺段 / 缺点 / 查询失败 /
           退化）被捕获、跳过政治要素不崩溃场景（回退边界）。暖琥珀虚线（与省界浅青白实线视觉明确区分）+
-          岛礁发光光点；NDC 深度偏移抗 z-fighting、与半透明海面 / 省界透明共存。本 TASK 不宣称取得审图号，
-          内部展示状态下验收（政治边界补充数据为非官方审图数据，见 docs/political-review-record.md）。
+          岛礁发光光点；NDC 深度偏移抗 z-fighting、与半透明海面 / 省界透明共存。entranceFrame（TASK-020）驱动
+          「水面 / 边界随后淡入」。本 TASK 不宣称取得审图号，内部展示状态下验收（政治边界补充数据为非官方
+          审图数据，见 docs/political-review-record.md）。
         */}
         <PoliticalFeaturesLayer
           heightmap={heightmap}
           political={political}
           exaggeration={config.exaggeration}
+          entranceFrame={entranceFrameRef}
         />
         {/*
           省名 / 省会光点 / 岛礁名称标注（TASK-016）：heightmap（含 pixels，构造共享 ElevationProvider）+ 地点
           目录 + 政治边界契约 + 离线字体清单均就绪时投影 + 贴地 / 浮高 + 字体覆盖校验后渲染。准备 / 覆盖期异常
           （角色-配对失衡 / 点名岛礁缺项 / 投影 / 高程查询失败 / 字体缺字）被捕获、跳过标签不崩溃场景（回退边界）。
-          Billboard Text（始终面向相机）+ 暖琥珀省会发光光点；字体取本地子集（无在线请求）。本 TASK 不宣称取得
-          审图号，内部展示状态下验收（坐标为非官方审图数据，见 docs/political-review-record.md）。
+          Billboard Text（始终面向相机）+ 暖琥珀省会发光光点；字体取本地子集（无在线请求）。entranceFrame
+          （TASK-020）驱动「省名标签自西向东错峰淡入 + 省会 / 岛礁名随省名阶段整体淡入」，与遮挡透明度乘法合成。
+          本 TASK 不宣称取得审图号，内部展示状态下验收（坐标为非官方审图数据，见 docs/political-review-record.md）。
         */}
         <PlaceLabelsLayer
           heightmap={heightmap}
@@ -680,10 +748,15 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
           fontManifest={fontManifest}
           exaggeration={config.exaggeration}
           hoveredAdminId={hoveredAdminId}
+          entranceFrame={entranceFrameRef}
         />
       </Canvas>
 
-      {/* 极简 DOM overlay：k 切换（验证步骤 4）+ 状态文本。完整 UI 由后续 TASK 接管。 */}
+      {/*
+        DOM overlay（TASK-020 起含加载 / 入场反馈）：k 切换（验证步骤 4）+ 加载进度 / 错误 / 入场阶段提示
+        （Loader，只反映真实受跟踪资产状态，不伪造计时进度）。完整外围 UI（海拔色阶图例、审图号 / 署名角标）
+        由后续 TASK 接管。
+      */}
       <div className="china-map-overlay">
         <div className="china-map-kcontrol">
           <span>垂直夸张 k = {config.exaggeration.toFixed(1)}</span>
@@ -698,16 +771,12 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
           </button>
           <span className="china-map-segments">分段 {config.meshSegments}²（GPU 位移）</span>
         </div>
-        {heightmap.phase === 'loading' && <div className="china-map-status">地形高程加载中…</div>}
-        {heightmap.phase === 'error' && (
-          <div className="china-map-status china-map-error">加载失败：{heightmap.message}</div>
-        )}
-        {places.phase === 'error' && (
-          <div className="china-map-status china-map-error">地点目录加载失败：{places.message}</div>
-        )}
-        {fontManifest.phase === 'error' && (
-          <div className="china-map-status china-map-error">字体清单加载失败：{fontManifest.message}</div>
-        )}
+        {/*
+          加载 / 入场 DOM 反馈（TASK-020）：loading 显示真实进度条（loadedCount / totalCount，不伪造计时）、
+          error 显示可诊断错误信息（保持交互关闭、不退化为 fallback）、动画阶段显示极简阶段提示（不遮画布）、
+          interactive 无输出。进度只来自真实资产状态 + 单一时间源 elapsed。
+        */}
+        <Loader readiness={readiness} phase={entrancePhase} />
         {/*
           南海诸岛 2D 标准附图（TASK-019）：右下角 SVG DOM overlay，独立于 3D 场景（SPEC §3.8「DOM overlay，
           非 3D」）。复用上层已加载的同一份 PoliticalBoundaryContract（与主图 PoliticalFeaturesLayer fetch 同一份

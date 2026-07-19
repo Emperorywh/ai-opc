@@ -78,6 +78,93 @@
 }
 
 /*
+ * 加载与入场 DOM 反馈（TASK-020，SPEC §4.3 进度条）。
+ *
+ * loading / error 全屏覆盖（此时画布无可探索内容 / 失败需明确阻断），动画阶段仅底部极简提示（不遮画布）。
+ * 全屏覆盖用半透明深色面板（不纯黑，保留画布的存在感），居中卡片承载标题 / 进度条 / 错误信息。
+ * 进度条只反映真实受跟踪资产（loadedCount / totalCount），不伪造计时；错误信息为可诊断的资产失败原因。
+ */
+.china-map-loader {
+  pointer-events: none;
+  color: #c7d0e0;
+}
+
+.china-map-loader--full {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(5, 8, 15, 0.86);
+}
+
+.china-map-loader--hint {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  background: rgba(8, 14, 26, 0.72);
+  border: 1px solid rgba(120, 160, 200, 0.25);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.china-map-loader-title {
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  color: #dfe7f2;
+}
+
+.china-map-loader-bar {
+  width: 280px;
+  max-width: 60vw;
+  height: 6px;
+  background: rgba(120, 160, 200, 0.18);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.china-map-loader-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4fd1c5, #9fe8d8);
+  border-radius: 3px;
+  transition: width 0.2s ease-out;
+}
+
+.china-map-loader-progress {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.china-map-loader-error {
+  max-width: 70vw;
+  padding: 8px 14px;
+  background: rgba(60, 20, 24, 0.5);
+  border: 1px solid rgba(200, 80, 80, 0.5);
+  border-radius: 6px;
+  color: #ffb4b4;
+  font-size: 13px;
+  text-align: center;
+  word-break: break-word;
+}
+
+.china-map-loader-hint {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.china-map-loader-phase {
+  letter-spacing: 0.08em;
+  color: #dfe7f2;
+}
+
+/*
  * 南海诸岛 2D 标准附图（TASK-019，SPEC §3.8）。
  *
  * 右下角矩形 DOM overlay，独立于 3D 画布。半透明深色面板贴合科技风，SVG 按 viewBox 等比缩放（宽度固定、

@@ -52,13 +52,19 @@
  */
 
 import { useMemo, useRef } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Billboard, Text } from '@react-three/drei'
 import * as THREE from 'three'
 import { PLACE_LABELS_CONFIG } from '../config/place-labels'
 import { PROVINCE_HOVER_CONFIG } from '../config/province-hover'
 import { LABEL_OCCLUSION_CONFIG } from '../config/label-occlusion'
+import { ENTRANCE_DURATIONS } from '../config/entrance'
+import {
+  computeAncillaryLabelOpacity,
+  computeProvinceLabelOpacity,
+  type EntranceFrame,
+} from '../lib/entrance-state'
 import { computeLabelVisibility } from '../lib/label-occlusion'
 import type { TerrainWorldYSampler } from '../lib/label-occlusion'
 import type {
@@ -103,7 +109,7 @@ interface OcclusionTextLabel {
   readonly baseColorHex: string
 }
 
-/** PlaceLabels 的 props：接收领域层准备好的标签 / 光点 + 可选的地形采样器 + 单一焦点状态，不取数、不持有交互状态。 */
+/** PlaceLabels 的 props：接收领域层准备好的标签 / 光点 + 可选的地形采样器 + 单一焦点状态 + 共享入场帧，不取数、不持有交互状态。 */
 export interface PlaceLabelsProps {
   /** 领域层 preparePlaceLabels 的产物（省名标签 + 省会光点 + 岛礁名称标签，已贴地 + 浮高）。 */
   readonly labels: PreparedPlaceLabels
@@ -120,6 +126,13 @@ export interface PlaceLabelsProps {
    * ProvinceHoverPicker 单点承担，本组件只消费该状态。
    */
   readonly hoveredAdminId?: string | null
+  /**
+   * 共享入场帧（TASK-020 单一时间源）。注入时每帧由本组件单一 useFrame 把「省名标签按自西向东错峰淡入」
+   * 与「省会光点 / 岛礁名称随省名阶段整体淡入」的透明度与遮挡透明度合成（乘法）写入 troika fillOpacity /
+   * 光点材质 opacity（SPEC §4.3「省名标签依次淡入，按地理顺序错峰，如自西向东」）。未注入（回退 TASK-020）
+   * 时不施加入场透明度（=1），标签 / 光点加载完成即直接可见。
+   */
+  readonly entranceFrame?: RefObject<EntranceFrame> | null
 }
 
 /**
@@ -129,11 +142,29 @@ export interface PlaceLabelsProps {
  * AdditiveBlending 呈发光。depthTest 保持开启使光点被前方山体正确遮挡；depthWrite=false 不影响其他透明层。
  * 省会光点不参与遮挡淡化（球体各向同性，depthTest 已与地形正确遮挡，无 Billboard 文本的遮挡需求）。
  */
-function CapitalPoint({ point }: { readonly point: PreparedCapitalPoint }): ReactNode {
+function CapitalPoint({
+  point,
+  materialSlot,
+  materialsRef,
+}: {
+  readonly point: PreparedCapitalPoint
+  /** 本光点材质在父级 materialsRef 数组中的下标（入场淡入时由父级统一寻址写 opacity）。 */
+  readonly materialSlot: number
+  /** 父级维护的省会光点材质数组 ref：本组件挂载时登记、卸载时清空对应槽位。 */
+  readonly materialsRef: RefObject<(THREE.MeshBasicMaterial | null)[]>
+}): ReactNode {
   return (
     <mesh position={[point.position[0], point.position[1], point.position[2]]} renderOrder={3}>
       <sphereGeometry args={[PLACE_LABELS_CONFIG.capitalPointRadiusMeters, 8, 8]} />
+      {/*
+        ref 回调把材质登记到父级 materialsRef[materialSlot]，供 PlaceLabels 单一 useFrame 统一写入场淡入
+        opacity（卸载时以 null 清空槽位）。省会光点的最终透明度 = 入场整体淡入透明度（computeAncillaryLabelOpacity，
+        与岛礁名称同包），不参与遮挡淡化（球体各向同性，depthTest 已与地形正确遮挡）。
+      */}
       <meshBasicMaterial
+        ref={(material: THREE.MeshBasicMaterial | null) => {
+          materialsRef.current[materialSlot] = material
+        }}
         color={PLACE_LABELS_CONFIG.capitalPointColorHex}
         blending={THREE.AdditiveBlending}
         transparent
@@ -152,7 +183,7 @@ function CapitalPoint({ point }: { readonly point: PreparedCapitalPoint }): Reac
  * 移除遮挡判定与透明度反馈：把 terrainQuery 置 null 即恢复 TASK-016 的默认完全可见状态，标签朝向与地点
  * 位置无回归（TASK-017 回退边界）。
  */
-export function PlaceLabels({ labels, terrainQuery, hoveredAdminId = null }: PlaceLabelsProps): ReactNode {
+export function PlaceLabels({ labels, terrainQuery, hoveredAdminId = null, entranceFrame = null }: PlaceLabelsProps): ReactNode {
   // 合并省名 + 岛礁名为统一的「遮挡文本标签」列表（省会光点不参与遮挡，单独渲染）。
   // text 原样透传领域层 shortName / 岛礁规范名（本组件不复制中文名表）；基线字号 / 基线色取自唯一配置源。
   // 省名标签携带 adminId（供焦点放大 / 置顶寻址），岛礁名标签 adminId=null（不参与 hover）。
@@ -183,29 +214,60 @@ export function PlaceLabels({ labels, terrainQuery, hoveredAdminId = null }: Pla
     return list
   }, [labels])
 
+  // 省名标签的「自西向东」错峰排序（TASK-020，SPEC §4.3「按地理顺序错峰，如自西向东」）。
+  // 按世界 x（东增）升序排省名标签，西部（x 小）staggerIndex 小 → delay 小 → 先淡入。岛礁名标签不参与
+  // 错峰（staggerIndex = -1 → 用整体淡入）。挂载期一次排序、确定性（同 x 时按原序稳定）。
+  const staggerInfo = useMemo(() => {
+    const indexToStagger = new Array<number>(textLabels.length).fill(-1)
+    const provinceEntries: Array<{ readonly i: number; readonly x: number }> = []
+    for (let i = 0; i < textLabels.length; i++) {
+      if (textLabels[i].kind === 'province') {
+        provinceEntries.push({ i, x: textLabels[i].position[0] })
+      }
+    }
+    provinceEntries.sort((a, b) => a.x - b.x)
+    provinceEntries.forEach((entry, rank) => {
+      indexToStagger[entry.i] = rank
+    })
+    return { indexToStagger, provinceCount: provinceEntries.length }
+  }, [textLabels])
+
   // 各文本标签的 troika 实例引用（下标与 textLabels 对齐；挂载 / 卸载由 R3F ref 回调自动维护）。
   const textRefs = useRef<(TroikaTextLike | null)[]>([])
   // 各标签的目标透明度（遮挡判定结果；indeterminate 时保持上一次目标，不抖动）。
   const targetOpacities = useRef<number[]>([])
-  // 各标签当前透明度（指数阻尼的当前值；初始 = 可见）。
+  // 各标签当前透明度（指数阻尼的当前值；初始 = 入场激活时 0 / 未激活时可见，见下）。
   const currentOpacities = useRef<number[]>([])
   // 帧计数（降频用）：由 R3F 统一帧循环递增，无独立计时器 / Clock。
   const frameCounter = useRef(0)
+  // 省会光点材质引用数组（入场淡入时由本组件单一 useFrame 统一写 opacity；与遮挡文本共用同一 useFrame、
+  // 同一共享 clock，无第二套计时器）。
+  const capitalMaterialsRef = useRef<(THREE.MeshBasicMaterial | null)[]>([])
+
+  // 是否激活入场淡入（entranceFrame 注入即激活）。激活时省名 / 岛礁名标签与省会光点初始透明度为 0
+  // （从不可见淡入）；未激活（回退 TASK-020）时初始为可见，加载完成即直接可见。捕获于数组长度同步处，
+  // 使标签数变化（k 切换 / 资产重载）时按「当前是否激活」确定性初始化新槽位。
+  const entranceActive = entranceFrame !== null && entranceFrame !== undefined
 
   // 标签数变化时同步数组长度（k 切换 / 资产重载导致 labels 变化时）；挂载期一次性分配，运行循环只
-  // 读写元素、不重建数组（无分配约束）。新槽位初始化为可见目标（terrainQuery 未就绪时即保持可见）。
+  // 读写元素、不重建数组（无分配约束）。新槽位初始化：遮挡目标恒为可见；当前透明度按入场激活与否
+  // 取 0（激活：从不可见淡入）或可见（未激活：直接可见）。
   const labelCount = textLabels.length
   if (targetOpacities.current.length !== labelCount) {
     targetOpacities.current = new Array<number>(labelCount).fill(LABEL_OCCLUSION_CONFIG.visibleOpacity)
-    currentOpacities.current = new Array<number>(labelCount).fill(LABEL_OCCLUSION_CONFIG.visibleOpacity)
+    const initialCurrent = entranceActive ? 0 : LABEL_OCCLUSION_CONFIG.visibleOpacity
+    currentOpacities.current = new Array<number>(labelCount).fill(initialCurrent)
   }
 
   useFrame((state, delta) => {
     const sampler = terrainQuery ?? null
-    // 生命周期守护：字体 / 地形未就绪或标签已卸载时，terrainQuery 为 null（场景层于 heightmap 就绪后才
-    // 注入、于卸载时随组件一同释放）。此时不发射线、不调制透明度，标签保持 troika 默认完全可见——
-    // 既不产生错误射线，也不在不可用期伪造遮挡淡化。
-    if (sampler === null) return
+    // 入场 elapsed（TASK-020）：entranceFrame 注入时取共享入场帧的 elapsed（单一时间源，与海面 / 遮挡
+    // 共用同一 R3F clock）；未注入时为 0（入场透明度恒为 1，等价于不施加入场淡入——回退边界）。
+    const entranceElapsed =
+      entranceFrame !== null && entranceFrame !== undefined && entranceFrame.current !== null
+        ? entranceFrame.current.elapsedSeconds
+        : 0
+    const entranceOn = entranceFrame !== null && entranceFrame !== undefined
 
     // 降频：由统一帧循环驱动的确定性帧间隔（帧计数器对 checkFrameInterval 取模），非计时器 / 非随机
     // 抽样。每 N 帧判定一次遮挡；未判定帧仍逐帧阻尼透明度（过渡平滑）。
@@ -223,6 +285,18 @@ export function PlaceLabels({ labels, terrainQuery, hoveredAdminId = null }: Pla
     const targets = targetOpacities.current
     const currents = currentOpacities.current
 
+    // 省会光点透明度（TASK-020）：= 入场整体淡入透明度（computeAncillaryLabelOpacity，与岛礁名同包）。
+    // 省会光点不参与遮挡（球体各向同性，depthTest 已正确遮挡），故透明度只由入场淡入决定；入场完成后恒 1。
+    // entranceOn=false 时不写 opacity（材质默认 1，回退边界：直接可见）。
+    if (entranceOn) {
+      const capitalOpacity = computeAncillaryLabelOpacity(entranceElapsed, ENTRANCE_DURATIONS)
+      for (const material of capitalMaterialsRef.current) {
+        if (material !== null && material !== undefined) {
+          material.opacity = capitalOpacity
+        }
+      }
+    }
+
     for (let i = 0; i < labelCount; i++) {
       const handle = refs[i]
       if (handle === null || handle === undefined) {
@@ -230,7 +304,10 @@ export function PlaceLabels({ labels, terrainQuery, hoveredAdminId = null }: Pla
         continue
       }
       const desc = textLabels[i]
-      if (shouldCheck) {
+      // 生命周期守护：sampler 为 null（字体 / 地形未就绪或标签已卸载）时不发射线、不调制遮挡目标——
+      // 既不产生错误射线，也不在不可用期伪造遮挡淡化。此时遮挡目标取可见（不暗化），入场淡入仍按共享
+      // elapsed 正常推进（入场与遮挡正交，sampler 不可用不应冻结入场淡入）。
+      if (sampler !== null && shouldCheck) {
         // 遮挡判定（委托领域层纯函数）：射线方向「标签→相机」，距离比较「地形世界 y 高出射线 y 超过余量
         // → 命中点比标签更近相机 → occluded」，否则 visible；退化 / 全失败 → indeterminate。
         const visibility = computeLabelVisibility(
@@ -264,11 +341,23 @@ export function PlaceLabels({ labels, terrainQuery, hoveredAdminId = null }: Pla
           targets[i] = PROVINCE_HOVER_CONFIG.focusedLabelOpacity
         }
       }
-      // 每帧指数阻尼当前透明度 → 目标（THREE.MathUtils.damp = lerp(current, target, 1 − exp(−λ·dt))）。
+      // 入场透明度合成（TASK-020）：最终目标 = 入场透明度 × 遮挡目标。省名标签按自西向东错峰淡入
+      // （staggerIndex ≥ 0 → computeProvinceLabelOpacity），省会 / 岛礁名标签随省名阶段整体淡入
+      // （staggerIndex = -1 → computeAncillaryLabelOpacity）。入场完成后入场透明度恒 1，合成退化为纯遮挡
+      // 目标——与 TASK-017 行为一致（无回归）。焦点置顶（targets[i]=1）× 入场透明度：入场期间 hover
+      // 不激活（相机锁定），故不冲突；入场后入场透明度=1，焦点置顶正常生效。
+      const staggerIndex = staggerInfo.indexToStagger[i]
+      const entranceOpacity = entranceOn
+        ? staggerIndex >= 0
+          ? computeProvinceLabelOpacity(entranceElapsed, ENTRANCE_DURATIONS, staggerIndex, staggerInfo.provinceCount)
+          : computeAncillaryLabelOpacity(entranceElapsed, ENTRANCE_DURATIONS)
+        : 1
+      const occlusionTarget = sampler !== null ? targets[i] : cfg.visibleOpacity
+      const composedTarget = entranceOpacity * occlusionTarget
+      // 每帧指数阻尼当前透明度 → 合成目标（THREE.MathUtils.damp = lerp(current, target, 1 − exp(−λ·dt))）。
       // 过渡帧率无关（dt 来自统一时钟）、状态确定可恢复。阻尼结果赋给 troika fillOpacity，其
       // onBeforeRender 下一帧读入 uniform 即生效（深度测试保持开启，标签不永久穿透地形）。
-      const target = targets[i]
-      const next = THREE.MathUtils.damp(currents[i], target, cfg.dampLambda, dt)
+      const next = THREE.MathUtils.damp(currents[i], composedTarget, cfg.dampLambda, dt)
       currents[i] = next
       handle.fillOpacity = next
     }
@@ -311,8 +400,13 @@ export function PlaceLabels({ labels, terrainQuery, hoveredAdminId = null }: Pla
           </Billboard>
         )
       })}
-      {labels.capitalPoints.map((point) => (
-        <CapitalPoint key={`capital-point-${point.adminId}`} point={point} />
+      {labels.capitalPoints.map((point, index) => (
+        <CapitalPoint
+          key={`capital-point-${point.adminId}`}
+          point={point}
+          materialSlot={index}
+          materialsRef={capitalMaterialsRef}
+        />
       ))}
     </group>
   )
