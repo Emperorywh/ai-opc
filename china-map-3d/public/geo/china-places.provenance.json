@@ -1,0 +1,31 @@
+{
+  "kind": "places-asset-provenance",
+  "assetPlaces": "china-places.json",
+  "source": {
+    "sourceId": "src-project-capitals",
+    "dataset": "项目维护省名锚点与省级行政中心目录（34 省 × 2 角色）",
+    "accessEndpoint": "offline://project-maintained/china-places.json",
+    "note": "省会/首府/直辖市中心/特别行政区中心坐标取自公开权威城市坐标；省名锚点取省域内可读位置（狭长 / 多岛省份已人工校正并附 anchorAdjustmentNote，校正锚点均已 point-in-polygon 验证落在省域内）。"
+  },
+  "generation": {
+    "pipeline": "scripts/places/build-places.ts",
+    "catalog": "scripts/places/place-catalog.ts（34 省 × 2 角色领域真值）",
+    "processingParams": {
+      "expansion": "每条 province 真值确定性展开为 1 个 provinceNameAnchor + 1 个 administrativeCapital",
+      "anchorRule": "锚点 = distinctAnchor?.coordinate ?? capital；行政中心 = capital",
+      "idDerivation": "地点 id = `${adminId}-anchor` / `${adminId}-capital`（确定性派生）",
+      "containmentCheck": "由 places-deep.ts 在 verify:assets / 测试中执行（point-in-polygon）",
+      "networkAccess": "none（地点坐标全部项目内维护，生产期零外网）"
+    },
+    "producedAt": "2026-07-19T06:50:56.370Z",
+    "producedBy": "TASK-005"
+  },
+  "integrity": {
+    "placesSha256": "694d9b7ef9c70f42a4bcdac4e21f53caecf105dca5bdcc8afe02b1b423fac2a5",
+    "entryCount": 68,
+    "anchorCount": 34,
+    "capitalCount": 34,
+    "adjustedAnchorCount": 4
+  },
+  "disclaimer": "本资产为项目维护的省名锚点与省级行政中心目录（坐标取自公开标准地图衍生数据，非官方审图数据），仅供内部展示，不得作为正式出版 / 发布用途，公开发布前须取得自然资源主管部门审图号。"
+}

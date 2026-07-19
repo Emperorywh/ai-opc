@@ -148,6 +148,14 @@ public/ 静态资产（fetch 本地文件，无外网）
   存在性在深度校验中另有**独立硬编码锚点**（不依赖目录），九段线 / 南海岛礁 / 争议区国标完整性仍由
   TASK-006 独立闭环——本 TASK 只交付 DataV 基础 34 省，**不**声称已完成政治红线。重建命令见
   `scripts/provinces/fetch-datav-provinces.ts`（离线取数，运行时零外网）。
-- 尚未交付：省会点位、九段线/岛礁等生产资产，由后续 TASK-005 ~ TASK-006 产出并接入各 scope。
+- 已交付生产资产（TASK-005）：`public/geo/china-places.json` + `public/geo/china-places.provenance.json`，
+  来源 `src-project-capitals`（项目维护省名锚点与省级行政中心目录，已登记入 `public/geo/data-sources.json`）。
+  places scope 接入**资产级深度校验**（恰好 34 省 × (1 锚点 + 1 行政中心) = 68 条 / 港澳台必在 /
+  adminId 与 34 省真值一致 / name 与真值一致 / 坐标落中国主图 / point-in-polygon 点落入对应省域 /
+  来源审计，见 `scripts/verify-assets/places-deep.ts`）；34 省 × 2 角色领域真值单一定义于
+  `scripts/places/place-catalog.ts`，地点 id 由 `${adminId}-anchor` / `${adminId}-capital` 确定性派生。
+  锚点缺省 = 省会坐标；狭长省份（内蒙古 / 黑龙江 / 甘肃 / 西藏）的人工校正锚点附 `anchorAdjustmentNote`
+  记录依据，**不**用组件内魔法偏移承载。重建命令见 `scripts/places/build-places.ts`（项目内维护，零外网）。
+- 尚未交付：九段线/岛礁等政治边界补充生产资产，由后续 TASK-006 产出并接入 political scope。
 - 当前 `version` 仅有 `1.0.0`；后续如更换 DEM 源或修正边界，在
   `src/geo-contracts/codes.ts` 的 `KNOWN_DATA_VERSIONS` 登记新版本。

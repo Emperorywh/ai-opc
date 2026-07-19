@@ -21,6 +21,16 @@
       "version": "areas_v3 拉取快照（SHA-256 记录于 china-provinces.provenance.json）",
       "license": "DataV.GeoAtlas 使用条款",
       "disclaimer": "DataV 边界为非官方审图数据，不含九段线 / 南海岛礁，部分争议区画法非国标；仅供内部展示，不得作为正式出版 / 发布用途，公开发布前须取得自然资源主管部门审图号。"
+    },
+    {
+      "id": "src-project-capitals",
+      "name": "项目维护省名锚点与省级行政中心目录",
+      "originUrl": "offline://project-maintained/china-places.json",
+      "kind": "placeGazetteer",
+      "isOfficialSurvey": false,
+      "version": "项目维护 v1（34 省 × 2 角色，SHA-256 记录于 china-places.provenance.json）",
+      "license": "内部（坐标取自公开标准地图衍生数据）",
+      "disclaimer": "项目维护的省名锚点与省会/首府/直辖市中心/特别行政区中心目录，坐标取自公开标准地图衍生数据，非官方审图数据；仅供内部展示，不得作为正式出版 / 发布用途，公开发布前须取得自然资源主管部门审图号。"
     }
   ]
 }

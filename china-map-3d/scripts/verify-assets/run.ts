@@ -25,6 +25,7 @@ import {
 } from '../../src/geo-contracts/index'
 import { verifyTerrainAsset } from './terrain-deep'
 import { verifyProvincesAsset } from './provinces-deep'
+import { verifyPlacesAsset } from './places-deep'
 
 const projectRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
 
@@ -68,6 +69,18 @@ const PRODUCTION_PROVINCES = {
 } as const
 
 /**
+ * 生产地点目录资产路径（相对项目根）。places scope 自 TASK-005 起校验这套生产资产。
+ * 地点目录同时承载省名锚点与省级行政中心（34 省 × 2 角色 = 68 条），并复用省级几何做 point-in-polygon 包含校验。
+ */
+const PRODUCTION_PLACES = {
+  places: 'public/geo/china-places.json',
+  provenance: 'public/geo/china-places.provenance.json',
+  provinceDirectory: 'public/geo/china-provinces-directory.json',
+  provinceGeometry: 'public/geo/china-provinces-geometry.json',
+  sources: 'public/geo/data-sources.json',
+} as const
+
+/**
  * Scope 注册表。
  * 后续 TASK 新增生产资产时：把对应 scope 的 probes 路径替换/扩展为真实资产路径，或追加 customVerify
  * 即可，无需新建第二条校验管线（避免重复契约/双轨入口）。
@@ -94,8 +107,12 @@ const SCOPE_REGISTRY: Record<string, ScopeDescriptor> = {
     customVerify: verifyProductionProvinces,
   },
   places: {
-    label: '地点目录',
+    label: '生产地点目录资产（深度校验：68 条/34 省×2 角色/港澳台/真值一致/坐标范围/省域包含/来源/审计）',
+    // probes 保留指向 tests/fixtures/legal 的代表夹具，仅为 `--scope all` 末尾的跨契约 bundle 核对
+    // （fixture 地点目录引用 CN-GD/CN-HI/CN-MO，需由 fixture 行政区目录解析）提供地点载荷。
+    // 本 scope 实际的资产校验由 customVerify 在生产资产上执行（与 terrain / provinces scope 同构）。
     probes: [{ path: 'tests/fixtures/legal/places.json', expectedKind: 'place-directory' }],
+    customVerify: verifyProductionPlaces,
   },
   political: {
     label: '政治边界补充数据',
@@ -308,6 +325,65 @@ function verifyProductionProvinces(): number {
     console.log('  ✓ 深度不变量通过：恰好 34 省、港 / 澳 / 台均在、目录-几何双射、与 34 省目录真值一致、所有环闭合')
     console.log(
       `  ✓ ${PRODUCTION_PROVINCES.sources}（来源引用解析）+ ${PRODUCTION_PROVINCES.provenance}（完整性摘要逐项一致：SHA-256 / 数量统计）`,
+    )
+  } else {
+    failures++
+    for (const err of outcome.errors) {
+      console.error(`  ✗ [${err.code}] ${err.path}: ${err.message}`)
+    }
+  }
+  return failures
+}
+
+/**
+ * 生产地点目录资产深度校验（TASK-005 places scope）。
+ * 加载地点目录、省级目录 / 几何（用于 adminId 解析与 point-in-polygon 包含校验）、来源注册表
+ * 与审计 sidecar，调用 verifyPlacesAsset 一次性给出 68 条 / 34 省双角色 / 港澳台 / 真值一致 /
+ * 坐标范围 / 省域包含 / 来源 / 审计的全部结论，并打印抽样摘要（角色构成、调整锚点数、包含校验状态）
+ * 便于人工读图。
+ */
+function verifyProductionPlaces(): number {
+  console.log('▶ 校验 scope：places（生产地点目录资产 · 深度校验）')
+  let failures = 0
+  let places: unknown
+  let provinceDirectory: unknown
+  let provinceGeometry: unknown
+  let sources: unknown
+  let provenance: unknown = undefined
+  let placesText: string | undefined = undefined
+  try {
+    places = readJsonFile(PRODUCTION_PLACES.places)
+    provinceDirectory = readJsonFile(PRODUCTION_PLACES.provinceDirectory)
+    provinceGeometry = readJsonFile(PRODUCTION_PLACES.provinceGeometry)
+    sources = readJsonFile(PRODUCTION_PLACES.sources)
+    // 地点目录原始文本用于复算 SHA-256 防篡改锚点；与落盘字节同源（readFileSync 原样读出）。
+    placesText = readFileSync(resolve(projectRoot, PRODUCTION_PLACES.places), 'utf-8')
+    provenance = readJsonFile(PRODUCTION_PLACES.provenance)
+  } catch (cause) {
+    failures++
+    console.error(`  ✗ 生产地点目录资产文件读取失败：${(cause as Error).message}`)
+    return failures
+  }
+
+  const outcome = verifyPlacesAsset({
+    places,
+    provinceDirectory,
+    provinceGeometry,
+    sourcesRegistry: sources,
+    provenance,
+    placesText,
+  })
+  if (outcome.ok) {
+    console.log(`  ✓ ${PRODUCTION_PLACES.places}（${outcome.samples.entryCount} 条 = ${outcome.samples.adminCount} 省 × 2 角色 · 地点契约通过）`)
+    console.log(
+      `  · 角色构成：省名锚点 ${outcome.samples.anchorCount}（其中人工校正 ${outcome.samples.adjustedAnchorCount}） / 省级行政中心 ${outcome.samples.capitalCount}`,
+    )
+    console.log(
+      `  · 几何包含校验：${outcome.samples.containmentChecked ? '已执行（非校正坐标均落入对应省域）' : '未执行（未提供省级几何）'}`,
+    )
+    console.log('  ✓ 深度不变量通过：恰好 34 省 × (1 锚点 + 1 行政中心)、adminId 与 34 省真值一致、港 / 澳 / 台均在、坐标落中国主图、点落入对应省域')
+    console.log(
+      `  ✓ ${PRODUCTION_PLACES.sources}（来源引用解析）+ ${PRODUCTION_PLACES.provenance}（完整性摘要逐项一致：SHA-256 / 数量统计）`,
     )
   } else {
     failures++
