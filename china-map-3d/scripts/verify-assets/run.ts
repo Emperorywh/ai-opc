@@ -2,12 +2,13 @@
  * 资产契约校验 CLI（pnpm verify:assets）。
  *
  * 这是 TASK-001 提供的「非交互自动化验证入口」，后续 TASK 复用同一入口验证正常资产与
- * 损坏资产。当前各 scope 指向 tests/fixtures/legal 下的代表夹具，证明入口可用；
- * 后续生产资 产 TASK 会把对应 scope 的文件路径重定向到 public/ 下的真实资产，
- * 并在必要时追加 scope 专属的更深层不变量（如「恰好 34 个省级行政区」）。
+ * 损坏资产。sources/provinces/places/political scope 当前指向 tests/fixtures/legal 下的代表夹具
+ * （对应生产资产尚未交付，由后续 TASK 接入）；terrain scope 自 TASK-003 起改为校验 public/ 下的
+ * 生产高程资产，并追加 scope 专属的更深层不变量（位深/尺寸/地势抽样，见 terrain-deep.ts）。
  *
  * 依赖方向：本脚本属于离线资产生产/校验层（scripts/，devDependency tsx 运行），
- * 只单向依赖 src/geo-contracts 契约层；不进入浏览器运行时包，不被 vite 打包。
+ * 只单向依赖 src/geo-contracts 契约层与同层 scripts/dem、scripts/verify-assets 模块；
+ * 不进入浏览器运行时包，不被 vite 打包。
  *
  * 退出码：全部通过为 0；任一失败为 1；参数错误为 2。输出确定性文本，便于 CI 与人工定位。
  */
@@ -22,6 +23,7 @@ import {
   type ContractBundle,
   type ContractKind,
 } from '../../src/geo-contracts/index'
+import { verifyTerrainAsset } from './terrain-deep'
 
 const projectRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
 
@@ -31,17 +33,32 @@ interface AssetProbe {
   readonly expectedKind: ContractKind
 }
 
-/** 单个 scope 的描述：一组待校验文件 + 是否附加跨契约引用核对。 */
+/** 单个 scope 的描述：一组待校验文件 + 是否附加跨契约引用核对，或自定义校验函数。 */
 interface ScopeDescriptor {
   readonly label: string
   readonly probes: readonly AssetProbe[]
   readonly runBundle?: boolean
+  /**
+   * 自定义校验：当某 scope 需要超出「按 kind 校验 JSON」的更深层不变量（如 terrain 的位深/尺寸/
+   * 地势抽样）时提供，返回失败计数。存在时取代默认 probe 循环。probes 仍可保留以参与 bundle 核对。
+   */
+  readonly customVerify?: () => number
 }
 
 /**
+ * 生产高程资产路径（相对项目根）。terrain scope 自 TASK-003 起校验这套生产资产。
+ */
+const PRODUCTION_TERRAIN = {
+  meta: 'public/terrain/china-heightmap-4096.meta.json',
+  raster: 'public/terrain/china-heightmap-4096.r16',
+  provenance: 'public/terrain/china-heightmap-4096.provenance.json',
+  sources: 'public/geo/data-sources.json',
+} as const
+
+/**
  * Scope 注册表。
- * 后续 TASK 新增生产资产时：把对应 scope 的 probes 路径替换/扩展为真实资产路径即可，
- * 无需新建第二条校验管线（避免重复契约/双轨入口）。
+ * 后续 TASK 新增生产资产时：把对应 scope 的 probes 路径替换/扩展为真实资产路径，或追加 customVerify
+ * 即可，无需新建第二条校验管线（避免重复契约/双轨入口）。
  */
 const SCOPE_REGISTRY: Record<string, ScopeDescriptor> = {
   sources: {
@@ -49,8 +66,9 @@ const SCOPE_REGISTRY: Record<string, ScopeDescriptor> = {
     probes: [{ path: 'tests/fixtures/legal/data-sources.json', expectedKind: 'data-source-registry' }],
   },
   terrain: {
-    label: '地形元数据',
-    probes: [{ path: 'tests/fixtures/legal/terrain.meta.json', expectedKind: 'terrain-meta' }],
+    label: '生产高程资产（深度校验：位深/尺寸/编码/地势抽样/来源）',
+    probes: [],
+    customVerify: verifyProductionTerrain,
   },
   provinces: {
     label: '省级行政区（目录 + 几何）',
@@ -140,8 +158,97 @@ function addToBundle(bundle: ContractBundle, kind: ContractKind, payload: unknow
   }
 }
 
+/**
+ * 读取 .r16 裸字节并解码为小端 uint16 像素数组，同时回传原始字节。
+ * 故意不按元数据 width/height 截断——把「实际像元数」原样交给 verifyTerrainAsset，
+ * 让「栅格尺寸与元数据一致」这条不变量在 CLI 路径也能被真正检查（而非恒真）。
+ * 原始字节（bytes）与 .r16 落盘字节同源，供 verifyTerrainAsset 复算 SHA-256 防篡改锚点。
+ */
+function readRasterPixelsLittleEndian(relativePath: string): { bytes: Uint8Array; pixels: Uint16Array } {
+  const absolute = resolve(projectRoot, relativePath)
+  const bytes = readFileSync(absolute)
+  if (bytes.length % 2 !== 0) {
+    throw new Error(`栅格字节长度 ${bytes.length} 非偶数，无法按 uint16 解码：${relativePath}`)
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const pixels = new Uint16Array(bytes.length / 2)
+  for (let i = 0; i < pixels.length; i++) {
+    pixels[i] = view.getUint16(i * 2, true)
+  }
+  return { bytes, pixels }
+}
+
+/**
+ * 生产高程资产深度校验（TASK-003 terrain scope）。
+ * 加载元数据、栅格、来源注册表与审计 sidecar，调用 verifyTerrainAsset 一次性给出
+ * 位深/尺寸/编码/地势抽样/来源的全部结论，并打印抽样摘要便于人工读图。
+ */
+function verifyProductionTerrain(): number {
+  console.log('▶ 校验 scope：terrain（生产高程资产 · 深度校验）')
+  let failures = 0
+  let meta: unknown
+  let sources: unknown
+  let pixels: Uint16Array
+  let rasterBytes: Uint8Array
+  let width = 0
+  let height = 0
+  let provenance: unknown = undefined
+  try {
+    meta = readJsonFile(PRODUCTION_TERRAIN.meta)
+    sources = readJsonFile(PRODUCTION_TERRAIN.sources)
+    const raster = readRasterPixelsLittleEndian(PRODUCTION_TERRAIN.raster)
+    pixels = raster.pixels
+    rasterBytes = raster.bytes
+    const resolution = (meta as { resolution?: { widthPixels?: number; heightPixels?: number } }).resolution
+    width = resolution?.widthPixels ?? 0
+    height = resolution?.heightPixels ?? 0
+    provenance = readJsonFile(PRODUCTION_TERRAIN.provenance)
+  } catch (cause) {
+    failures++
+    console.error(`  ✗ 生产高程资产文件读取失败：${(cause as Error).message}`)
+    return failures
+  }
+
+  const outcome = verifyTerrainAsset({
+    meta,
+    pixels,
+    width,
+    height,
+    sourcesRegistry: sources,
+    provenance,
+    rasterBytes,
+  })
+  if (outcome.ok) {
+    console.log(`  ✓ ${PRODUCTION_TERRAIN.meta}（元数据契约通过）`)
+    console.log(`  ✓ ${PRODUCTION_TERRAIN.raster}（位深 ${outcome.samples.distinctCodes} 个不同编码，16 位精度保持）`)
+    console.log(
+      `  · 抽样（米）：青藏 ${outcome.samples.tibetanMeters.toFixed(0)} / 东部 ${outcome.samples.easternMeters.toFixed(0)} / ` +
+        `四川盆地 ${outcome.samples.sichuanBasinMeters.toFixed(0)} / 周边山地 ${outcome.samples.sichuanSurroundingsMeters.toFixed(0)} / ` +
+        `东海陆架 ${outcome.samples.eastChinaSeaShelfMeters.toFixed(0)} / 南海深海 ${outcome.samples.southChinaSeaDeepMeters.toFixed(0)}`,
+    )
+    console.log(
+      `  · 编码端点：code=0 → ${outcome.samples.decodedAtZeroCode}m / code=65535 → ${outcome.samples.decodedAtMaxCode}m / ` +
+        `实测 [${outcome.samples.observedMinMeters.toFixed(0)}, ${outcome.samples.observedMaxMeters.toFixed(0)}]`,
+    )
+    console.log('  ✓ 地势抽样不变量通过：青藏高于东部、盆地低于周边、浅海含负高程、深海截断到下限')
+    console.log(
+      `  ✓ ${PRODUCTION_TERRAIN.sources}（来源引用解析）+ ${PRODUCTION_TERRAIN.provenance}（完整性摘要逐项一致：SHA-256 / 字节数 / 统计量）`,
+    )
+  } else {
+    failures++
+    for (const err of outcome.errors) {
+      console.error(`  ✗ [${err.code}] ${err.path}: ${err.message}`)
+    }
+  }
+  return failures
+}
+
 /** 校验单个 scope，返回失败计数。把所有错误一次性打印，避免逐条往复。 */
 function verifyScope(scopeName: string, descriptor: ScopeDescriptor): number {
+  // 自定义校验（如 terrain 的深度校验）取代默认 probe 循环。
+  if (descriptor.customVerify) {
+    return descriptor.customVerify()
+  }
   console.log(`▶ 校验 scope：${scopeName}（${descriptor.label}）`)
   let failures = 0
 

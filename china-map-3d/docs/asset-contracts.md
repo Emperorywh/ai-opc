@@ -129,10 +129,16 @@ public/ 静态资产（fetch 本地文件，无外网）
 
 ---
 
-## 7. 当前状态（骨架阶段）
+## 7. 当前状态
 
 - 已交付：契约层、验证入口、测试基线、代表夹具（legal + broken）、本文档。
-- 尚未交付：真实生产资产（DEM heightmap、34 省边界、省会点位、九段线/岛礁），
-  由后续 TASK-002 ~ TASK-006 产出并接入各 scope。
+- 已交付生产资产（TASK-003）：`public/terrain/china-heightmap-4096.{r16,meta.json,provenance.json}`
+  + `public/geo/data-sources.json`（来源 `src-etopo1-noaa`）。terrain scope 已接入**资产级深度校验**
+  （位深/尺寸/编码/地势抽样/来源审计，见 `scripts/verify-assets/terrain-deep.ts`）；`provenance.integrity`
+  的六项摘要（rasterBytes / sha256 / distinctCodes / observedMinMeters / observedMaxMeters /
+  clampedToMinCount）由校验侧逐项复算比对，SHA-256 防篡改锚点闭环。重建命令与**分辨率决策**
+  （0.5° ETOPO1 被接受为 TASK-003 契约产物，视觉升级推迟到 TASK-004 依据 GPU 渲染判定）见
+  `scripts/dem/README.md` §1A / §1B。
+- 尚未交付：34 省边界、省会点位、九段线/岛礁等生产资产，由后续 TASK-004 ~ TASK-006 产出并接入各 scope。
 - 当前 `version` 仅有 `1.0.0`；后续如更换 DEM 源或修正边界，在
   `src/geo-contracts/codes.ts` 的 `KNOWN_DATA_VERSIONS` 登记新版本。

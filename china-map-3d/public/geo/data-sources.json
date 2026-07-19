@@ -1,0 +1,16 @@
+{
+  "kind": "data-source-registry",
+  "version": "1.0.0",
+  "sources": [
+    {
+      "id": "src-etopo1-noaa",
+      "name": "NOAA ETOPO1 全球地形（经 Open Topo Data 取数）",
+      "originUrl": "https://ngdc.noaa.gov/mgg/global/global.html",
+      "kind": "digitalElevationModel",
+      "isOfficialSurvey": false,
+      "version": "ETOPO1 Ice Surface v2.2 / 经 Open Topo Data etopo1 端点抽样",
+      "license": "NOAA NCEI 公共领域数据",
+      "disclaimer": "ETOPO1 为公开科学地形数据集（含陆地高程与海洋水深），非中国官方审图数据；本资产经粗分辨率抽样后重采样到 4096²，仅供内部展示，公开发布前须取得自然资源主管部门审图号。"
+    }
+  ]
+}
