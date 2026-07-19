@@ -1,7 +1,8 @@
 /**
  * 中国 3D 地势大屏场景装配（TASK-009 资产 / 配置 / 渲染分层；TASK-011 受约束相机；
  * TASK-012 深色氛围照明与背景层次；TASK-013 动态海面；TASK-014 省级贴地边界；
- * TASK-015 十段线与岛礁点位；TASK-016 省名 / 省会光点 / 岛礁名称标注 + 离线字体子集）。
+ * TASK-015 十段线与岛礁点位；TASK-016 省名 / 省会光点 / 岛礁名称标注 + 离线字体子集；
+ * TASK-017 标签地形遮挡淡化——由 PlaceLabelsLayer 构造地形世界 y 采样器注入 PlaceLabels）。
  *
  * 角色与依赖方向（清晰的场景装配边界，TASK-009 输出约束「资产访问、领域计算、渲染和 DOM overlay
  * 不能混成巨型组件」）：
@@ -111,6 +112,7 @@ import {
   preparePlaceLabels,
   type PlaceLabelPrepConfig,
 } from '../lib/place-labels'
+import type { TerrainWorldYSampler } from '../lib/label-occlusion'
 import type {
   AdministrativeGeometryContract,
   PlaceDirectoryContract,
@@ -446,13 +448,16 @@ function useLabelFontManifest(): LabelFontManifestState {
  * 2. 调领域纯函数 preparePlaceLabels（投影 + 贴地 / 浮高 + 红线断言）产出 PreparedPlaceLabels。
  * 3. collectAllLabelDomainStrings 从地点 / 政治契约提取字体必须覆盖的全部领域字符串。
  * 4. validateLabelFontCoverage 断言字体清单 ⊇ 领域字符串（缺字即 coverage-incomplete）。
- * 5. 覆盖校验通过则交 PlaceLabels 渲染（Billboard Text + 发光光点，始终面向相机）。
+ * 5. 由 provider + k 构造 terrainQuery（TASK-017 地形世界 y 采样器，遮挡判定用）。
+ * 6. 覆盖校验通过则交 PlaceLabels 渲染（Billboard Text + 发光光点，始终面向相机）+ 注入 terrainQuery
+ *    使省名 / 岛礁名标签按地形遮挡淡化（TASK-017）。
  *
  * 准备 / 覆盖期异常（角色-配对失衡 / 点名岛礁缺项 / 投影 / 高程查询失败 / 字体缺字）被捕获并 console.error
  * 记录后跳过标签——不崩溃场景（地形 / 海面 / 省界 / 十段线 / 相机 / 氛围继续有效，符合 TASK-016 回退边界）。
  *
  * memo 边界：provider 仅依赖 heightmap；labels 依赖 place + political + provider + k + prepConfig；
- * coverage 依赖 labels + manifest。k 切换时 labels 确定性重算（浮高 / 贴地随 k 变化）——离散切换一次性开销。
+ * coverage 依赖 labels + manifest；terrainQuery（TASK-017 遮挡采样器）依赖 provider + k。k 切换时 labels
+ * 与 terrainQuery 确定性重算（浮高 / 贴地 / 地形世界 y 随 k 变化）——离散切换一次性开销。
  */
 function PlaceLabelsLayer({
   heightmap,
@@ -484,6 +489,20 @@ function PlaceLabelsLayer({
     }),
     [],
   )
+
+  // 地形世界 y 采样器（TASK-017 标签遮挡判定用）：把共享 ElevationProvider 的真实米制高程经夸张系数 k
+  // 还原为世界地形 y = h·k（与 GPU 位移同一公式），供 PlaceLabels 的遮挡层沿「标签→相机」射线采样。
+  // provider 未就绪时返回 null（遮挡层据此不发射线、标签保持默认可见——生命周期守护）。闭包不分配大
+  // 对象：每次调用只走 provider.queryAtWorld（返回判别联合，失败即 null）。provider / k 变化时重建闭包。
+  const terrainQuery = useMemo<TerrainWorldYSampler | null>(() => {
+    if (provider === null) return null
+    const k = exaggeration
+    return (worldX: number, worldZ: number): number | null => {
+      const query = provider.queryAtWorld(worldX, worldZ)
+      if (!query.ok) return null
+      return query.meters * k
+    }
+  }, [provider, exaggeration])
 
   // 准备 + 覆盖校验：任一输入未就绪返回 notReady；准备 / 覆盖异常捕获、记录、跳过标签不崩溃场景。
   const result = useMemo(() => {
@@ -524,7 +543,7 @@ function PlaceLabelsLayer({
   }, [heightmap, places, political, fontManifest, provider, exaggeration, prepConfig])
 
   if (!result.ok) return null
-  return <PlaceLabels labels={result.labels} />
+  return <PlaceLabels labels={result.labels} terrainQuery={terrainQuery} />
 }
 
 /** ChinaMapScreen 的 props：允许注入配置（默认生产配置），便于低资源环境改用测试配置。 */
