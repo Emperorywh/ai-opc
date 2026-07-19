@@ -21,6 +21,16 @@
  * 加载失败语义（绝不静默退化为平面 fallback，TASK-009 实现约束「没有 8 位降级、临时平面 fallback」）：
  * - 元数据不通过契约校验、字节长度与分辨率不符、fetch 失败：抛错（带稳定信息），由上层在加载期暴露，
  *   不返回「平地纹理」伪结果——平地 fallback 会把「看不到起伏」伪装成「成功」，违反 TASK 验收。
+ *
+ * 共享 CPU 高程事实源（TASK-014 省/界贴地；SPEC §3.6「运行时须将 heightmap 解码为一份 CPU 侧数组…
+ * 供边界 densification / 遮挡射线 / 海面以下判定共用」）：
+ * - 本加载器在构造 GPU 纹理时已用 decodeHeightmapBytes 把 .r16 解码为一份 Uint16Array（16 位高程的唯一
+ *   CPU 表示，约 32MB）。把它一并返回（pixels 字段），使上层（ChinaMapScreen）能用 createElevationProvider
+ *   包装出共享 ElevationProvider（TASK-008），供省界贴地 densify（src/lib/province-borders）等 CPU 消费者
+ *   查询与 GPU 同一份高程事实源——零额外取数、零额外解码、零额外 32MB（pixels 即构造纹理时已解码的那份，
+ *   小端主机上是源字节缓冲的零拷贝视图）。GPU 纹理（float 归一化）与 CPU pixels（uint16）是同一源的两种
+ *   表示（SPEC §3.6「GPU 位移用的纹理是另一份」指表示不同，非各自取数）。回退 TASK-014 仅不再消费 pixels，
+ *   该字段对地形渲染无害（TASK-014 回退边界）。
  */
 
 import * as THREE from 'three'
@@ -28,10 +38,17 @@ import { validateTerrainMeta } from '../geo-contracts'
 import type { TerrainMetaContract } from '../geo-contracts'
 import { decodeHeightmapBytes } from '../lib/elevation'
 
-/** 加载产物：经契约校验的元数据 + 可供 shader 采样的 16 位精度归一化纹理。 */
+/**
+ * 加载产物：经契约校验的元数据 + 可供 shader 采样的 16 位精度归一化纹理 + 共享 CPU 高程像素。
+ *
+ * pixels 是构造纹理时已解码的 Uint16Array（16 位高程 CPU 表示），供上层包装为共享 ElevationProvider，
+ * 供省界贴地等 CPU 消费者与 GPU 共用同一份高程事实源（零额外取数 / 解码 / 内存）。
+ */
 export interface HeightmapTextureLoadResult {
   readonly meta: TerrainMetaContract
   readonly texture: THREE.DataTexture
+  /** 16 位高程像素（行 0=北、列 0=西、小端 uint16），与 GPU 纹理同一源、供 CPU 高程查询复用。 */
+  readonly pixels: Uint16Array
 }
 
 /** 加载期失败的稳定错误码（含 fetch / 元数据 / 字节长度三类根因）。 */
@@ -172,7 +189,8 @@ export async function loadHeightmapTexture(
   }
 
   // 复用运行时高程层的唯一 16 位小端解码入口；全程零 8 位浏览器图像解码。
+  // pixels 同时用于构造 GPU 纹理（下面）与一并返回供上层包装共享 CPU ElevationProvider（TASK-014）。
   const pixels = decodeHeightmapBytes(bytes, expectedPixels)
   const texture = buildHeightmapDataTexture(meta, pixels)
-  return { meta, texture }
+  return { meta, texture, pixels }
 }
