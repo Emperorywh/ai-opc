@@ -41,6 +41,7 @@ import { SEA_SURFACE_CONFIG } from '../config/sea-surface'
 import { SCENE_ATMOSPHERE_CONFIG, hexToShaderFloat3 } from '../config/scene-atmosphere'
 import { ENTRANCE_DURATIONS } from '../config/entrance'
 import { computeSceneLayerOpacity, type EntranceFrame } from '../lib/entrance-state'
+import type { RuntimeFrame } from '../lib/runtime-lifecycle'
 import { SEA_SURFACE_FRAGMENT_SHADER, SEA_SURFACE_VERTEX_SHADER } from './sea-surface-shaders'
 
 /**
@@ -57,6 +58,13 @@ export interface SeaSurfaceProps {
    * 海面加载完成即直接可见（回退边界）。
    */
   readonly entranceFrame?: RefObject<EntranceFrame> | null
+  /**
+   * 共享运行时帧（TASK-022 集中编排）。注入时每帧先检查 runtimeFrame.paused：context-lost / restoring 期间
+   * 冻结 uTime / uOpacity（不推进波动 / 不改透明度），使水面在 context 异常期间静止、恢复后继续。水面波动为
+   * 周期性 sin，恢复时 uTime 直接接续 R3F 共享 clock（相位跳变不可感知，无需偏移追踪）。未注入（回退 TASK-022）
+   * 时不检查暂停、水面始终推进（回退边界）。
+   */
+  readonly runtimeFrame?: RefObject<RuntimeFrame> | null
 }
 
 /**
@@ -65,7 +73,7 @@ export interface SeaSurfaceProps {
  * 海面参数全部来自冻结的 SEA_SURFACE_CONFIG（海面参数唯一源）与 SCENE_ATMOSPHERE_CONFIG
  * （雾参数唯一源）；entranceFrame 仅调制入场淡入透明度（单一显式状态流驱动，非组件私设计时器）。
  */
-export function SeaSurface({ entranceFrame = null }: SeaSurfaceProps = {}): ReactNode {
+export function SeaSurface({ entranceFrame = null, runtimeFrame = null }: SeaSurfaceProps = {}): ReactNode {
   const { colorHex, opacity, planeLayout, segments, waves } = SEA_SURFACE_CONFIG
 
   // uniforms 挂载期一次构造（useMemo 空依赖）：唯一时间输入 uTime + 静态 color/opacity/wave/fog 参数。
@@ -106,6 +114,12 @@ export function SeaSurface({ entranceFrame = null }: SeaSurfaceProps = {}): Reac
   // 单一显式状态流（共享入场帧）派生，非本组件私设计时器——与 uTime 同一 useFrame、同一共享 clock。
   // entranceFrame 未注入时 uOpacity 保持配置基线值（回退 TASK-020：海面加载完成即直接可见）。
   useFrame((state) => {
+    // 运行时暂停（TASK-022 集中编排）：context-lost / restoring 期间冻结 uTime / uOpacity——不推进波动、
+    // 不改透明度，水面静止。paused 由 RuntimeLifecycleController 单点写入 runtimeFrame，本组件只读消费
+    // （不监听 context 事件）。恢复后下一帧直接接续 R3F 共享 clock（sin 周期相位跳变不可感知）。
+    if (runtimeFrame !== null && runtimeFrame !== undefined && runtimeFrame.current.paused) {
+      return
+    }
     uniforms.uTime.value = state.clock.getElapsedTime()
     if (entranceFrame !== null && entranceFrame !== undefined) {
       const frame = entranceFrame.current

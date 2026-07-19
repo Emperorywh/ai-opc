@@ -365,3 +365,54 @@
   opacity: 0.75;
   line-height: 1.35;
 }
+
+/*
+ * 运行时恢复状态诊断 overlay（TASK-022，SPEC §7.4 大屏长时间运行稳定性）。
+ *
+ * context-lost / restoring / restore-failed 期间的全屏半透明覆盖，告知用户「图形上下文恢复中」或「恢复失败 +
+ * 可诊断原因」。与 Loader（TASK-020 加载 / 入场反馈）同款半透明深色面板 + 居中卡片，视觉一致。pointer-events:none
+ * ——诊断覆盖层不阻挡画布交互（恢复后画布立即可操作）；仅 restore-failed 用 role=alert 强调需人工介入。
+ */
+.china-map-runtime {
+  pointer-events: none;
+  color: #c7d0e0;
+}
+
+.china-map-runtime--full {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(5, 8, 15, 0.86);
+}
+
+.china-map-runtime-title {
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  color: #dfe7f2;
+}
+
+.china-map-runtime-detail {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.china-map-runtime-error {
+  max-width: 70vw;
+  padding: 8px 14px;
+  background: rgba(60, 20, 24, 0.5);
+  border: 1px solid rgba(200, 80, 80, 0.5);
+  border-radius: 6px;
+  color: #ffb4b4;
+  font-size: 13px;
+  text-align: center;
+  word-break: break-word;
+}
+
+.china-map-runtime-hint {
+  font-size: 12px;
+  opacity: 0.6;
+}

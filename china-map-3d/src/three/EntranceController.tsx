@@ -20,6 +20,11 @@
  * - 无 new THREE.Clock()、无 setInterval / setTimeout：唯一时钟是 R3F 的共享 clock（与海面波动 SeaSurface、
  *   标签遮挡 PlaceLabels 的 useFrame 同源），无独立漂移时钟。
  *
+ * 运行时暂停（TASK-022 集中编排）：注入共享 runtimeFrame 时，本组件每帧先检查 runtimeFrame.paused。
+ *   context-lost / restoring 期间 paused=true，本组件冻结入场 elapsed（不派生 / 不写 entranceFrame，保留暂停前
+ *   最后一帧），并把暂停时长折叠进起始时刻偏移，使恢复后入场从原位继续、无跳变。本组件**不**监听 context
+ *   事件——paused 由 RuntimeLifecycleController 单点写入 runtimeFrame，本组件只读消费（集中编排契约）。
+ *
  * 阶段切换回调（驱动 DOM 与相机锁，非每帧）：
  * - 阶段切换约 4 次（loading→terrain-rise→labels-fade-in→scene-layers-fade-in→interactive，或 loading→error），
  *   仅在切换帧回调 onPhaseChange，使 ChinaMapScreen 以普通 React state 更新 DOM 加载文本与相机 enabled——
@@ -42,6 +47,7 @@ import {
   type EntranceFrame,
   type EntrancePhase,
 } from '../lib/entrance-state'
+import type { RuntimeFrame } from '../lib/runtime-lifecycle'
 
 /** EntranceController 的 props：资产就绪状态 + 阶段切换回调 + 共享入场帧 ref（上层创建并下发）。 */
 export interface EntranceControllerProps {
@@ -51,6 +57,12 @@ export interface EntranceControllerProps {
   readonly onPhaseChange: (phase: EntrancePhase) => void
   /** 共享入场帧 ref：本组件每帧写入 phase + elapsed，各渲染层 useFrame 只读消费。 */
   readonly entranceFrame: RefObject<EntranceFrame>
+  /**
+   * 共享运行时帧（TASK-022 集中编排）。注入时本组件每帧先检查 runtimeFrame.paused：context-lost / restoring
+   * 期间冻结入场 elapsed（不推进视觉状态），并把暂停时长折叠进起始时刻偏移，使恢复后入场从原位继续、
+   * 无跳变。未注入（回退 TASK-022）时不检查暂停、入场始终推进（回退边界）。
+   */
+  readonly runtimeFrame?: RefObject<RuntimeFrame> | null
 }
 
 /**
@@ -63,12 +75,16 @@ export function EntranceController({
   readiness,
   onPhaseChange,
   entranceFrame,
+  runtimeFrame = null,
 }: EntranceControllerProps): ReactNode {
   // 入场起始时刻（R3F 共享 clock 的 getElapsedTime()，秒）；null=尚未捕获（资产未全部就绪）。
   // useRef 在 StrictMode 重挂载下保持同一对象（同 fiber），故起始时刻只捕获一次、动画只启动一次。
   const startClockRef = useRef<number | null>(null)
   // 上一次回调的阶段（用于检测阶段切换、仅切换帧回调 onPhaseChange）。初值与首帧派生一致以避免冗余回调。
   const lastPhaseRef = useRef<EntrancePhase>(readiness.failed ? 'error' : 'loading')
+  // 运行时暂停追踪（TASK-022）：暂停开始时刻（R3F 共享 clock 秒）；null=未暂停。
+  // 恢复时把「暂停时长」折叠进 startClockRef（起始时刻后移暂停时长），使入场 elapsed 从原位继续、无跳变。
+  const pauseStartRef = useRef<number | null>(null)
 
   // 单一帧循环（R3F 共享 clock）：派生入场 elapsed + 阶段，原地写共享帧的两个标量字段，阶段切换时回调。
   // 每帧只读 clock、**原地改写** entranceFrame.current 的 phase / elapsedSeconds 两个标量——零对象分配
@@ -76,6 +92,27 @@ export function EntranceController({
   // 与仓库其余 useFrame 热循环（SeaSurface「原始数字赋值，不创建新对象」等）一致，避免 24h 大屏的 GC 抖动。
   useFrame((state) => {
     const clockNow = state.clock.getElapsedTime()
+
+    // 运行时暂停（TASK-022）：context-lost / restoring 期间冻结入场推进。注入 runtimeFrame 时检查 paused：
+    // 进入暂停记录起始（仅一次）；暂停期间直接 return（不派生 / 不写 entranceFrame），entranceFrame 保留
+    // 暂停前最后一帧的值——各渲染层据此保持冻结画面（地形 rise / 标签 / 水面边界透明度不变）。
+    if (runtimeFrame !== null && runtimeFrame.current.paused) {
+      if (pauseStartRef.current === null) {
+        pauseStartRef.current = clockNow
+      }
+      return
+    }
+    // 恢复（paused 由 true→false）：把暂停时长折叠进起始时刻偏移，使 elapsed 从原位继续。
+    // startClockRef 已捕获（入场进行中 / 完成）时后移暂停时长；未捕获（loading 期间暂停）时无需调整
+    // （起始尚未捕获，elapsed 仍为 0）。pauseStartRef 清零，下次暂停重新记录。
+    if (pauseStartRef.current !== null) {
+      const pausedFor = clockNow - pauseStartRef.current
+      if (startClockRef.current !== null) {
+        startClockRef.current += pausedFor
+      }
+      pauseStartRef.current = null
+    }
+
     // 幂等起始捕获：仅在「起始未捕获 && 资产全部就绪 && 无失败」的首帧写一次。
     // 失败时永不捕获（条件含 !failed）→ elapsed 恒 0 → error 终态下入场动画不继续。
     if (startClockRef.current === null && readiness.ready && !readiness.failed) {
