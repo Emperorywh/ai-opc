@@ -1,0 +1,23 @@
+{
+  "kind": "administrative-geometry",
+  "version": "1.0.0",
+  "crs": "EPSG:4326",
+  "features": [
+    {
+      "adminId": "CN-GD",
+      "geometry": {
+        "type": "Polygon",
+        "rings": [
+          [
+            { "lon": 200, "lat": 21.5 },
+            { "lon": 117.2, "lat": 21.5 },
+            { "lon": 117.2, "lat": 25.5 }
+          ]
+        ]
+      }
+    }
+  ],
+  "source": {
+    "sourceId": "src-datav-provinces"
+  }
+}

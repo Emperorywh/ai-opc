@@ -1,0 +1,46 @@
+{
+  "kind": "data-source-registry",
+  "version": "1.0.0",
+  "sources": [
+    {
+      "id": "src-copernicus-dem",
+      "name": "Copernicus DEM GLO-30",
+      "originUrl": "https://registry.opendata.aws/copernicus-dem/",
+      "kind": "digitalElevationModel",
+      "isOfficialSurvey": false,
+      "version": "GLO-30 / 2021 release",
+      "license": "Copernicus Public License",
+      "disclaimer": "公开科学 DEM 数据集，非中国官方审图数据；公开发布前须取得自然资源主管部门审图号。"
+    },
+    {
+      "id": "src-datav-provinces",
+      "name": "阿里 DataV.GeoAtlas 省级边界",
+      "originUrl": "https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json",
+      "kind": "administrativeBoundary",
+      "isOfficialSurvey": false,
+      "version": "areas_v3 拉取快照",
+      "license": "DataV.GeoAtlas 使用条款",
+      "disclaimer": "DataV 边界为非官方审图数据，不含九段线/南海岛礁，部分争议区画法非国标；仅供内部展示，不得作为正式出版用途。"
+    },
+    {
+      "id": "src-project-political",
+      "name": "项目自补九段线与南海岛礁（衍生）",
+      "originUrl": "offline://project-maintained/ten-dash-and-islands.json",
+      "kind": "politicalBoundarySupplement",
+      "isOfficialSurvey": false,
+      "version": "项目维护草稿 v1",
+      "license": "内部",
+      "disclaimer": "项目自行维护的政治边界补充数据，坐标取自公开标准地图衍生数据，非官方审图数据；正式发布以自然资源主管部门审图为准。"
+    },
+    {
+      "id": "src-project-capitals",
+      "name": "项目维护省级行政中心目录",
+      "originUrl": "offline://project-maintained/province-capitals.json",
+      "kind": "placeGazetteer",
+      "isOfficialSurvey": false,
+      "version": "项目维护草稿 v1",
+      "license": "内部",
+      "disclaimer": "项目维护的省会/首府/直辖市中心/特别行政区中心目录，非官方审图数据；仅供内部展示，发布前须审图。"
+    }
+  ]
+}

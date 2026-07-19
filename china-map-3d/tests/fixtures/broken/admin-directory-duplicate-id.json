@@ -1,0 +1,24 @@
+{
+  "kind": "administrative-directory",
+  "version": "1.0.0",
+  "entries": [
+    {
+      "id": "CN-GD",
+      "name": "广东省",
+      "type": "province"
+    },
+    {
+      "id": "CN-GD",
+      "name": "广东（重复）",
+      "type": "province"
+    },
+    {
+      "id": "CN-HI",
+      "name": "海南省",
+      "type": "province"
+    }
+  ],
+  "source": {
+    "sourceId": "src-datav-provinces"
+  }
+}

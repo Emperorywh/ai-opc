@@ -1,0 +1,54 @@
+{
+  "kind": "political-boundary",
+  "version": "1.0.0",
+  "crs": "EPSG:4326",
+  "features": [
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 1,
+      "coordinates": [
+        { "lon": 121.0, "lat": 24.5 },
+        { "lon": 121.5, "lat": 22.5 },
+        { "lon": 122.0, "lat": 20.5 }
+      ]
+    },
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 10,
+      "coordinates": [
+        { "lon": 117.0, "lat": 6.0 },
+        { "lon": 116.0, "lat": 5.0 },
+        { "lon": 115.0, "lat": 4.0 }
+      ]
+    },
+    {
+      "type": "islandOrReefPoint",
+      "name": "曾母暗沙",
+      "coordinate": { "lon": 112.30, "lat": 3.58 }
+    },
+    {
+      "type": "islandOrReefPoint",
+      "name": "钓鱼岛",
+      "coordinate": { "lon": 123.46, "lat": 25.75 }
+    },
+    {
+      "type": "disputedBoundaryCorrection",
+      "targetRegion": "藏南",
+      "geometry": {
+        "type": "Polygon",
+        "rings": [
+          [
+            { "lon": 92.0, "lat": 27.0 },
+            { "lon": 97.0, "lat": 27.0 },
+            { "lon": 97.0, "lat": 29.5 },
+            { "lon": 92.0, "lat": 29.5 }
+          ]
+        ]
+      },
+      "basis": "按中国主张画法补充藏南范围，来源为公开标准地图衍生数据，非官方审图。"
+    }
+  ],
+  "source": {
+    "sourceId": "src-project-political"
+  }
+}

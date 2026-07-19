@@ -1,0 +1,53 @@
+{
+  "kind": "place-directory",
+  "version": "1.0.0",
+  "crs": "EPSG:4326",
+  "entries": [
+    {
+      "id": "place-gd-anchor",
+      "adminId": "CN-GD",
+      "role": "provinceNameAnchor",
+      "name": "广东",
+      "coordinate": { "lon": 113.4, "lat": 23.5 }
+    },
+    {
+      "id": "place-gd-capital",
+      "adminId": "CN-GD",
+      "role": "administrativeCapital",
+      "name": "广州",
+      "coordinate": { "lon": 113.27, "lat": 23.13 }
+    },
+    {
+      "id": "place-hi-anchor",
+      "adminId": "CN-HI",
+      "role": "provinceNameAnchor",
+      "name": "海南",
+      "coordinate": { "lon": 109.7, "lat": 19.1 },
+      "anchorAdjustmentNote": "几何中心偏居中部山地，锚点人工定位到北部人口聚集带以便标签可读。"
+    },
+    {
+      "id": "place-hi-capital",
+      "adminId": "CN-HI",
+      "role": "administrativeCapital",
+      "name": "海口",
+      "coordinate": { "lon": 110.32, "lat": 20.04 }
+    },
+    {
+      "id": "place-mo-anchor",
+      "adminId": "CN-MO",
+      "role": "provinceNameAnchor",
+      "name": "澳门",
+      "coordinate": { "lon": 113.55, "lat": 22.16 }
+    },
+    {
+      "id": "place-mo-capital",
+      "adminId": "CN-MO",
+      "role": "administrativeCapital",
+      "name": "澳门",
+      "coordinate": { "lon": 113.55, "lat": 22.16 }
+    }
+  ],
+  "source": {
+    "sourceId": "src-project-capitals"
+  }
+}

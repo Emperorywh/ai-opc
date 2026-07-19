@@ -1,0 +1,5 @@
+# pnpm 构建脚本许可（pnpm 11+ 通过此文件管理 postinstall 白名单）。
+# esbuild 是 vitest/tsx 的间接依赖（devDependency），其 postinstall 仅校验本地原生二进制；
+# 允许后可消除 ERR_PNPM_IGNORED_BUILDS。该依赖不进入浏览器运行时包。
+allowBuilds:
+  esbuild: true

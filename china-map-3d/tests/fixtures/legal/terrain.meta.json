@@ -1,0 +1,26 @@
+{
+  "kind": "terrain-meta",
+  "version": "1.0.0",
+  "crs": "EPSG:3857",
+  "geographicExtent": {
+    "crs": "EPSG:4326",
+    "west": 72,
+    "south": 3,
+    "east": 136,
+    "north": 54
+  },
+  "resolution": {
+    "widthPixels": 4096,
+    "heightPixels": 4096
+  },
+  "elevationEncoding": {
+    "minValueMeters": -1500,
+    "maxValueMeters": 9000,
+    "bitDepth": 16,
+    "encoding": "linear-unsigned-integer",
+    "outOfRangePolicy": "clamp-to-range"
+  },
+  "source": {
+    "sourceId": "src-copernicus-dem"
+  }
+}
