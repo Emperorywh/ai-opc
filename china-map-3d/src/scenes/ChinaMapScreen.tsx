@@ -86,6 +86,7 @@ import { SeaSurface } from '../three/SeaSurface'
 import { ProvinceBorders } from '../three/ProvinceBorders'
 import { PoliticalFeatures } from '../three/PoliticalFeatures'
 import { PlaceLabels } from '../three/PlaceLabels'
+import { ProvinceHoverPicker } from '../three/ProvinceHoverPicker'
 import { MapOrbitControls } from '../three/MapOrbitControls'
 import { SceneAtmosphere } from '../three/SceneAtmosphere'
 import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from '../three/camera-constraints'
@@ -218,10 +219,12 @@ function ProvinceBordersLayer({
   heightmap,
   geometry,
   exaggeration,
+  hoveredAdminId,
 }: {
   readonly heightmap: HeightmapState
   readonly geometry: ProvinceGeometryState
   readonly exaggeration: number
+  readonly hoveredAdminId: string | null
 }): null | ReactNode {
   // 所有 Hook 必须无条件调用（react-hooks/rules-of-hooks）：就绪判定移入 Hook 内部，不在 Hook 前 early return。
   // 由 heightmap 的 meta + pixels 构造共享 ElevationProvider（pixels 即取数时已解码的 Uint16Array，零额外内存）。
@@ -261,7 +264,7 @@ function ProvinceBordersLayer({
   }, [heightmap, geometry, provider, exaggeration, prepConfig])
 
   if (!result.ok) return null
-  return <ProvinceBorders borders={result.borders} />
+  return <ProvinceBorders borders={result.borders} hoveredAdminId={hoveredAdminId} />
 }
 
 /** 政治边界补充契约加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为空契约——红线完整性）。 */
@@ -465,12 +468,14 @@ function PlaceLabelsLayer({
   political,
   fontManifest,
   exaggeration,
+  hoveredAdminId,
 }: {
   readonly heightmap: HeightmapState
   readonly places: PlaceDirectoryState
   readonly political: PoliticalBoundaryState
   readonly fontManifest: LabelFontManifestState
   readonly exaggeration: number
+  readonly hoveredAdminId: string | null
 }): null | ReactNode {
   // 所有 Hook 必须无条件调用（rules-of-hooks）：就绪判定移入 Hook 内部。
   // 由 heightmap 的 meta + pixels 构造 ElevationProvider（与省界 / 政治要素层各自构造、共享同一份 pixels）。
@@ -543,7 +548,13 @@ function PlaceLabelsLayer({
   }, [heightmap, places, political, fontManifest, provider, exaggeration, prepConfig])
 
   if (!result.ok) return null
-  return <PlaceLabels labels={result.labels} terrainQuery={terrainQuery} />
+  return (
+    <PlaceLabels
+      labels={result.labels}
+      terrainQuery={terrainQuery}
+      hoveredAdminId={hoveredAdminId}
+    />
+  )
 }
 
 /** ChinaMapScreen 的 props：允许注入配置（默认生产配置），便于低资源环境改用测试配置。 */
@@ -577,6 +588,20 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
   // 离线字体清单并行取数（TASK-016）：标签层渲染前据此做字体覆盖校验，缺字即不渲染 + 错误状态。
   const fontManifest = useLabelFontManifest()
 
+  // 省级悬停焦点状态（TASK-018 单一焦点源）：稳定 adminId（CN- 前缀）或 null（无焦点）。这是边界样式与
+  // 标签样式的**唯一**交互输入——ProvinceHoverPicker 把指针命中翻译成 adminId | null 并回调本 setter，
+  // ProvinceBordersLayer / PlaceLabelsLayer 只消费该状态派生各自样式，不再各自拾取。状态以稳定标识表达，
+  // 不保存 Three.js 对象引用 / 中文名匹配 / 多组件布尔组合（TASK-018 实现约束）。
+  const [hoveredAdminId, setHoveredAdminId] = useState<string | null>(null)
+  // 恢复不变量（TASK-018）：geometry 失效（未就绪 / 错误 / 卸载）时显式复位焦点为 null——ProvinceHoverPicker
+  // 在 geometry 未就绪时不渲染（无拾取面），不再回调；若此时焦点残留为某 adminId，会指向已失效的几何，
+  // 故在此复位。仅在 phase 变化时触发（依赖 geometry.phase），非每帧。
+  useEffect(() => {
+    if (geometry.phase !== 'ready') {
+      setHoveredAdminId(null)
+    }
+  }, [geometry.phase])
+
   // 受约束相机的交互启停（TASK-011）：单一显式布尔，当前 = heightmap 就绪。后续入场状态机
   // （升起动画）在此合并「就绪 && 升起完成」即可统一接管，无需改 MapOrbitControls。
   // 加载 / 错误期置 false——尚无可探索地形时锁定相机，避免空场景下的无意义旋转。
@@ -606,13 +631,28 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
         {/*
           省级贴地边界（TASK-014）：heightmap（含 pixels，构造共享 ElevationProvider）与 province geometry 均
           就绪时 densify + 贴地 + 按行政区分组渲染。准备期异常被捕获、跳过省界不崩溃场景（回退边界）。
-          浅青白发光线、NDC 深度偏移抗 z-fighting、与半透明海面共存；按行政区分组供后续 hover 寻址。
+          浅青白发光线、NDC 深度偏移抗 z-fighting、与半透明海面共存；按行政区分组，hoveredAdminId（TASK-018）
+          命中省份加亮加粗、非焦点压暗、无焦点基线（ProvinceBordersLayer 透传 hoveredAdminId 给 ProvinceBorders）。
         */}
         <ProvinceBordersLayer
           heightmap={heightmap}
           geometry={geometry}
           exaggeration={config.exaggeration}
+          hoveredAdminId={hoveredAdminId}
         />
+        {/*
+          省级悬停拾取（TASK-018）：geometry 就绪时挂载不可见拾取面，把指针命中的世界 (x,z) 经 invertWorld
+          反算成 (lon,lat)、再经 findProvinceAtLonLat 裁决所属省份，回调更新单一 hoveredAdminId 状态。该状态是
+          边界 / 标签样式的唯一焦点源——二者只消费，不各自拾取。无 click 行为（只注册 move / out / leave）。
+          geometry 未就绪时不渲染（无几何无法裁决，避免错误焦点）。回退本 TASK 仅移除该拾取面与焦点状态，
+          静态省界 / 标签保持 TASK-017 完成时的行为（TASK-018 回退边界）。
+        */}
+        {geometry.phase === 'ready' && (
+          <ProvinceHoverPicker
+            features={geometry.contract.features}
+            onHoveredProvinceChange={setHoveredAdminId}
+          />
+        )}
         {/*
           十段线与岛礁点位（TASK-015）：heightmap（含 pixels，构造共享 ElevationProvider）与政治边界补充契约
           均就绪时红线完整性校验 + densify + 海平面贴合 + 按段分组渲染。准备期异常（缺段 / 缺点 / 查询失败 /
@@ -638,6 +678,7 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
           political={political}
           fontManifest={fontManifest}
           exaggeration={config.exaggeration}
+          hoveredAdminId={hoveredAdminId}
         />
       </Canvas>
 

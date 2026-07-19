@@ -57,6 +57,7 @@ import { useFrame } from '@react-three/fiber'
 import { Billboard, Text } from '@react-three/drei'
 import * as THREE from 'three'
 import { PLACE_LABELS_CONFIG } from '../config/place-labels'
+import { PROVINCE_HOVER_CONFIG } from '../config/province-hover'
 import { LABEL_OCCLUSION_CONFIG } from '../config/label-occlusion'
 import { computeLabelVisibility } from '../lib/label-occlusion'
 import type { TerrainWorldYSampler } from '../lib/label-occlusion'
@@ -83,16 +84,26 @@ interface TroikaTextLike {
  * 把 TASK-016 的两类 Billboard 文本标签（省名 / 岛礁名）统一成同一结构，使遮挡层可用单一数组、单一
  * useFrame 循环管理它们的 ref / 目标透明度 / 当前透明度（对齐下标），避免两套并行结构。省会光点不参与
  * 遮挡（球体各向同性 + depthTest 已与地形正确遮挡，无 Billboard 文本的遮挡淡化需求）。
+ *
+ * TASK-018 扩展：携带 kind（province / island）与（省名的）adminId，使遮挡层与渲染层可据 hoveredAdminId
+ * 对省名标签施加焦点放大 / 置顶（岛礁名标签不参与 hover——只有省份可悬停）。baseFontSizeMeters /
+ * baseColorHex 保留「无焦点基线态」的字号 / 颜色，焦点态字号 = baseFontSizeMeters × 放大倍率、颜色 =
+ * 焦点提亮色，由渲染层据 hoveredAdminId 在 JSX 中响应式合成。
  */
 interface OcclusionTextLabel {
   readonly key: string
   readonly text: string
   readonly position: readonly [number, number, number]
-  readonly fontSizeMeters: number
-  readonly colorHex: string
+  /** 标签类别：province（省名，可被 hover 焦点放大）或 island（岛礁名，不参与 hover）。 */
+  readonly kind: 'province' | 'island'
+  /** 省名标签的行政区稳定标识（kind='province' 时有效）；岛礁名标签为 null（不参与 hover 寻址）。 */
+  readonly adminId: string | null
+  /** 基线字号（米，无焦点态）。焦点态字号 = 本值 × PROVINCE_HOVER_CONFIG.focusedLabelScale。 */
+  readonly baseFontSizeMeters: number
+  readonly baseColorHex: string
 }
 
-/** PlaceLabels 的 props：只接收领域层准备好的标签 / 光点 + 可选的地形采样器，不取数、不持有交互状态。 */
+/** PlaceLabels 的 props：接收领域层准备好的标签 / 光点 + 可选的地形采样器 + 单一焦点状态，不取数、不持有交互状态。 */
 export interface PlaceLabelsProps {
   /** 领域层 preparePlaceLabels 的产物（省名标签 + 省会光点 + 岛礁名称标签，已贴地 + 浮高）。 */
   readonly labels: PreparedPlaceLabels
@@ -102,6 +113,13 @@ export interface PlaceLabelsProps {
    * 保持 troika 默认完全可见（TASK-017 生命周期处理）。
    */
   readonly terrainQuery?: TerrainWorldYSampler | null
+  /**
+   * 当前悬停焦点行政区的稳定标识（CN- 前缀）或 null（无焦点）。由场景层（ChinaMapScreen）保管的唯一焦点源，
+   * 本组件据此派生焦点省名标签的字号放大 / 置顶透明度 / 提亮色（SPEC §4.2「标签放大并置顶」）。岛礁名标签
+   * 不参与 hover。null 时全部省名标签回到基线字号 / 遮挡透明度（恢复不变量）。本组件不做拾取——拾取由
+   * ProvinceHoverPicker 单点承担，本组件只消费该状态。
+   */
+  readonly hoveredAdminId?: string | null
 }
 
 /**
@@ -134,9 +152,10 @@ function CapitalPoint({ point }: { readonly point: PreparedCapitalPoint }): Reac
  * 移除遮挡判定与透明度反馈：把 terrainQuery 置 null 即恢复 TASK-016 的默认完全可见状态，标签朝向与地点
  * 位置无回归（TASK-017 回退边界）。
  */
-export function PlaceLabels({ labels, terrainQuery }: PlaceLabelsProps): ReactNode {
+export function PlaceLabels({ labels, terrainQuery, hoveredAdminId = null }: PlaceLabelsProps): ReactNode {
   // 合并省名 + 岛礁名为统一的「遮挡文本标签」列表（省会光点不参与遮挡，单独渲染）。
-  // text 原样透传领域层 shortName / 岛礁规范名（本组件不复制中文名表）；颜色 / 字号取自唯一配置源。
+  // text 原样透传领域层 shortName / 岛礁规范名（本组件不复制中文名表）；基线字号 / 基线色取自唯一配置源。
+  // 省名标签携带 adminId（供焦点放大 / 置顶寻址），岛礁名标签 adminId=null（不参与 hover）。
   const textLabels = useMemo<OcclusionTextLabel[]>(() => {
     const list: OcclusionTextLabel[] = []
     for (const label of labels.provinceLabels) {
@@ -144,8 +163,10 @@ export function PlaceLabels({ labels, terrainQuery }: PlaceLabelsProps): ReactNo
         key: `province-name-${label.adminId}`,
         text: label.text,
         position: label.position,
-        fontSizeMeters: PLACE_LABELS_CONFIG.provinceLabelFontSizeMeters,
-        colorHex: PLACE_LABELS_CONFIG.provinceLabelColorHex,
+        kind: 'province',
+        adminId: label.adminId,
+        baseFontSizeMeters: PLACE_LABELS_CONFIG.provinceLabelFontSizeMeters,
+        baseColorHex: PLACE_LABELS_CONFIG.provinceLabelColorHex,
       })
     }
     for (const label of labels.islandLabels) {
@@ -153,8 +174,10 @@ export function PlaceLabels({ labels, terrainQuery }: PlaceLabelsProps): ReactNo
         key: `island-name-${label.name}`,
         text: label.name,
         position: label.position,
-        fontSizeMeters: PLACE_LABELS_CONFIG.islandLabelFontSizeMeters,
-        colorHex: PLACE_LABELS_CONFIG.islandLabelColorHex,
+        kind: 'island',
+        adminId: null,
+        baseFontSizeMeters: PLACE_LABELS_CONFIG.islandLabelFontSizeMeters,
+        baseColorHex: PLACE_LABELS_CONFIG.islandLabelColorHex,
       })
     }
     return list
@@ -230,6 +253,16 @@ export function PlaceLabels({ labels, terrainQuery }: PlaceLabelsProps): ReactNo
         } else if (visibility === 'visible') {
           targets[i] = cfg.visibleOpacity
         }
+        // 样式合成优先级（TASK-018 实现约束「遮挡透明度与 hover 放大必须通过明确优先级合成，不能互相覆盖
+        // 造成闪烁」）：焦点省名标签的透明度目标恒取置顶透明度（1.0，完全可见），覆盖遮挡判定结果——即
+        // 「被悬停的省名标签即使位于山后也保持完全可见（置顶）」，符合 SPEC §4.2「置顶」语义。岛礁名标签
+        // 与非焦点省名标签的透明度目标仍由遮挡判定决定。这是确定性的单一公式（焦点 ? 置顶 : 遮挡目标），
+        // 焦点态与遮挡态不会互相覆盖造成闪烁——每 shouldCheck 帧（遮挡降频）先写遮挡目标，焦点省名标签
+        // 随即被覆盖为置顶目标，下方 next 计算据此阻尼，无两套目标争抢。焦点态字号 / 颜色则在 JSX 中据
+        // hoveredAdminId 响应式合成（hoveredAdminId 变化立即生效），与透明度共同表达「放大置顶」。
+        if (desc.kind === 'province' && desc.adminId !== null && desc.adminId === hoveredAdminId) {
+          targets[i] = PROVINCE_HOVER_CONFIG.focusedLabelOpacity
+        }
       }
       // 每帧指数阻尼当前透明度 → 目标（THREE.MathUtils.damp = lerp(current, target, 1 − exp(−λ·dt))）。
       // 过渡帧率无关（dt 来自统一时钟）、状态确定可恢复。阻尼结果赋给 troika fillOpacity，其
@@ -243,27 +276,41 @@ export function PlaceLabels({ labels, terrainQuery }: PlaceLabelsProps): ReactNo
 
   return (
     <group>
-      {textLabels.map((desc, i) => (
-        <Billboard key={desc.key} position={[desc.position[0], desc.position[1], desc.position[2]]}>
-          {/*
-            ref 回调按 textLabels 下标登记 troika 实例；卸载时 R3F 以 null 回调清空对应槽位（生命周期自动）。
-            fillOpacity 不作为 prop 传入——由上方 useFrame 从第 1 帧起接管（troika 默认 fillOpacity=1.0
-            覆盖首帧，与可见目标一致，故接管无可见跳变）。font 取本地子集路径（场景层已校验覆盖）。
-          */}
-          <Text
-            ref={(el: TroikaTextLike | null) => {
-              textRefs.current[i] = el
-            }}
-            font={PLACE_LABELS_CONFIG.fontPath}
-            fontSize={desc.fontSizeMeters}
-            color={desc.colorHex}
-            anchorX="center"
-            anchorY="middle"
-          >
-            {desc.text}
-          </Text>
-        </Billboard>
-      ))}
+      {textLabels.map((desc, i) => {
+        // 焦点态字号 / 颜色合成（TASK-018 SPEC §4.2「标签放大」）：省名标签在 hoveredAdminId 命中时字号 × 放大
+        // 倍率、颜色取焦点提亮色（比基线更亮，从地形中跳出）；岛礁名标签与非焦点省名标签用基线字号 / 基线色。
+        // fontSize / color 通过 troika Text 的 prop 响应式更新（hoveredAdminId 变化触发 React 重渲染），troika
+        // 仅对该标签重排一次（非逐帧），性能可控。hoveredAdminId 为 null（无焦点）时全部回到基线（恢复不变量）。
+        const isFocusedProvince =
+          desc.kind === 'province' && desc.adminId !== null && desc.adminId === hoveredAdminId
+        const fontSizeMeters = isFocusedProvince
+          ? desc.baseFontSizeMeters * PROVINCE_HOVER_CONFIG.focusedLabelScale
+          : desc.baseFontSizeMeters
+        const colorHex = isFocusedProvince
+          ? PROVINCE_HOVER_CONFIG.focusedLabelColorHex
+          : desc.baseColorHex
+        return (
+          <Billboard key={desc.key} position={[desc.position[0], desc.position[1], desc.position[2]]}>
+            {/*
+              ref 回调按 textLabels 下标登记 troika 实例；卸载时 R3F 以 null 回调清空对应槽位（生命周期自动）。
+              fillOpacity 不作为 prop 传入——由上方 useFrame 从第 1 帧起接管（troika 默认 fillOpacity=1.0
+              覆盖首帧，与可见目标一致，故接管无可见跳变）。font 取本地子集路径（场景层已校验覆盖）。
+            */}
+            <Text
+              ref={(el: TroikaTextLike | null) => {
+                textRefs.current[i] = el
+              }}
+              font={PLACE_LABELS_CONFIG.fontPath}
+              fontSize={fontSizeMeters}
+              color={colorHex}
+              anchorX="center"
+              anchorY="middle"
+            >
+              {desc.text}
+            </Text>
+          </Billboard>
+        )
+      })}
       {labels.capitalPoints.map((point) => (
         <CapitalPoint key={`capital-point-${point.adminId}`} point={point} />
       ))}
