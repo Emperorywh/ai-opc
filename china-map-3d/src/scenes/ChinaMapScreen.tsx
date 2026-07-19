@@ -79,6 +79,7 @@ import {
 import { PROVINCE_BORDERS_CONFIG } from '../config/province-borders'
 import { POLITICAL_FEATURES_CONFIG } from '../config/political-features'
 import { PLACE_LABELS_CONFIG } from '../config/place-labels'
+import { RENDER_BUDGET_CONFIG } from '../config/render-budget'
 import { ChinaTerrainMesh } from '../three/ChinaTerrainMesh'
 import { loadHeightmapTexture } from '../three/load-heightmap-texture'
 import type { HeightmapTextureLoadResult } from '../three/load-heightmap-texture'
@@ -737,6 +738,34 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
   // 故交互只在「入场完成 && 运行正常」时解锁（不会提前 / 重复解锁）。
   const interactionEnabled = isEntranceInteractive(entrancePhase) && runtimePhase === 'running'
 
+  /*
+   * 生产渲染性能预算（TASK-023 性能预算固化，SPEC §7.3 / §7.4、TASK-023 输出与实现约束）：
+   *
+   * DPR 上限：Canvas dpr 取自 RENDER_BUDGET_CONFIG.dprMin / dprMax（= [1, 2]，src/config/render-budget
+   * 唯一事实源）。DPR 上限 2 是结构性决定：4K × DPR 2 的绘制缓冲是大屏独显的合理上限，DPR 大于 2 会把
+   * 绘制缓冲与显存带宽推到边际收益递减区间，故硬性钳制。R3F 在此 [min, max] 区间内按 devicePixelRatio
+   * 自动取值，4K 屏 DPR 2 即触顶。
+   *
+   * 网格档位（不自动升级）：生产默认 2048²（PRODUCTION_TERRAIN_CONFIG，由 terrain-config 校验），
+   * 4096² 仅在上层显式以 initialConfig.meshSegments=4096 注入时启用——场景装配无「检测 GPU / 帧率后
+   * 自动升级」路径（UPPER_TIER_AUTO_UPGRADE_ENABLED=false）。是否启用 4096² 只由人工实测帧率 / 显存
+   * 决定（docs/performance-measurement-record.md），绝不自动升降档伪造通过。
+   *
+   * 缓存所有权（单次离线加载、常驻复用）：heightmap 纹理 + CPU 高程像素在 useHeightmap hook 内一次性
+   * 加载，经 props 下发各渲染层共享（同一份 GPU 纹理、同一份 pixels 包装出的 ElevationProvider）。
+   * 无运行时流式网络（RUNTIME_STREAMING_ENABLED=false）、无自动低清 fallback
+   * （AUTO_LOW_RES_FALLBACK_ENABLED=false）。context 丢失 / 恢复时由 restoreSceneGpuResources 从同一份
+   * CPU 源重新上传 GPU，绝不重新 fetch / 重新解码（TASK-022，本 TASK 不回归）。
+   *
+   * 逐帧分配不变量（PER_FRAME_ALLOCATION_FORBIDDEN=true）：全部 useFrame 回调只写既有 uniform / 材质
+   * 标量字段（.value / .opacity / .fillOpacity），不逐帧创建几何 / 纹理 / 大数组 / 新 Clock（视觉时钟
+   * 统一由 R3F 共享 clock 承载）。
+   *
+   * 测量边界：1080p / 4K 持续 60fps 是目标独显设备上的人工性能验收项，由用户在目标环境手动执行并
+   * 记录（docs/performance-measurement-record.md）。本场景不自动启动浏览器、不自动测量、不自动降级。
+   * 性能预算不变量（DPR 上限 ≤ 2、默认档 2048²、不自动升级、无流式 / fallback、显存 / draw call 预算
+   * 有限）由 tests/render-budget.test.ts 在 Node 环境断言。
+   */
   return (
     <div className="china-map-screen">
       <Canvas
@@ -746,7 +775,7 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
           far: MAP_CAMERA_CONSTRAINTS.far,
           position: [DEFAULT_CAMERA_POSE.position.x, DEFAULT_CAMERA_POSE.position.y, DEFAULT_CAMERA_POSE.position.z],
         }}
-        dpr={[1, 2]}
+        dpr={[RENDER_BUDGET_CONFIG.dprMin, RENDER_BUDGET_CONFIG.dprMax]}
         shadows={SCENE_SHADOWS_ENABLED}
       >
         <SceneAtmosphere />
