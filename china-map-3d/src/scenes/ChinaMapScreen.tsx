@@ -1,6 +1,7 @@
 /**
  * 中国 3D 地势大屏场景装配（TASK-009 资产 / 配置 / 渲染分层；TASK-011 受约束相机；
- * TASK-012 深色氛围照明与背景层次；TASK-013 动态海面；TASK-014 省级贴地边界）。
+ * TASK-012 深色氛围照明与背景层次；TASK-013 动态海面；TASK-014 省级贴地边界；
+ * TASK-015 十段线与岛礁点位）。
  *
  * 角色与依赖方向（清晰的场景装配边界，TASK-009 输出约束「资产访问、领域计算、渲染和 DOM overlay
  * 不能混成巨型组件」）：
@@ -47,6 +48,16 @@
  * （不崩溃场景——地形 / 海面 / 相机 / 氛围继续有效，符合回退边界）。省界准备层（src/lib/province-borders）
  * 单向依赖行政区几何 / 投影 / 高程查询，不依赖 React hover 状态（hover 由 TASK-018 交付）。
  *
+ * 十段线 / 岛礁点位分层独立性（TASK-015 输出约束「回退本 TASK 只会移除主图十段线和岛礁点位渲染」
+ * 「此前省界与海面无回归」）：PoliticalFeaturesLayer 只在 heightmap（含 pixels）与政治边界补充契约均就绪时
+ * 计算并渲染；准备期任一异常（红线缺段 / 缺点、投影 / 高程查询失败、退化）被捕获、console.error 记录并
+ * 跳过政治要素（不崩溃场景——地形 / 海面 / 省界 / 相机 / 氛围继续有效，符合回退边界）。政治要素准备层
+ * （src/lib/political-features）单向依赖政治边界契约（TASK-006 共享事实源）/ 投影 / 高程查询 / SPEC §6
+ * 红线点名领域真值（src/geo-contracts/political-catalog），不依赖 React 交互状态、不复制坐标。
+ * 十段线按段独立渲染（暖琥珀虚线，与省界浅青白实线视觉明确区分）；岛礁点位以发光光点标记（规范名称
+ * 文本由 TASK-016 的统一标签系统呈现）。本 TASK 不宣称取得审图号，正式发布仍被 TASK-006 的待审图状态
+ * 禁止（政治边界补充数据为非官方审图数据，见 docs/political-review-record.md）。
+ *
  * 阴影预算（TASK-012 实现约束「地形不投递高分辨率阴影贴图」）：Canvas shadows 显式取
  * SCENE_SHADOWS_ENABLED（结构性 false）——本 TASK 不启用任何 shadow map，地势方向感由方向光 Lambert
  * + 半球环境光体现（详见 terrain-shaders.ts / scene-atmosphere.ts）。DOM overlay 仅一个 k 切换控件 +
@@ -65,22 +76,32 @@ import {
   resolveTerrainConfigOrThrow,
 } from '../config/terrain-config'
 import { PROVINCE_BORDERS_CONFIG } from '../config/province-borders'
+import { POLITICAL_FEATURES_CONFIG } from '../config/political-features'
 import { ChinaTerrainMesh } from '../three/ChinaTerrainMesh'
 import { loadHeightmapTexture } from '../three/load-heightmap-texture'
 import type { HeightmapTextureLoadResult } from '../three/load-heightmap-texture'
 import { SeaSurface } from '../three/SeaSurface'
 import { ProvinceBorders } from '../three/ProvinceBorders'
+import { PoliticalFeatures } from '../three/PoliticalFeatures'
 import { MapOrbitControls } from '../three/MapOrbitControls'
 import { SceneAtmosphere } from '../three/SceneAtmosphere'
 import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from '../three/camera-constraints'
 import { SCENE_SHADOWS_ENABLED } from '../config/scene-atmosphere'
 import { createElevationProvider } from '../lib/elevation'
 import { loadProvinceGeometry } from '../lib/province-geometry'
+import { loadPoliticalBoundary } from '../lib/political-boundary'
 import {
   prepareProvinceBorders,
   type ProvinceBorderPrepConfig,
 } from '../lib/province-borders'
-import type { AdministrativeGeometryContract } from '../geo-contracts'
+import {
+  preparePoliticalFeatures,
+  type PoliticalFeaturePrepConfig,
+} from '../lib/political-features'
+import type {
+  AdministrativeGeometryContract,
+  PoliticalBoundaryContract,
+} from '../geo-contracts'
 
 /** heightmap 加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为平面 fallback）。 */
 export type HeightmapState =
@@ -227,6 +248,112 @@ function ProvinceBordersLayer({
   return <ProvinceBorders borders={result.borders} />
 }
 
+/** 政治边界补充契约加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为空契约——红线完整性）。 */
+type PoliticalBoundaryState =
+  | { readonly phase: 'loading' }
+  | { readonly phase: 'ready'; readonly contract: PoliticalBoundaryContract }
+  | { readonly phase: 'error'; readonly message: string }
+
+/**
+ * 加载政治边界补充契约（资产访问层 loadPoliticalBoundary），就绪后返回经契约校验的 contract。
+ * 与 heightmap / province geometry 并行取数；政治要素层只在 heightmap 与 contract 均就绪时计算。
+ * 失败绝不退化为空 / 伪造契约（TASK-015 红线：政治边界完整性）。
+ */
+function usePoliticalBoundary(): PoliticalBoundaryState {
+  const [state, setState] = useState<PoliticalBoundaryState>({ phase: 'loading' })
+  useEffect(() => {
+    let cancelled = false
+    loadPoliticalBoundary()
+      .then((contract) => {
+        if (!cancelled) setState({ phase: 'ready', contract })
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setState({
+            phase: 'error',
+            message: cause instanceof Error ? cause.message : String(cause),
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return state
+}
+
+/**
+ * 十段线 / 岛礁点位准备 + 渲染层（TASK-015）。
+ *
+ * 依赖两个就绪输入：heightmap（含 pixels，构造共享 ElevationProvider）与政治边界补充契约（features）。
+ * 任一未就绪时返回 null（不渲染）。二者齐备时：
+ * 1. 由 heightmap.meta + pixels 构造 ElevationProvider（与省界层各自构造、共享同一份 pixels，零额外内存）。
+ * 2. 调领域纯函数 preparePoliticalFeatures（红线完整性校验 + densify + 海平面贴合 + 按段分组）产出
+ *    PreparedPoliticalFeatures。
+ * 3. 交 PoliticalFeatures 渲染（暖琥珀虚线 + 岛礁光点、NDC 深度偏移、与海面 / 省界透明共存）。
+ *
+ * 准备期异常（红线缺段 / 缺点、投影 / 高程查询失败、退化）被捕获并 console.error 记录后跳过政治要素——
+ * 不崩溃场景（地形 / 海面 / 省界 / 相机 / 氛围继续有效，符合 TASK-015 回退边界）。正常合法资产下不触发。
+ *
+ * memo 边界：provider 仅依赖 heightmap（pixels/meta 引用稳定）；features 依赖 contract + provider + k +
+ * prepConfig（prepConfig 由冻结配置派生、引用稳定）。k 切换时 features 确定性重算（海平面贴合 y 随 k
+ * 变化，必须重算以保持贴合）——与省界同构的离散切换一次性开销（~毫秒级），非每帧。
+ */
+function PoliticalFeaturesLayer({
+  heightmap,
+  political,
+  exaggeration,
+}: {
+  readonly heightmap: HeightmapState
+  readonly political: PoliticalBoundaryState
+  readonly exaggeration: number
+}): null | ReactNode {
+  // 所有 Hook 必须无条件调用（react-hooks/rules-of-hooks）：就绪判定移入 Hook 内部。
+  // 由 heightmap 的 meta + pixels 构造 ElevationProvider（与省界层各自构造、共享同一份 pixels，零额外内存）。
+  const provider = useMemo(() => {
+    if (heightmap.phase !== 'ready') return null
+    return createElevationProvider(heightmap.heightmap.meta, heightmap.heightmap.pixels)
+  }, [heightmap])
+
+  // 政治要素准备配置由冻结的 POLITICAL_FEATURES_CONFIG 派生（densify 间距 + epsilon + 海平面 y），引用稳定。
+  const prepConfig = useMemo<PoliticalFeaturePrepConfig>(
+    () => ({
+      densifySpacingMeters: POLITICAL_FEATURES_CONFIG.densifySpacingMeters,
+      terrainEpsilonMeters: POLITICAL_FEATURES_CONFIG.terrainEpsilonMeters,
+      seaLevelYMeters: POLITICAL_FEATURES_CONFIG.seaLevelYMeters,
+    }),
+    [],
+  )
+
+  // 准备期可能抛 PoliticalFeaturePrepError（红线缺项 / 查询失败 / 退化）——捕获并记录，跳过政治要素不崩溃场景。
+  // 未就绪（heightmap / political / provider 任缺）时返回 notReady，渲染 null。
+  const result = useMemo(() => {
+    if (heightmap.phase !== 'ready' || political.phase !== 'ready' || provider === null) {
+      return { ok: false as const, notReady: true }
+    }
+    try {
+      return {
+        ok: true as const,
+        features: preparePoliticalFeatures(
+          political.contract,
+          provider,
+          exaggeration,
+          prepConfig,
+        ),
+      }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      // 准备失败：console 记录便于排查，但不抛出（不崩溃场景）；合法资产下正常路径不触发。
+      // eslint-disable-next-line no-console
+      console.error(`[PoliticalFeatures] 十段线 / 岛礁点位准备失败：${message}`)
+      return { ok: false as const, notReady: false }
+    }
+  }, [heightmap, political, provider, exaggeration, prepConfig])
+
+  if (!result.ok) return null
+  return <PoliticalFeatures features={result.features} />
+}
+
 /** ChinaMapScreen 的 props：允许注入配置（默认生产配置），便于低资源环境改用测试配置。 */
 export interface ChinaMapScreenProps {
   /** 初始地形渲染配置（默认 PRODUCTION_TERRAIN_CONFIG：k=2.0、分段 2048²）。 */
@@ -250,6 +377,9 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
   const heightmap = useHeightmap()
   // 省级行政区几何并行取数（与 heightmap 独立）；省界层只在二者均就绪时计算（TASK-014）。
   const geometry = useProvinceGeometry()
+  // 政治边界补充契约并行取数（与 heightmap / province geometry 独立）；政治要素层只在 heightmap 与 contract
+  // 均就绪时计算（TASK-015）。
+  const political = usePoliticalBoundary()
 
   // 受约束相机的交互启停（TASK-011）：单一显式布尔，当前 = heightmap 就绪。后续入场状态机
   // （升起动画）在此合并「就绪 && 升起完成」即可统一接管，无需改 MapOrbitControls。
@@ -285,6 +415,18 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
         <ProvinceBordersLayer
           heightmap={heightmap}
           geometry={geometry}
+          exaggeration={config.exaggeration}
+        />
+        {/*
+          十段线与岛礁点位（TASK-015）：heightmap（含 pixels，构造共享 ElevationProvider）与政治边界补充契约
+          均就绪时红线完整性校验 + densify + 海平面贴合 + 按段分组渲染。准备期异常（缺段 / 缺点 / 查询失败 /
+          退化）被捕获、跳过政治要素不崩溃场景（回退边界）。暖琥珀虚线（与省界浅青白实线视觉明确区分）+
+          岛礁发光光点；NDC 深度偏移抗 z-fighting、与半透明海面 / 省界透明共存。本 TASK 不宣称取得审图号，
+          内部展示状态下验收（政治边界补充数据为非官方审图数据，见 docs/political-review-record.md）。
+        */}
+        <PoliticalFeaturesLayer
+          heightmap={heightmap}
+          political={political}
           exaggeration={config.exaggeration}
         />
       </Canvas>

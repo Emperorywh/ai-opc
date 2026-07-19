@@ -1,0 +1,30 @@
+{
+  "kind": "political-asset-provenance",
+  "assetPolitical": "china-political-boundary.json",
+  "source": {
+    "sourceId": "src-project-political",
+    "dataset": "项目自补九段线（含台湾东侧段的标准十段画法）、南海主要岛礁与钓鱼岛/赤尾屿等附属岛屿点位、藏南与阿克赛钦争议区按中国主张画法的修正",
+    "accessEndpoint": "offline://project-maintained/china-political-boundary.json",
+    "note": "九段线（十段画法）段序号、岛礁规范名称与争议区目标区域由 src/geo-contracts/political-catalog 的 SPEC §6 红线点名领域真值单一定义；坐标为 representative（取自公开标准地图衍生数据），九段线几何顶点与争议区边界的国标逐点一致性以人工对照公开标准地图核对为准（见 docs/political-review-record.md）。"
+  },
+  "generation": {
+    "pipeline": "项目内维护（未走离线生产脚本；坐标取自公开标准地图衍生数据 / 自然资源部标准地图服务衍生）",
+    "catalog": "src/geo-contracts/political-catalog.ts（SPEC §6 红线点名领域真值 · 单一定义点）",
+    "processingParams": {
+      "tenDashStructure": "十段画法 = 南海 9 段（segmentIndex 1..9）+ 台湾东侧 1 段（segmentIndex 10 = TAIWAN_EAST_SEGMENT_INDEX）",
+      "requiredIslands": "钓鱼岛 / 赤尾屿 / 曾母暗沙（SPEC §6 / §3.3 点名；完整南海诸岛名录属人工核对项，本资产不声称穷尽）",
+      "requiredDisputedRegions": "藏南 / 阿克赛钦（SPEC §6 点名，按中国主张画法补充）",
+      "coordinateExtent": "所有坐标落在中国主图 [72,3,136,54]（含端点），由 verifyPoliticalAsset 的资产级 coordinate-out-of-extent 锚点把关",
+      "networkAccess": "none（坐标全部项目内维护，生产期零外网）"
+    },
+    "producedAt": "2026-07-19T00:00:00.000Z",
+    "producedBy": "TASK-006（资产管线）/ TASK-015（落盘为 public 运行时资产）"
+  },
+  "integrity": {
+    "politicalSha256": "a6b782a016ed7f8d19dc1b2e7ad0265c0793455aac61480019256212ac2f3916",
+    "nineDashSegmentCount": 10,
+    "islandCount": 5,
+    "disputedRegionCount": 2
+  },
+  "disclaimer": "本资产为项目自行维护的政治边界补充数据：九段线（含台湾东侧段的标准十段画法）、南海主要岛礁与钓鱼岛/赤尾屿等附属岛屿点位、藏南与阿克赛钦争议区按中国主张画法的修正。坐标取自公开标准地图衍生数据，非自然资源主管部门官方审图数据；九段线几何顶点与争议区边界的国标逐点一致性、南海诸岛完整岛礁名录闭包以人工对照公开标准地图核对为准（见 docs/political-review-record.md）。仅供内部展示，不得作为正式出版 / 发布用途，公开发布前必须取得自然资源主管部门审图号。"
+}

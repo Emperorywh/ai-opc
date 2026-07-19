@@ -108,6 +108,16 @@ export {
   type PoliticalBoundaryFeature,
 } from './political'
 
+// 政治边界 SPEC §6 红线点名领域真值目录（单一定义点，运行时与离线层共用）
+export {
+  EXPECTED_NINE_DASH_SEGMENT_COUNT,
+  POLITICAL_SOURCE_ID,
+  REQUIRED_DISPUTED_REGIONS,
+  REQUIRED_ISLAND_NAMES,
+  REQUIRED_NINE_DASH_SEGMENT_INDICES,
+  TAIWAN_EAST_SEGMENT_INDEX,
+} from './political-catalog'
+
 // 统一验证入口
 export {
   validateContractByKind,
