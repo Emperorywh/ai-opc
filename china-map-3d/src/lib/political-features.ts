@@ -66,13 +66,9 @@ import type {
   NineDashLineSegmentFeature,
   PoliticalBoundaryContract,
 } from '../geo-contracts'
-import {
-  EXPECTED_NINE_DASH_SEGMENT_COUNT,
-  REQUIRED_ISLAND_NAMES,
-  REQUIRED_NINE_DASH_SEGMENT_INDICES,
-  TAIWAN_EAST_SEGMENT_INDEX,
-} from '../geo-contracts/political-catalog'
+import { EXPECTED_NINE_DASH_SEGMENT_COUNT, TAIWAN_EAST_SEGMENT_INDEX } from '../geo-contracts/political-catalog'
 import type { ElevationProvider } from './elevation'
+import { collectPoliticalRedLineGaps } from './political-red-line'
 import { projectToWorld } from './projection'
 
 /**
@@ -322,49 +318,42 @@ function appendLineSegmentEdges(
 }
 
 /**
- * 对政治边界契约做红线完整性断言（SPEC §6，与资产级深度校验共用同一份领域真值）。
+ * 对政治边界契约做红线完整性断言（SPEC §6，与资产级深度校验、与 2D 南海附图准备共用同一份领域真值）。
  *
  * 任一红线缺项 → 抛 PoliticalFeaturePrepError（稳定 code），整条准备失败、不产出残缺十段线 / 缺失岛礁。
  * 断言项（TASK-015 验证方式 1「十个线段和全部必需点位都被消费」、验证方式 2「缺段 / 缺点 → 失败」）：
  * - 恰好 EXPECTED_NINE_DASH_SEGMENT_COUNT（10）段，段序号 REQUIRED_NINE_DASH_SEGMENT_INDICES（1..10）全在；
  * - 台湾东侧段（TAIWAN_EAST_SEGMENT_INDEX = 10）独立硬编码锚点；
  * - REQUIRED_ISLAND_NAMES（钓鱼岛 / 赤尾屿 / 曾母暗沙）均在。
+ *
+ * 数据复用（TASK-019 实现约束「主图和附图必须共享 TASK-006 数据...禁止复制一份专用十段线、岛礁或
+ * 名称数组」）：红线「目录」唯一来自 political-catalog，「扫描逻辑」唯一来自共享单源
+ * collectPoliticalRedLineGaps（src/lib/political-red-line，TASK-019 抽取）。本函数只据缺项事实按
+ * 既定顺序抛本层稳定错误码（political-features.*），不再各自遍历 features / 对照目录常量——
+ * 2D 南海附图准备（src/lib/south-china-sea-inset）走同一扫描结果、抛各自错误码（south-china-sea-inset.*），
+ * 二者不存在第二套段数 / 段序号 / 岛礁名清单或扫描代码。错误码与抛出顺序与重构前逐项一致。
  */
 function assertRedLineCompleteness(contract: PoliticalBoundaryContract): void {
-  const segmentIndices = new Set<number>()
-  const islandNames = new Set<string>()
-  for (const feature of contract.features) {
-    if (feature.type === 'nineDashLineSegment') {
-      segmentIndices.add(feature.segmentIndex)
-    } else if (feature.type === 'islandOrReefPoint') {
-      islandNames.add(feature.name)
-    }
-  }
+  const gaps = collectPoliticalRedLineGaps(contract)
 
   // 段数：恰好 10 段（十段画法，SPEC §6）。
-  if (segmentIndices.size !== EXPECTED_NINE_DASH_SEGMENT_COUNT) {
+  if (gaps.segmentCount !== EXPECTED_NINE_DASH_SEGMENT_COUNT) {
     throw new PoliticalFeaturePrepError(
       'political-features.segment-count-mismatch',
-      `九段线必须恰好含 ${EXPECTED_NINE_DASH_SEGMENT_COUNT} 段（十段画法），实际为 ${segmentIndices.size} 段——拒绝准备残缺十段线。`,
+      `九段线必须恰好含 ${EXPECTED_NINE_DASH_SEGMENT_COUNT} 段（十段画法），实际为 ${gaps.segmentCount} 段——拒绝准备残缺十段线。`,
     )
   }
 
   // 段序号 1..10 全在（逐段核对，缺哪段就指明哪段）。
-  const missingSegments: number[] = []
-  for (const index of REQUIRED_NINE_DASH_SEGMENT_INDICES) {
-    if (!segmentIndices.has(index)) {
-      missingSegments.push(index)
-    }
-  }
-  if (missingSegments.length > 0) {
+  if (gaps.missingSegmentIndices.length > 0) {
     throw new PoliticalFeaturePrepError(
       'political-features.segment-missing',
-      `九段线缺少段序号：[${missingSegments.join(', ')}]（十段画法需 1..10 全在）——拒绝准备残缺十段线。`,
+      `九段线缺少段序号：[${gaps.missingSegmentIndices.join(', ')}]（十段画法需 1..10 全在）——拒绝准备残缺十段线。`,
     )
   }
 
   // 台湾东侧段（segmentIndex===10）独立硬编码锚点（SPEC §6 红线）。
-  if (!segmentIndices.has(TAIWAN_EAST_SEGMENT_INDEX)) {
+  if (!gaps.taiwanEastSegmentPresent) {
     throw new PoliticalFeaturePrepError(
       'political-features.taiwan-east-segment-missing',
       `九段线缺少台湾东侧段（segmentIndex=${TAIWAN_EAST_SEGMENT_INDEX}），SPEC §6 红线要求十段画法含台湾东侧那段——拒绝准备残缺十段线。`,
@@ -372,16 +361,10 @@ function assertRedLineCompleteness(contract: PoliticalBoundaryContract): void {
   }
 
   // SPEC §6 点名岛礁（钓鱼岛 / 赤尾屿 / 曾母暗沙）均在。
-  const missingIslands: string[] = []
-  for (const name of REQUIRED_ISLAND_NAMES) {
-    if (!islandNames.has(name)) {
-      missingIslands.push(name)
-    }
-  }
-  if (missingIslands.length > 0) {
+  if (gaps.missingIslandNames.length > 0) {
     throw new PoliticalFeaturePrepError(
       'political-features.required-island-missing',
-      `缺少 SPEC §6 点名岛礁 / 附属岛屿：[${missingIslands.join('、')}]——拒绝准备缺失岛礁点位的残缺主图。`,
+      `缺少 SPEC §6 点名岛礁 / 附属岛屿：[${gaps.missingIslandNames.join('、')}]——拒绝准备缺失岛礁点位的残缺主图。`,
     )
   }
 }

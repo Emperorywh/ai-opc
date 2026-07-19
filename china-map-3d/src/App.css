@@ -76,3 +76,44 @@
   color: #ffb4b4;
   border-color: rgba(200, 80, 80, 0.5);
 }
+
+/*
+ * 南海诸岛 2D 标准附图（TASK-019，SPEC §3.8）。
+ *
+ * 右下角矩形 DOM overlay，独立于 3D 画布。半透明深色面板贴合科技风，SVG 按 viewBox 等比缩放（宽度固定、
+ * 高度由墨卡托比例派生于 viewBox，见 src/config/south-china-sea-inset）。不遮挡主图核心区域（左上 k 控件、
+ * 中央地形），并为后续合规角标（TASK-021）留出右下分区。附图仅静态展示，不捕获指针（overlay 父级
+ * pointer-events: none，附图沿用——点击穿透到 3D 画布，与「不参与 hover / 不下钻」一致）。
+ */
+.china-map-inset {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: 220px;
+  padding: 8px 10px 6px;
+  background: rgba(8, 14, 26, 0.72);
+  border: 1px solid rgba(120, 160, 200, 0.25);
+  border-radius: 6px;
+  color: #c7d0e0;
+  font-size: 12px;
+}
+
+.china-map-inset-caption {
+  margin-bottom: 4px;
+  color: #dfe7f2;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+.china-map-inset-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.china-map-inset-disclaimer {
+  margin-top: 4px;
+  font-size: 10px;
+  line-height: 1.3;
+  opacity: 0.65;
+}

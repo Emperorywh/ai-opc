@@ -89,6 +89,7 @@ import { PlaceLabels } from '../three/PlaceLabels'
 import { ProvinceHoverPicker } from '../three/ProvinceHoverPicker'
 import { MapOrbitControls } from '../three/MapOrbitControls'
 import { SceneAtmosphere } from '../three/SceneAtmosphere'
+import { SouthChinaSeaInset } from '../components/SouthChinaSeaInset'
 import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from '../three/camera-constraints'
 import { SCENE_SHADOWS_ENABLED } from '../config/scene-atmosphere'
 import { createElevationProvider } from '../lib/elevation'
@@ -707,6 +708,16 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
         {fontManifest.phase === 'error' && (
           <div className="china-map-status china-map-error">字体清单加载失败：{fontManifest.message}</div>
         )}
+        {/*
+          南海诸岛 2D 标准附图（TASK-019）：右下角 SVG DOM overlay，独立于 3D 场景（SPEC §3.8「DOM overlay，
+          非 3D」）。复用上层已加载的同一份 PoliticalBoundaryContract（与主图 PoliticalFeaturesLayer fetch 同一份
+          public/geo/china-political-boundary.json，TASK-006 共享事实源），不重复取数、不复制十段线 / 岛礁坐标；
+          坐标经 projectToInset（TASK-007 同一墨卡托投影）映射到附图 2D 子范围，与主图共享同一墨卡托结果、
+          仅视口映射不同。political 未就绪时不渲染（回退边界：回退本 TASK 只会移除右下 2D 附图，主 3D 图的省界、
+          十段线、岛礁、标签和 hover 全部保持不变）。附图不参与省级 hover（独立展示层），不反向修改 3D 相机 /
+          地形 / hover / 领域资产。本 TASK 不声称取得审图号，附图如实标注「非官方审图数据，仅供内部展示」。
+        */}
+        {political.phase === 'ready' && <SouthChinaSeaInset contract={political.contract} />}
       </div>
     </div>
   )
