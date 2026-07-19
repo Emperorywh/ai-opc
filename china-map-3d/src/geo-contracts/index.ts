@@ -63,6 +63,8 @@ export {
 
 // 地形元数据
 export {
+  decodeUint16ToElevation,
+  encodeElevationToUint16,
   validateTerrainMeta,
   type DataSourceRef,
   type TerrainElevationEncoding,

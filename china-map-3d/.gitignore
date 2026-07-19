@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Python 字节码与缓存（仅 scripts/dem 离线生产脚本可能产生，绝不进版本库）
+__pycache__/
+*.pyc
+*.pyo
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

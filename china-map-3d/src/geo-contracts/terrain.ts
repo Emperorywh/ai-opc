@@ -44,6 +44,68 @@ export interface TerrainRasterResolution {
 }
 
 /**
+ * 把真实米制海拔线性编码为 16 位无符号整数（SPEC §5.1、§7.1）。
+ *
+ * 这里是离线生产层（TS 可测试核心 / Python rasterio / QGIS 三条路径）与运行时解码层
+ * 共同遵循的「唯一编码源」。任何路径都不得另写一套编码公式——若需调整区间或位深，
+ * 必须先在本契约与 TerrainElevationEncoding 中登记，再同步所有消费方。
+ *
+ * 不变量：
+ * - 线性归一化：code = round((meters - minValueMeters) / (maxValueMeters - minValueMeters) * 65535)。
+ * - clamp-to-range：低于下限截断到 0，高于上限截断到 65535。
+ *   浅水负高程（如 -200m）只要落在区间内就被保留为合法低位编码；
+ *   深海（如 -2000m，低于下限 -1500m）截断到 0，与下限同码。
+ * - 非有限数值（NaN/Infinity）视为生产流程缺陷，直接抛错而非静默落到 0，避免脏数据
+ *   被误认为合法海平面。
+ *
+ * @param meters 真实海拔（米）。
+ * @param minValueMeters 编码区间下限（米），通常为负以保留浅水负高程。
+ * @param maxValueMeters 编码区间上限（米）。
+ * @returns 0..65535 的 16 位无符号整数编码。
+ */
+export function encodeElevationToUint16(
+  meters: number,
+  minValueMeters: number,
+  maxValueMeters: number,
+): number {
+  if (!(minValueMeters < maxValueMeters)) {
+    throw new RangeError(
+      `编码区间必须满足 minValueMeters < maxValueMeters，实际为 ${minValueMeters} / ${maxValueMeters}。`,
+    )
+  }
+  if (!Number.isFinite(meters)) {
+    throw new RangeError(`高程必须为有限数值，实际为 ${meters}；生产流程应在上游剔除 NaN/Infinity。`)
+  }
+  const span = maxValueMeters - minValueMeters
+  const normalized = (meters - minValueMeters) / span
+  // clamp-to-range：先夹到 [0,1] 再放大，确保上下界外的值映射到端点码而非溢出。
+  const clamped = Math.min(1, Math.max(0, normalized))
+  return Math.round(clamped * 65535)
+}
+
+/**
+ * 把 16 位无符号整数编码解码回真实米制海拔（encodeElevationToUint16 的逆运算）。
+ *
+ * 解码是 GPU 片元按 UV 采样 heightmap 后还原真实海拔、CPU 双线性高度查询、资产校验
+ * 抽样的共同入口。它与编码在量化步长（≈(max-min)/65535 米）内一致，不存在第二套解码。
+ */
+export function decodeUint16ToElevation(
+  code: number,
+  minValueMeters: number,
+  maxValueMeters: number,
+): number {
+  if (!(minValueMeters < maxValueMeters)) {
+    throw new RangeError(
+      `解码区间必须满足 minValueMeters < maxValueMeters，实际为 ${minValueMeters} / ${maxValueMeters}。`,
+    )
+  }
+  if (!Number.isInteger(code) || code < 0 || code > 65535) {
+    throw new RangeError(`16 位编码必须为 0..65535 的整数，实际为 ${code}。`)
+  }
+  return (code / 65535) * (maxValueMeters - minValueMeters) + minValueMeters
+}
+
+/**
  * 栅格覆盖的地理范围（经纬度四至）。
  * 注意：crs 固定为 EPSG:4326——这里表达的是「栅格覆盖的经纬度区域」，
  * 与地形栅格自身的平面 CRS（EPSG:3857）是两个不同语义的字段，二者共存避免投影歧义。
