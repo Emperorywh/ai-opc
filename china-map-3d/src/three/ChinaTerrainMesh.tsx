@@ -3,13 +3,14 @@
  *
  * 角色与依赖方向：
  * - 本组件属于渲染层（src/three），只负责「把一份已加载的 heightmap 纹理 + 一份受控配置 + 一份
- *   色阶配置装配成 GPU 位移 + 分层设色地形 mesh」。它**只**依赖：配置层
- *   （resolveTerrainConfigOrThrow / TerrainRenderConfig、resolveElevationColorConfig /
- *   ElevationColorConfig —— 夸张系数 / 分段 / 色阶的唯一权威）、坐标层（TERRAIN_PLANE_LAYOUT ——
- *   米制世界包围盒的渲染派生）、资产访问层（HeightmapTextureLoadResult）、本层着色器
- *   （TERRAIN_VERTEX_SHADER / TERRAIN_FRAGMENT_SHADER）、three / R3F。**禁止**自行读取 GeoJSON、
- *   维护 hover、加载外网或在组件内复制色阶断点 / 颜色（TASK-009/010 实现约束）——纹理、元数据、
- *   色阶由上层注入，颜色事实源来自 elevation-color-ramp，hover 由后续 TASK 在拾取层接管。
+ *   色阶配置 + 一份场景氛围配置装配成 GPU 位移 + 分层设色 + 深色氛围照明地形 mesh」。它**只**依赖：
+ *   配置层（resolveTerrainConfigOrThrow / TerrainRenderConfig、resolveElevationColorConfig /
+ *   ElevationColorConfig、SCENE_ATMOSPHERE_CONFIG —— 夸张系数 / 分段 / 色阶 / 氛围照明的唯一权威）、
+ *   坐标层（TERRAIN_PLANE_LAYOUT —— 米制世界包围盒的渲染派生）、资产访问层
+ *   （HeightmapTextureLoadResult）、本层着色器（TERRAIN_VERTEX_SHADER / TERRAIN_FRAGMENT_SHADER）、
+ *   three / R3F。**禁止**自行读取 GeoJSON、维护 hover、加载外网或在组件内复制色阶断点 / 颜色 /
+ *   光向 / 雾密度（TASK-009/010/012 实现约束）——纹理、元数据、色阶、氛围由上层 / 配置注入，
+ *   颜色事实源来自 elevation-color-ramp，氛围事实源来自 scene-atmosphere，hover 由后续 TASK 在拾取层接管。
  *
  * GPU 位移（SPEC §7.1；TASK-009 实现约束「位移必须发生在 GPU shader」）：
  * - plane 用 PlaneGeometry，顶点位置恒为平面（local z=0），UV 覆盖 [0,1]²；mesh 绕 X 轴 −90° 旋转使其
@@ -49,6 +50,10 @@ import {
   resolveElevationColorConfig,
   type ElevationColorConfig,
 } from '../config/elevation-color-ramp'
+import {
+  SCENE_ATMOSPHERE_CONFIG,
+  hexToShaderFloat3,
+} from '../config/scene-atmosphere'
 import { TERRAIN_FRAGMENT_SHADER, TERRAIN_VERTEX_SHADER } from './terrain-shaders'
 import { TERRAIN_PLANE_LAYOUT } from './terrain-layout'
 import type { HeightmapTextureLoadResult } from './load-heightmap-texture'
@@ -103,10 +108,15 @@ export function ChinaTerrainMesh({ heightmap, config, rise = 1.0 }: ChinaTerrain
     return tex
   }, [colorConfig])
 
-  // uniform 对象：依赖 meta / texture / config / rise / plane 尺寸 / ramp；相关值变化时重建（R3F 会把
-  // 新对象赋给 shaderMaterial.uniforms，渲染器每帧按引用上传，无需重编译着色器）。
+  // uniform 对象：依赖 meta / texture / config / rise / plane 尺寸 / ramp / 氛围配置；相关值变化时重建
+  // （R3F 会把新对象赋给 shaderMaterial.uniforms，渲染器每帧按引用上传，无需重编译着色器）。
   // 注意：夸张系数 k 只进 uExaggeration，不进任何色阶 uniform——故改 k 只改起伏，颜色不变（TASK-010）。
+  // 灯光 / 雾 uniform 取自冻结的 SCENE_ATMOSPHERE_CONFIG（单一事实源）——与场景灯（SceneAtmosphere）
+  // 共用同一份光向 / 光色 / 雾密度，不在本组件复制氛围常量（TASK-012 实现约束「视觉参数集中管理」）。
+  // SCENE_ATMOSPHERE_CONFIG 是模块级冻结常量（引用永不变化），故氛围 uniform 不进 useMemo 依赖数组，
+  // 与 rampTexture 一并随 colorConfig / texture 重建周期复用。
   const uniforms = useMemo(() => {
+    const { mainLight, hemisphereAmbient, fog } = SCENE_ATMOSPHERE_CONFIG
     return {
       uHeightmap: { value: texture },
       uHeightmapSize: {
@@ -119,6 +129,19 @@ export function ChinaTerrainMesh({ heightmap, config, rise = 1.0 }: ChinaTerrain
       uRise: { value: rise },
       uPlaneWorldWidth: { value: TERRAIN_PLANE_LAYOUT.worldWidthX },
       uPlaneWorldHeight: { value: TERRAIN_PLANE_LAYOUT.worldHeightZ },
+      // 主光（西北偏高方向光）：方向 / 光色 / 光强来自氛围配置，与场景 directionalLight 同源。
+      uMainLightDirection: {
+        value: new THREE.Vector3(mainLight.direction.x, mainLight.direction.y, mainLight.direction.z),
+      },
+      uMainLightColor: { value: new THREE.Vector3(...hexToShaderFloat3(mainLight.hex)) },
+      uMainLightIntensity: { value: mainLight.intensity },
+      // 半球环境光：天 / 地色 + 低强度，背光面不死黑又不冲淡色阶。
+      uHemisphereSkyColor: { value: new THREE.Vector3(...hexToShaderFloat3(hemisphereAmbient.skyHex)) },
+      uHemisphereGroundColor: { value: new THREE.Vector3(...hexToShaderFloat3(hemisphereAmbient.groundHex)) },
+      uHemisphereIntensity: { value: hemisphereAmbient.intensity },
+      // 极轻微雾：雾色（= 背景色）+ 密度。fog.enabled=false 时密度传 0，片元内 fogFactor 恒为 0（零开销）。
+      uFogColor: { value: new THREE.Vector3(...hexToShaderFloat3(fog.hex)) },
+      uFogDensity: { value: fog.enabled ? fog.density : 0 },
     }
   }, [texture, meta, rampTexture, config.exaggeration, rise])
 

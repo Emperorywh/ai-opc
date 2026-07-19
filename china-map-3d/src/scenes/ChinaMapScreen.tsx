@@ -1,5 +1,6 @@
 /**
- * 中国 3D 地势大屏场景装配（TASK-009 资产 / 配置 / 渲染分层；TASK-011 受约束相机）。
+ * 中国 3D 地势大屏场景装配（TASK-009 资产 / 配置 / 渲染分层；TASK-011 受约束相机；
+ * TASK-012 深色氛围照明与背景层次）。
  *
  * 角色与依赖方向（清晰的场景装配边界，TASK-009 输出约束「资产访问、领域计算、渲染和 DOM overlay
  * 不能混成巨型组件」）：
@@ -9,11 +10,16 @@
  * - 领域 / 配置：resolveTerrainConfigOrThrow（src/config/terrain-config）—— 唯一的夸张系数与分段预算
  *   权威，非法配置在挂载期即抛错。本场景把 DOM 控件改的 k 经它校验后注入 mesh。
  * - 渲染：ChinaTerrainMesh（src/three/ChinaTerrainMesh）—— 唯一的 GPU 位移地形装配；本场景只传 props。
+ *   氛围照明（光向 / 光色 / 环境光 / 雾）由 ChinaTerrainMesh 内部从 SCENE_ATMOSPHERE_CONFIG 注入着色器
+ *   uniform，本场景不重复传氛围 props（单一事实源，TASK-012 实现约束「视觉参数集中管理」）。
  * - 相机 / 控制（TASK-011）：MAP_CAMERA_CONSTRAINTS / DEFAULT_CAMERA_POSE（src/three/camera-constraints）
  *   —— 受约束东南斜俯视相机的纯计算契约（距离 / 极角 / target 边界 / FOV / near / far 全部由主图世界
  *   包围盒派生，无魔法坐标）；MapOrbitControls（src/three/MapOrbitControls）把它装配到 drei OrbitControls。
  *   本场景只把「是否启用交互」显式传入，不在场景内复制约束常量、不持有隐式相机状态。
- * - 场景装配（本文件）：负责 Canvas / 受约束相机 / 加载编排 / 极简 DOM overlay（k 切换 + 状态）。
+ * - 氛围（TASK-012）：SceneAtmosphere（src/three/SceneAtmosphere）—— 把 SCENE_ATMOSPHERE_CONFIG
+ *   装配成背景色 / 雾 / 半球环境光 / 单盏方向主光；阴影图总开关 SCENE_SHADOWS_ENABLED（结构性 false）
+ *   显式注入 Canvas。本场景不复制氛围常量、不读取行政区 / 地点 / hover。
+ * - 场景装配（本文件）：负责 Canvas / 受约束相机 / 深色氛围 / 加载编排 / 极简 DOM overlay（k 切换 + 状态）。
  *   不在此处读取 GeoJSON、不维护 hover、不做颜色分层、不加载外网（后续 TASK 接管）。
  *
  * 相机交互启停契约（TASK-011 实现约束「相机状态可被后续入场状态机统一启停，没有隐式组件状态」）：
@@ -22,8 +28,10 @@
  *   「就绪 && 升起完成」合并即可，无需改 MapOrbitControls。MapOrbitControls 不自持交互开关，
  *   故本场景不存在「组件内部猜测 DOM 状态」的第二套启停路径。
  *
- * 光照 / 背景 / 雾仍未做（片元着色器内置一盏固定方向光做最小可读着色，见 terrain-shaders.ts）；
- * 完整氛围由后续 TASK 接管。DOM overlay 仅一个 k 切换控件 + 加载 / 错误状态文本，完整 UI 由后续 TASK 接管。
+ * 阴影预算（TASK-012 实现约束「地形不投递高分辨率阴影贴图」）：Canvas shadows 显式取
+ * SCENE_SHADOWS_ENABLED（结构性 false）——本 TASK 不启用任何 shadow map，地势方向感由方向光 Lambert
+ * + 半球环境光体现（详见 terrain-shaders.ts / scene-atmosphere.ts）。DOM overlay 仅一个 k 切换控件 +
+ * 加载 / 错误状态文本，完整 UI 由后续 TASK 接管。
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -41,7 +49,9 @@ import { ChinaTerrainMesh } from '../three/ChinaTerrainMesh'
 import { loadHeightmapTexture } from '../three/load-heightmap-texture'
 import type { HeightmapTextureLoadResult } from '../three/load-heightmap-texture'
 import { MapOrbitControls } from '../three/MapOrbitControls'
+import { SceneAtmosphere } from '../three/SceneAtmosphere'
 import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from '../three/camera-constraints'
+import { SCENE_SHADOWS_ENABLED } from '../config/scene-atmosphere'
 
 /** heightmap 加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为平面 fallback）。 */
 export type HeightmapState =
@@ -125,7 +135,9 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
           position: [DEFAULT_CAMERA_POSE.position.x, DEFAULT_CAMERA_POSE.position.y, DEFAULT_CAMERA_POSE.position.z],
         }}
         dpr={[1, 2]}
+        shadows={SCENE_SHADOWS_ENABLED}
       >
+        <SceneAtmosphere />
         <MapOrbitControls enabled={interactionEnabled} />
         <TerrainLayer heightmap={heightmap} config={config} />
       </Canvas>

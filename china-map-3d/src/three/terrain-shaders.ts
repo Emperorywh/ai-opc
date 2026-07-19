@@ -40,9 +40,19 @@
  *   resolveElevationColorConfig 保证与 SPEC §5.1 色阶域一致），采样 256×1 ramp 纹理得到基线色。
  *   ramp 纹理与 CPU 侧色阶事实源（src/config/elevation-color-ramp）共用同一控制点表 + 分段线性
  *   插值策略，断点 / 基线色 / ramp 描述不在着色器内复制（TASK-010 实现约束「色阶事实源唯一」）。
- * - 法线明暗叠加在基线色上（环境光 + Lambert 漫反射），背光面保留细节不死黑；地形本身不投递
- *   阴影贴图（4096² 级阴影图成本过高，SPEC §3.4、TASK-010 输出约束「不启用高成本阴影贴图」）。
- *   完整氛围（背景 / 雾 / 多光源）由后续 TASK 接管，本处仅一盏固定方向光做地势方向感的最小着色。
+ *
+ * 深色地势照明与背景层次（SPEC §3.4，TASK-012 核心交付）：
+ * - 法线明暗的光向 / 光色 / 光强 / 半球环境光 / 雾 全部来自场景氛围配置（src/config/scene-atmosphere
+ *   的 SCENE_ATMOSPHERE_CONFIG），由 ChinaTerrainMesh 注入 uniform——本片元不再硬编码光向，与场景灯
+ *   （SceneAtmosphere 的 directionalLight / hemisphereLight）共用同一份参数（单一光向源）。地形是自定义
+ *   ShaderMaterial，不自动消费 three.js 场景灯，故氛围参数需经 uniform 显式注入；这不是「第二套灯光逻辑」，
+ *   而是同一份配置经两个通道作用到两类材质（场景灯 → 未来标准材质的海面 / 标签；uniform → 自定义地形）。
+ * - 地形不投递阴影贴图（SPEC §3.4「4096² 级阴影图成本过高」、TASK-012 实现约束）：地势方向感由「方向光
+ *   Lambert 漫反射 + 半球环境光」体现，背光面保留环境补光可辨认（不致死黑）。shadow map 的任何引入都
+ *   应由后续 TASK 以局部、低成本方式单独决策，不在本片元内。
+ * - 极轻微 FogExp2：片元按相机距离复算与 three.js 同一公式（fogFactor = 1 − exp(−density²·depth²）），
+ *   把基线色 ×光照淡入雾色（= 背景色），柔化地图远缘与背景的衔接。密度取自配置（远角雾因子 ~9%），
+ *   不吞没南海 / 边界 / 标签。
  */
 
 /**
@@ -136,25 +146,48 @@ void main() {
 `
 
 /**
- * 片元着色器：真实海拔分层设色 + 法线 Lambert 明暗（TASK-010 核心交付）。
+ * 片元着色器：真实海拔分层设色 + 场景氛围照明（方向光 Lambert + 半球环境光）+ 极轻微雾
+ * （TASK-010 分层设色 / TASK-012 深色氛围）。
  *
  * 颜色完全由「真实米制海拔 h」决定，与垂直夸张系数 k 无关——片元按像素 UV 重新采样 heightmap 得 h，
  * 按 u = (h − minH)/(maxH − minH) 归一化（minH/maxH 来自经校验的元数据，与 SPEC §5.1 色阶域一致），
  * 采样 256×1 ramp 纹理得基线色。ramp 由 src/config/elevation-color-ramp 唯一事实源派生（控制点 +
- * 分段线性插值），着色器内不复制断点 / 颜色。法线只调制基线色的明暗（Lambert 漫反射 + 环境光），
- * 体现地势方向感；地形本身不投递阴影贴图（SPEC §3.4、TASK-010 输出约束）。颜色不映射任何业务数据
+ * 分段线性插值），着色器内不复制断点 / 颜色。法线只调制基线色的明暗（Lambert 漫反射 + 半球环境光），
+ * 体现地势方向感；地形本身不投递阴影贴图（SPEC §3.4、TASK-012 实现约束）。颜色不映射任何业务数据
  * （TASK-009/010 实现约束「高程色阶是纯地理语义」）。
+ *
+ * 照明 / 雾参数全部来自场景氛围配置（SCENE_ATMOSPHERE_CONFIG），由 ChinaTerrainMesh 注入 uniform——
+ * 本片元不硬编码光向 / 光色 / 雾密度，与场景灯（SceneAtmosphere）共用同一份参数（TASK-012 实现约束
+ * 「视觉参数集中管理」）。地形是自定义 ShaderMaterial，不自动消费 three.js 场景灯，故氛围参数需经
+ * uniform 显式注入；这不是「第二套灯光逻辑」，而是同一份配置经两个通道作用到两类材质。
  *
  * uniform 语义：
  * - uHeightmap：归一化高程码纹理（与顶点位移共用同一份，片元按像素重采样得真实 h）。
  * - uElevationRamp：256×1 色阶 ramp 纹理（RGB / UnsignedByteType，来自 elevation-color-ramp）。
  * - uMinElevationMeters / uMaxElevationMeters：色阶归一化上下限（来自元数据，与色阶域一致）。
+ * - uMainLightDirection：主光方向（surface-to-light，世界坐标，单位向量；西北偏高 → x<0、y>0、z<0）。
+ *   来自 SCENE_ATMOSPHERE_CONFIG.mainLight.direction，与场景 directionalLight.position 同源。
+ * - uMainLightColor：主光颜色（[0,1]³，sRGB 字节 / 255，与 ramp 同一颜色空间约定）。
+ * - uMainLightIntensity：主光强度（地势明暗的主要来源）。
+ * - uHemisphereSkyColor / uHemisphereGroundColor：半球环境光天 / 地色（[0,1]³）。
+ * - uHemisphereIntensity：半球环境光强度（低强度，保证背光面不死黑又不冲淡色阶）。
+ * - uFogColor：雾色（[0,1]³，= 背景色；远缘淡入背景形成无接缝过渡）。
+ * - uFogDensity：雾密度（1/米，FogExp2 density；远角雾因子 ~9%，不吞没南海 / 边界 / 标签）。
+ *   uFogDensity=0 时雾完全关闭（配置 FOG_ENABLED=false 的情形），片元不做任何淡入。
  */
 export const TERRAIN_FRAGMENT_SHADER = /* glsl */ `
 uniform sampler2D uHeightmap;
 uniform sampler2D uElevationRamp;
 uniform float uMinElevationMeters;
 uniform float uMaxElevationMeters;
+uniform vec3 uMainLightDirection;
+uniform vec3 uMainLightColor;
+uniform float uMainLightIntensity;
+uniform vec3 uHemisphereSkyColor;
+uniform vec3 uHemisphereGroundColor;
+uniform float uHemisphereIntensity;
+uniform vec3 uFogColor;
+uniform float uFogDensity;
 
 varying vec3 vWorldNormal;
 varying vec2 vHeightmapUV;
@@ -180,14 +213,30 @@ void main() {
   );
   vec3 baseColor = texture2D(uElevationRamp, vec2(rampU, 0.5)).rgb;
 
-  // 法线明暗：一盏固定方向光做 Lambert 漫反射（西北偏高方位，强调青藏—东海地势梯度，SPEC §3.4）。
-  // 氛围 TASK 会引入真正的场景光源，届时由片元重新接管；本处仅作地势方向感的最小明暗。
-  // 地形本身不投递阴影贴图（成本过高），只用方向光 + 环境光体现立体感（TASK-010 输出约束）。
-  vec3 lightDir = normalize(vec3(-0.5, 0.8, -0.4));
-  float diffuse = clamp(dot(normalize(vWorldNormal), lightDir), 0.0, 1.0);
+  // 主光 Lambert 漫反射（SPEC §3.4「西北偏高方位单盏主光」）：光向 / 光色 / 光强全部来自氛围配置
+  // uniform，与场景 directionalLight 同源。地形不投递阴影贴图——明暗完全由 dot(N, L) 决定（TASK-012
+  // 实现约束「地形不投递高分辨率阴影贴图」）。
+  vec3 N = normalize(vWorldNormal);
+  float diffuse = clamp(dot(N, normalize(uMainLightDirection)), 0.0, 1.0);
+  vec3 mainContribution = uMainLightColor * (uMainLightIntensity * diffuse);
 
-  // 环境光 + 漫反射，保留背光面细节（不致死黑）；颜色由真实海拔决定，明暗由法线决定，二者解耦。
-  vec3 color = baseColor * (0.35 + 0.65 * diffuse);
+  // 半球环境光（SPEC §3.4「低强度半球光，天 / 地双色，保证背光面不死黑」）：按法线 +Y 在天 / 地色间
+  // 插值——朝上表面（+Y）偏天色、朝下表面偏地色。强度 < 1（低强度），不冲淡分层设色（TASK-012 实现
+  // 约束「不以过强环境光冲淡高程色阶」）。背光面（diffuse=0）仍有环境补光，可辨认不死黑。
+  float skyWeight = N.y * 0.5 + 0.5;
+  vec3 ambient = mix(uHemisphereGroundColor, uHemisphereSkyColor, skyWeight) * uHemisphereIntensity;
+
+  // 颜色由真实海拔决定（baseColor），明暗由法线 ×氛围灯光决定（ambient + main）；二者解耦。
+  vec3 color = baseColor * (ambient + mainContribution);
+
+  // 极轻微指数雾（SPEC §3.4「可选极轻微指数雾」）：按相机距离复算与 three.js FogExp2 同一公式
+  // （fogFactor = 1 − exp(−density²·depth²）），把光照后的颜色淡入雾色（= 背景色），柔化地图远缘。
+  // uFogDensity=0（配置 FOG_ENABLED=false）时 fogFactor 恒为 0，片元零开销不做淡入。cameraPosition
+  // 是 ShaderMaterial 内建 uniform（世界相机坐标）；vWorldPosition 已含位移与 mesh 定位。
+  float fogDepth = distance(cameraPosition, vWorldPosition);
+  float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * fogDepth * fogDepth);
+  fogFactor = clamp(fogFactor, 0.0, 1.0);
+  color = mix(color, uFogColor, fogFactor);
 
   gl_FragColor = vec4(color, 1.0);
 }
