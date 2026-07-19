@@ -204,3 +204,164 @@
   line-height: 1.3;
   opacity: 0.65;
 }
+
+/*
+ * 海拔色阶图例（TASK-021，SPEC §9）。
+ *
+ * 色阶复用——单一事实源（TASK-021 实现约束「图例不得复制色阶断点和颜色，必须从 TASK-010 的单一事实源
+ * 派生」）：色条 background（CSS linear-gradient）与刻度色块颜色全部由渲染层从 prepareElevationLegend
+ * （sampleElevationColor + normalizeElevationToRampU）派生后以 inline style 注入，本 CSS 只定义几何 / 排版，
+ * 不写任何色阶颜色——不存在第二套色阶。色条纵向覆盖完整色阶域 [-1500m, 9000m]（与 shader ramp 纹理跨度
+ * 同一事实源），0m 标注「海平面」使水下色段有读图含义。
+ *
+ * 布局——避让主图核心与右下附图（SPEC §9「不遮挡主图核心区域（如左侧竖向贴边）」、TASK-021 实现约束
+ * 「必须同时避让主图核心和右下附图」）：左侧竖向贴边、纵向居中（top:50% + translateY(-50%)）。不遮挡中央
+ * 地形核心；与左上 k 控件（top:16px）、左下合规角标（bottom:16px）、右下南海附图（right/bottom:16px）在
+ * 垂直 / 水平方向分离，互不重叠。pointer-events:none——图例为静态读图辅助，不捕获指针（点击穿透到画布）。
+ */
+.china-map-legend {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 10px 12px;
+  border: 1px solid rgba(120, 160, 200, 0.25);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.china-map-legend-caption {
+  margin-bottom: 8px;
+  letter-spacing: 0.08em;
+}
+
+.china-map-legend-body {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.china-map-legend-bar {
+  flex: 0 0 auto;
+  /* height / width / background(linear-gradient，色阶唯一采样器派生) / border 由渲染层 inline 注入 */
+}
+
+.china-map-legend-ticks {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* 高度由 flex align-items:stretch 拉伸到色条高度，使 li 的 top:% 相对色条高度解析 */
+}
+
+.china-map-legend-tick {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  /* top 由渲染层 inline 注入（(1 - positionFraction) * 100%，positionFraction 来自色阶域归一化） */
+  transform: translateY(-50%);
+}
+
+.china-map-legend-tick-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  border: 1px solid rgba(120, 160, 200, 0.35);
+  /* background 由渲染层 inline 注入（该海拔颜色，来自色阶唯一采样器） */
+}
+
+.china-map-legend-sea-level {
+  margin-left: 4px;
+  opacity: 0.6;
+  font-size: 0.9em;
+}
+
+/*
+ * 合规角标（TASK-021，SPEC §8 / §6）。
+ *
+ * 审图状态——不得伪装已审图（SPEC §8、TASK-021 实现约束「不得以占位审图号暗示已经审图」）：审图号占位为
+ * 字面 GS(202x)xxxx 号（未送审形态），状态文字「未取得审图号 · 仅内部展示」；本 CSS 不打绿勾、不加「已通过」
+ * 类视觉，如实呈现未审图状态。审图号用暖琥珀色（#ffd180）与十段线 / 岛礁政治要素同系，低调可读。
+ *
+ * 发布限制——免责声明不得缺失（SPEC §8、TASK-021 实现约束「不得删除『非官方、仅内部展示、不得正式发布』
+ * 的限制」）：免责声明区（.china-map-compliance-disclaimer）以顶部分隔线与来源列表区分，opacity 低调但完整
+ * 可读，文本来自配置层冻结常量（与 TASK-021 输出要求逐字一致），取得真实审图号前不得删除。
+ *
+ * 来源单一事实源——不复制来源名称（TASK-021 实现约束「合规角标只消费来源 / 审图状态」）：来源列表名称由
+ * 渲染层从来源注册表派生后注入，本 CSS 只定义排版；「非官方」标记如实呈现（当前全部来源非官方审图）。
+ *
+ * 布局——左下角低调角标（SPEC §8「低调角标」「右下 / 左下」、TASK-021 实现约束「避让主图核心和右下附图」）：
+ * left/bottom:16px，半透明深色面板。与左侧竖向图例（纵向居中）、右下南海附图（right/bottom:16px）分离，
+ * 互不重叠。pointer-events:none——角标为静态展示，不捕获指针（点击穿透到画布）。
+ */
+.china-map-compliance {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  pointer-events: none;
+  line-height: 1.4;
+  /* background / border / max-width / color / font-size 由渲染层 inline 注入 */
+}
+
+.china-map-compliance-caption {
+  margin-bottom: 6px;
+  letter-spacing: 0.08em;
+}
+
+.china-map-compliance-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.china-map-compliance-label {
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.china-map-compliance-audit {
+  color: #ffd180;
+}
+
+.china-map-compliance-status {
+  opacity: 0.7;
+}
+
+.china-map-compliance-sources {
+  align-items: flex-start;
+}
+
+.china-map-compliance-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.china-map-compliance-source {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.china-map-compliance-source-unofficial {
+  opacity: 0.6;
+  font-size: 0.9em;
+}
+
+.china-map-compliance-disclaimer {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(120, 160, 200, 0.18);
+  opacity: 0.75;
+  line-height: 1.35;
+}

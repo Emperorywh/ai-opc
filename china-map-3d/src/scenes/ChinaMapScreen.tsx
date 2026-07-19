@@ -92,12 +92,15 @@ import { SceneAtmosphere } from '../three/SceneAtmosphere'
 import { EntranceController } from '../three/EntranceController'
 import { SouthChinaSeaInset } from '../components/SouthChinaSeaInset'
 import { Loader } from '../components/ui/Loader'
+import { ElevationLegend } from '../components/ui/ElevationLegend'
+import { ComplianceBadge } from '../components/ui/ComplianceBadge'
 import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from '../three/camera-constraints'
 import { SCENE_SHADOWS_ENABLED } from '../config/scene-atmosphere'
 import { createElevationProvider } from '../lib/elevation'
 import { loadProvinceGeometry } from '../lib/province-geometry'
 import { loadPoliticalBoundary } from '../lib/political-boundary'
 import { loadPlaceDirectory } from '../lib/place-directory'
+import { loadDataSourceRegistry } from '../lib/data-source-registry'
 import {
   loadLabelFontManifest,
   validateLabelFontCoverage,
@@ -126,6 +129,7 @@ import {
 } from '../lib/entrance-state'
 import type {
   AdministrativeGeometryContract,
+  DataSourceRegistryContract,
   PlaceDirectoryContract,
   PoliticalBoundaryContract,
 } from '../geo-contracts'
@@ -464,6 +468,47 @@ function useLabelFontManifest(): LabelFontManifestState {
   return state
 }
 
+/** 数据来源注册表加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为空注册表——合规署名完整性）。 */
+type DataSourceRegistryState =
+  | { readonly phase: 'loading' }
+  | { readonly phase: 'ready'; readonly contract: DataSourceRegistryContract }
+  | { readonly phase: 'error'; readonly message: string }
+
+/**
+ * 加载数据来源注册表（资产访问层 loadDataSourceRegistry，TASK-021）。
+ *
+ * 该注册表（public/geo/data-sources.json）是 TASK-001 来源声明契约的生产事实源，承载 DEM / 边界 / 政治补充
+ * 等全部来源声明（含非官方审图免责声明）。合规角标（ComplianceBadge）从中派生三类必备署名，不复制来源
+ * 名称字面量。
+ *
+ * 独立性（TASK-021 实现约束「合规角标只消费来源 / 审图状态，不得反向控制资产、场景或交互」）：本 hook
+ * **不**计入 trackedAssets（不参与入场资产就绪判定、不阻塞相机解锁 / 升起动画）——合规角标是静态 overlay，
+ * 其加载状态只决定角标何时呈现，不影响 3D 场景与入场编排。回退本 TASK 仅移除图例 + 角标，来源注册表
+ * 资产仍保留（各资产 provenance 引用它）。
+ */
+function useDataSourceRegistry(): DataSourceRegistryState {
+  const [state, setState] = useState<DataSourceRegistryState>({ phase: 'loading' })
+  useEffect(() => {
+    let cancelled = false
+    loadDataSourceRegistry()
+      .then((contract) => {
+        if (!cancelled) setState({ phase: 'ready', contract })
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setState({
+            phase: 'error',
+            message: cause instanceof Error ? cause.message : String(cause),
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return state
+}
+
 /**
  * 省名 / 省会光点 / 岛礁名称标注准备 + 渲染层（TASK-016）。
  *
@@ -613,6 +658,9 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
   const places = usePlaceDirectory()
   // 离线字体清单并行取数（TASK-016）：标签层渲染前据此做字体覆盖校验，缺字即不渲染 + 错误状态。
   const fontManifest = useLabelFontManifest()
+  // 数据来源注册表并行取数（TASK-021）：合规角标从中派生三类必备署名。不计入 trackedAssets（独立 overlay，
+  // 不影响入场 / 相机 / 场景）。失败时角标不渲染（不静默显示缺来源的角标），主图 / 附图不受影响。
+  const dataSources = useDataSourceRegistry()
 
   // 省级悬停焦点状态（TASK-018 单一焦点源）：稳定 adminId（CN- 前缀）或 null（无焦点）。这是边界样式与
   // 标签样式的**唯一**交互输入——ProvinceHoverPicker 把指针命中翻译成 adminId | null 并回调本 setter，
@@ -771,6 +819,24 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
           </button>
           <span className="china-map-segments">分段 {config.meshSegments}²（GPU 位移）</span>
         </div>
+        {/*
+          海拔色阶图例（TASK-021，SPEC §9）：左侧竖向贴边 DOM overlay，独立于 3D 画布。色条渐变与关键刻度的
+          颜色 / 位置全部从 TASK-010 色阶唯一事实源派生（prepareElevationLegend → sampleElevationColor /
+          normalizeElevationToRampU，与地表片元着色器同一采样器与归一化），不复制断点 / 颜色。关键刻度
+          0 / 1000 / 2000 / 3500 / 5000 / 8848m 齐全，0m 标注「海平面」使水下色段有读图含义。无 props——呈现
+          常量全部来自配置层冻结常量，挂载即稳定呈现、不依赖 3D 资产加载。布局：左侧纵向居中，不遮挡主图核心
+          （中央地形）、不与左上 k 控件 / 右下南海附图 / 左下合规角标重叠。回退本 TASK 仅移除该图例。
+          图例置于 Loader 之前（DOM 序）：加载全屏 Loader 覆盖于其上，加载完成后自然显露。
+        */}
+        <ElevationLegend />
+        {/*
+          合规角标（TASK-021，SPEC §8 / §6）：左下角低调半透明 DOM overlay，独立于 3D 画布。审图号占位为
+          未送审形态（字面 GS(202x)xxxx 号 + 状态「未取得审图号 · 仅内部展示」，不伪造已批复号码）；三类必备
+          来源署名（DEM / 行政区边界 / 政治边界补充）从来源注册表派生，不复制来源名称字面量；完整免责声明
+          （非官方 / 仅内部 / 不得正式发布）至取得真实审图号前不得删除。dataSources 就绪时挂载；不计入
+          trackedAssets（独立 overlay，不影响入场 / 相机 / 场景）。回退本 TASK 仅移除该角标。
+        */}
+        {dataSources.phase === 'ready' && <ComplianceBadge registry={dataSources.contract} />}
         {/*
           加载 / 入场 DOM 反馈（TASK-020）：loading 显示真实进度条（loadedCount / totalCount，不伪造计时）、
           error 显示可诊断错误信息（保持交互关闭、不退化为 fallback）、动画阶段显示极简阶段提示（不遮画布）、
