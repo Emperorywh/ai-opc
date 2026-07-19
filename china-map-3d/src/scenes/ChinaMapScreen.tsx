@@ -1,6 +1,6 @@
 /**
  * 中国 3D 地势大屏场景装配（TASK-009 资产 / 配置 / 渲染分层；TASK-011 受约束相机；
- * TASK-012 深色氛围照明与背景层次）。
+ * TASK-012 深色氛围照明与背景层次；TASK-013 动态海面）。
  *
  * 角色与依赖方向（清晰的场景装配边界，TASK-009 输出约束「资产访问、领域计算、渲染和 DOM overlay
  * 不能混成巨型组件」）：
@@ -12,6 +12,9 @@
  * - 渲染：ChinaTerrainMesh（src/three/ChinaTerrainMesh）—— 唯一的 GPU 位移地形装配；本场景只传 props。
  *   氛围照明（光向 / 光色 / 环境光 / 雾）由 ChinaTerrainMesh 内部从 SCENE_ATMOSPHERE_CONFIG 注入着色器
  *   uniform，本场景不重复传氛围 props（单一事实源，TASK-012 实现约束「视觉参数集中管理」）。
+ * - 海面（TASK-013）：SeaSurface（src/three/SeaSurface）—— 唯一的动态半透明海面装配；位于 y=0（与
+ *   地形同米制海平面）、覆盖主图世界包围盒、双层流动、半透明透视水下大陆架。本场景把它作为独立
+ *   渲染层挂在 Canvas 内，不与 TerrainLayer 耦合（海面不读取 heightmap、不承担加载状态职责）。
  * - 相机 / 控制（TASK-011）：MAP_CAMERA_CONSTRAINTS / DEFAULT_CAMERA_POSE（src/three/camera-constraints）
  *   —— 受约束东南斜俯视相机的纯计算契约（距离 / 极角 / target 边界 / FOV / near / far 全部由主图世界
  *   包围盒派生，无魔法坐标）；MapOrbitControls（src/three/MapOrbitControls）把它装配到 drei OrbitControls。
@@ -19,14 +22,19 @@
  * - 氛围（TASK-012）：SceneAtmosphere（src/three/SceneAtmosphere）—— 把 SCENE_ATMOSPHERE_CONFIG
  *   装配成背景色 / 雾 / 半球环境光 / 单盏方向主光；阴影图总开关 SCENE_SHADOWS_ENABLED（结构性 false）
  *   显式注入 Canvas。本场景不复制氛围常量、不读取行政区 / 地点 / hover。
- * - 场景装配（本文件）：负责 Canvas / 受约束相机 / 深色氛围 / 加载编排 / 极简 DOM overlay（k 切换 + 状态）。
- *   不在此处读取 GeoJSON、不维护 hover、不做颜色分层、不加载外网（后续 TASK 接管）。
+ * - 场景装配（本文件）：负责 Canvas / 受约束相机 / 深色氛围 / 动态海面 / 加载编排 / 极简 DOM overlay
+ *   （k 切换 + 状态）。不在此处读取 GeoJSON、不维护 hover、不做颜色分层、不加载外网（后续 TASK 接管）。
  *
  * 相机交互启停契约（TASK-011 实现约束「相机状态可被后续入场状态机统一启停，没有隐式组件状态」）：
  * - 是否启用轨道交互由本场景以单一布尔 `interactionEnabled` 显式决定，当前 = 「heightmap 已就绪」。
- *   该布尔是后续入场状态机（TASK-013：升起动画期间锁定相机）可统一接管的状态入口：届时把
+ *   该布尔是后续入场状态机（TASK-014：升起动画期间锁定相机）可统一接管的状态入口：届时把
  *   「就绪 && 升起完成」合并即可，无需改 MapOrbitControls。MapOrbitControls 不自持交互开关，
  *   故本场景不存在「组件内部猜测 DOM 状态」的第二套启停路径。
+ *
+ * 海面分层独立性（TASK-013 输出约束「海面作为独立渲染层，不承担地表分层设色、相机、边界或加载状态
+ * 职责」）：SeaSurface 不接收任何 props、不读取 heightmap 加载状态——它在 Canvas 内始终渲染（其几何
+ * 覆盖与时间动画均不依赖地形资产是否就绪）。回退本 TASK 仅移除该层，水下负高程地形、色阶、相机、
+ * 氛围完整保留。
  *
  * 阴影预算（TASK-012 实现约束「地形不投递高分辨率阴影贴图」）：Canvas shadows 显式取
  * SCENE_SHADOWS_ENABLED（结构性 false）——本 TASK 不启用任何 shadow map，地势方向感由方向光 Lambert
@@ -48,6 +56,7 @@ import {
 import { ChinaTerrainMesh } from '../three/ChinaTerrainMesh'
 import { loadHeightmapTexture } from '../three/load-heightmap-texture'
 import type { HeightmapTextureLoadResult } from '../three/load-heightmap-texture'
+import { SeaSurface } from '../three/SeaSurface'
 import { MapOrbitControls } from '../three/MapOrbitControls'
 import { SceneAtmosphere } from '../three/SceneAtmosphere'
 import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from '../three/camera-constraints'
@@ -121,7 +130,7 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
   const heightmap = useHeightmap()
 
   // 受约束相机的交互启停（TASK-011）：单一显式布尔，当前 = heightmap 就绪。后续入场状态机
-  // （TASK-013 升起动画）在此合并「就绪 && 升起完成」即可统一接管，无需改 MapOrbitControls。
+  // （升起动画）在此合并「就绪 && 升起完成」即可统一接管，无需改 MapOrbitControls。
   // 加载 / 错误期置 false——尚无可探索地形时锁定相机，避免空场景下的无意义旋转。
   const interactionEnabled = heightmap.phase === 'ready'
 
@@ -140,6 +149,12 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
         <SceneAtmosphere />
         <MapOrbitControls enabled={interactionEnabled} />
         <TerrainLayer heightmap={heightmap} config={config} />
+        {/*
+          动态海面（TASK-013）：独立渲染层，位于 y=0、覆盖主图海域、双层流动、半透明透视水下大陆架。
+          不接收 props、不读取 heightmap 加载状态——始终渲染，回退本 TASK 仅移除该层（水下负高程地形、
+          色阶、相机、氛围完整保留）。透明 + 不写深度，使水下地形透过海面可见、陆地遮挡海面（无穿插）。
+        */}
+        <SeaSurface />
       </Canvas>
 
       {/* 极简 DOM overlay：k 切换（验证步骤 4）+ 状态文本。完整 UI 由后续 TASK 接管。 */}
