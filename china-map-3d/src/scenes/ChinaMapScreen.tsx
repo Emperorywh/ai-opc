@@ -1,7 +1,7 @@
 /**
  * 中国 3D 地势大屏场景装配（TASK-009 资产 / 配置 / 渲染分层；TASK-011 受约束相机；
  * TASK-012 深色氛围照明与背景层次；TASK-013 动态海面；TASK-014 省级贴地边界；
- * TASK-015 十段线与岛礁点位）。
+ * TASK-015 十段线与岛礁点位；TASK-016 省名 / 省会光点 / 岛礁名称标注 + 离线字体子集）。
  *
  * 角色与依赖方向（清晰的场景装配边界，TASK-009 输出约束「资产访问、领域计算、渲染和 DOM overlay
  * 不能混成巨型组件」）：
@@ -77,12 +77,14 @@ import {
 } from '../config/terrain-config'
 import { PROVINCE_BORDERS_CONFIG } from '../config/province-borders'
 import { POLITICAL_FEATURES_CONFIG } from '../config/political-features'
+import { PLACE_LABELS_CONFIG } from '../config/place-labels'
 import { ChinaTerrainMesh } from '../three/ChinaTerrainMesh'
 import { loadHeightmapTexture } from '../three/load-heightmap-texture'
 import type { HeightmapTextureLoadResult } from '../three/load-heightmap-texture'
 import { SeaSurface } from '../three/SeaSurface'
 import { ProvinceBorders } from '../three/ProvinceBorders'
 import { PoliticalFeatures } from '../three/PoliticalFeatures'
+import { PlaceLabels } from '../three/PlaceLabels'
 import { MapOrbitControls } from '../three/MapOrbitControls'
 import { SceneAtmosphere } from '../three/SceneAtmosphere'
 import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from '../three/camera-constraints'
@@ -90,6 +92,12 @@ import { SCENE_SHADOWS_ENABLED } from '../config/scene-atmosphere'
 import { createElevationProvider } from '../lib/elevation'
 import { loadProvinceGeometry } from '../lib/province-geometry'
 import { loadPoliticalBoundary } from '../lib/political-boundary'
+import { loadPlaceDirectory } from '../lib/place-directory'
+import {
+  loadLabelFontManifest,
+  validateLabelFontCoverage,
+} from '../lib/label-font'
+import type { LabelFontManifest } from '../lib/label-font'
 import {
   prepareProvinceBorders,
   type ProvinceBorderPrepConfig,
@@ -98,8 +106,14 @@ import {
   preparePoliticalFeatures,
   type PoliticalFeaturePrepConfig,
 } from '../lib/political-features'
+import {
+  collectAllLabelDomainStrings,
+  preparePlaceLabels,
+  type PlaceLabelPrepConfig,
+} from '../lib/place-labels'
 import type {
   AdministrativeGeometryContract,
+  PlaceDirectoryContract,
   PoliticalBoundaryContract,
 } from '../geo-contracts'
 
@@ -354,6 +368,165 @@ function PoliticalFeaturesLayer({
   return <PoliticalFeatures features={result.features} />
 }
 
+/** 地点目录加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为空目录——标签完整性）。 */
+type PlaceDirectoryState =
+  | { readonly phase: 'loading' }
+  | { readonly phase: 'ready'; readonly contract: PlaceDirectoryContract }
+  | { readonly phase: 'error'; readonly message: string }
+
+/**
+ * 加载地点目录（资产访问层 loadPlaceDirectory），就绪后返回经契约校验的 contract。
+ * 与 heightmap / province geometry / political boundary 并行取数；标签层只在 heightmap + 地点目录 + 政治边界
+ * 均就绪时计算（TASK-016）。失败绝不退化为空目录（标签会基于残缺数据产出缺省标签）。
+ */
+function usePlaceDirectory(): PlaceDirectoryState {
+  const [state, setState] = useState<PlaceDirectoryState>({ phase: 'loading' })
+  useEffect(() => {
+    let cancelled = false
+    loadPlaceDirectory()
+      .then((contract) => {
+        if (!cancelled) setState({ phase: 'ready', contract })
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setState({
+            phase: 'error',
+            message: cause instanceof Error ? cause.message : String(cause),
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return state
+}
+
+/** 离线字体清单加载状态：加载中 / 就绪 / 失败（失败绝不静默退化——缺字需明确状态）。 */
+type LabelFontManifestState =
+  | { readonly phase: 'loading' }
+  | { readonly phase: 'ready'; readonly manifest: LabelFontManifest }
+  | { readonly phase: 'error'; readonly message: string }
+
+/**
+ * 加载离线字体清单（资产访问层 loadLabelFontManifest），就绪后返回经结构校验的清单。
+ * 清单记录字体实际包含的字符集合，供标签层在渲染前做覆盖校验（缺字即不渲染标签 + 错误状态，
+ * 不静默显示空白 / fallback 网络字体）。失败绝不退化为空清单。
+ */
+function useLabelFontManifest(): LabelFontManifestState {
+  const [state, setState] = useState<LabelFontManifestState>({ phase: 'loading' })
+  useEffect(() => {
+    let cancelled = false
+    loadLabelFontManifest(PLACE_LABELS_CONFIG.fontManifestPath)
+      .then((manifest) => {
+        if (!cancelled) setState({ phase: 'ready', manifest })
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setState({
+            phase: 'error',
+            message: cause instanceof Error ? cause.message : String(cause),
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return state
+}
+
+/**
+ * 省名 / 省会光点 / 岛礁名称标注准备 + 渲染层（TASK-016）。
+ *
+ * 依赖五个就绪输入：heightmap（含 pixels，构造共享 ElevationProvider）、地点目录（省名锚点 + 省级行政中心）、
+ * 政治边界补充契约（岛礁名称 + 坐标）、夸张系数 k、离线字体清单。任一未就绪时返回 null（不渲染）。
+ * 全部齐备时：
+ * 1. 由 heightmap.meta + pixels 构造 ElevationProvider（与省界 / 政治要素层各自构造、共享同一份 pixels）。
+ * 2. 调领域纯函数 preparePlaceLabels（投影 + 贴地 / 浮高 + 红线断言）产出 PreparedPlaceLabels。
+ * 3. collectAllLabelDomainStrings 从地点 / 政治契约提取字体必须覆盖的全部领域字符串。
+ * 4. validateLabelFontCoverage 断言字体清单 ⊇ 领域字符串（缺字即 coverage-incomplete）。
+ * 5. 覆盖校验通过则交 PlaceLabels 渲染（Billboard Text + 发光光点，始终面向相机）。
+ *
+ * 准备 / 覆盖期异常（角色-配对失衡 / 点名岛礁缺项 / 投影 / 高程查询失败 / 字体缺字）被捕获并 console.error
+ * 记录后跳过标签——不崩溃场景（地形 / 海面 / 省界 / 十段线 / 相机 / 氛围继续有效，符合 TASK-016 回退边界）。
+ *
+ * memo 边界：provider 仅依赖 heightmap；labels 依赖 place + political + provider + k + prepConfig；
+ * coverage 依赖 labels + manifest。k 切换时 labels 确定性重算（浮高 / 贴地随 k 变化）——离散切换一次性开销。
+ */
+function PlaceLabelsLayer({
+  heightmap,
+  places,
+  political,
+  fontManifest,
+  exaggeration,
+}: {
+  readonly heightmap: HeightmapState
+  readonly places: PlaceDirectoryState
+  readonly political: PoliticalBoundaryState
+  readonly fontManifest: LabelFontManifestState
+  readonly exaggeration: number
+}): null | ReactNode {
+  // 所有 Hook 必须无条件调用（rules-of-hooks）：就绪判定移入 Hook 内部。
+  // 由 heightmap 的 meta + pixels 构造 ElevationProvider（与省界 / 政治要素层各自构造、共享同一份 pixels）。
+  const provider = useMemo(() => {
+    if (heightmap.phase !== 'ready') return null
+    return createElevationProvider(heightmap.heightmap.meta, heightmap.heightmap.pixels)
+  }, [heightmap])
+
+  // 标签准备配置由冻结的 PLACE_LABELS_CONFIG 派生（省名 / 岛礁浮高 + epsilon + 海平面 y），引用稳定。
+  const prepConfig = useMemo<PlaceLabelPrepConfig>(
+    () => ({
+      provinceLabelHeightOffsetMeters: PLACE_LABELS_CONFIG.provinceLabelHeightOffsetMeters,
+      islandLabelHeightOffsetMeters: PLACE_LABELS_CONFIG.islandLabelHeightOffsetMeters,
+      terrainEpsilonMeters: PLACE_LABELS_CONFIG.terrainEpsilonMeters,
+      seaLevelYMeters: PLACE_LABELS_CONFIG.seaLevelYMeters,
+    }),
+    [],
+  )
+
+  // 准备 + 覆盖校验：任一输入未就绪返回 notReady；准备 / 覆盖异常捕获、记录、跳过标签不崩溃场景。
+  const result = useMemo(() => {
+    if (
+      heightmap.phase !== 'ready' ||
+      places.phase !== 'ready' ||
+      political.phase !== 'ready' ||
+      fontManifest.phase !== 'ready' ||
+      provider === null
+    ) {
+      return { ok: false as const, notReady: true }
+    }
+    try {
+      // 1. 准备标签（投影 + 贴地 / 浮高 + 红线断言）。
+      const labels = preparePlaceLabels(
+        places.contract,
+        political.contract,
+        provider,
+        exaggeration,
+        prepConfig,
+      )
+      // 2. 字体覆盖校验：从契约提取领域字符串，断言字体清单 ⊇ 领域字符串。缺字即抛 coverage-incomplete。
+      const domainStrings = collectAllLabelDomainStrings(places.contract, political.contract)
+      const coverage = validateLabelFontCoverage(fontManifest.manifest, domainStrings)
+      if (!coverage.ok) {
+        throw new Error(
+          `${coverage.message}${coverage.missingCharacters !== undefined ? `（缺失：[${coverage.missingCharacters.join('、')}]）` : ''}`,
+        )
+      }
+      return { ok: true as const, labels }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      // 准备 / 覆盖失败：console 记录便于排查，但不抛出（不崩溃场景）；合法资产下正常路径不触发。
+      // eslint-disable-next-line no-console
+      console.error(`[PlaceLabels] 省名 / 省会光点 / 岛礁名称标签准备或字体覆盖校验失败：${message}`)
+      return { ok: false as const, notReady: false }
+    }
+  }, [heightmap, places, political, fontManifest, provider, exaggeration, prepConfig])
+
+  if (!result.ok) return null
+  return <PlaceLabels labels={result.labels} />
+}
+
 /** ChinaMapScreen 的 props：允许注入配置（默认生产配置），便于低资源环境改用测试配置。 */
 export interface ChinaMapScreenProps {
   /** 初始地形渲染配置（默认 PRODUCTION_TERRAIN_CONFIG：k=2.0、分段 2048²）。 */
@@ -380,6 +553,10 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
   // 政治边界补充契约并行取数（与 heightmap / province geometry 独立）；政治要素层只在 heightmap 与 contract
   // 均就绪时计算（TASK-015）。
   const political = usePoliticalBoundary()
+  // 地点目录并行取数（TASK-016）：省名锚点 + 省级行政中心；标签层只在 heightmap + 地点 + 政治边界均就绪时计算。
+  const places = usePlaceDirectory()
+  // 离线字体清单并行取数（TASK-016）：标签层渲染前据此做字体覆盖校验，缺字即不渲染 + 错误状态。
+  const fontManifest = useLabelFontManifest()
 
   // 受约束相机的交互启停（TASK-011）：单一显式布尔，当前 = heightmap 就绪。后续入场状态机
   // （升起动画）在此合并「就绪 && 升起完成」即可统一接管，无需改 MapOrbitControls。
@@ -429,6 +606,20 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
           political={political}
           exaggeration={config.exaggeration}
         />
+        {/*
+          省名 / 省会光点 / 岛礁名称标注（TASK-016）：heightmap（含 pixels，构造共享 ElevationProvider）+ 地点
+          目录 + 政治边界契约 + 离线字体清单均就绪时投影 + 贴地 / 浮高 + 字体覆盖校验后渲染。准备 / 覆盖期异常
+          （角色-配对失衡 / 点名岛礁缺项 / 投影 / 高程查询失败 / 字体缺字）被捕获、跳过标签不崩溃场景（回退边界）。
+          Billboard Text（始终面向相机）+ 暖琥珀省会发光光点；字体取本地子集（无在线请求）。本 TASK 不宣称取得
+          审图号，内部展示状态下验收（坐标为非官方审图数据，见 docs/political-review-record.md）。
+        */}
+        <PlaceLabelsLayer
+          heightmap={heightmap}
+          places={places}
+          political={political}
+          fontManifest={fontManifest}
+          exaggeration={config.exaggeration}
+        />
       </Canvas>
 
       {/* 极简 DOM overlay：k 切换（验证步骤 4）+ 状态文本。完整 UI 由后续 TASK 接管。 */}
@@ -449,6 +640,12 @@ export function ChinaMapScreen({ initialConfig = PRODUCTION_TERRAIN_CONFIG }: Ch
         {heightmap.phase === 'loading' && <div className="china-map-status">地形高程加载中…</div>}
         {heightmap.phase === 'error' && (
           <div className="china-map-status china-map-error">加载失败：{heightmap.message}</div>
+        )}
+        {places.phase === 'error' && (
+          <div className="china-map-status china-map-error">地点目录加载失败：{places.message}</div>
+        )}
+        {fontManifest.phase === 'error' && (
+          <div className="china-map-status china-map-error">字体清单加载失败：{fontManifest.message}</div>
         )}
       </div>
     </div>
