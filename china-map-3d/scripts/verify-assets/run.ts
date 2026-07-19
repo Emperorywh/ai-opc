@@ -24,6 +24,7 @@ import {
   type ContractKind,
 } from '../../src/geo-contracts/index'
 import { verifyTerrainAsset } from './terrain-deep'
+import { verifyProvincesAsset } from './provinces-deep'
 
 const projectRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
 
@@ -56,6 +57,17 @@ const PRODUCTION_TERRAIN = {
 } as const
 
 /**
+ * 生产省级边界资产路径（相对项目根）。provinces scope 自 TASK-004 起校验这套生产资产。
+ * 目录与几何拆为两个 kind 各自的文件（目录小而快、几何大而独立加载），二者经深度校验构成一一对应。
+ */
+const PRODUCTION_PROVINCES = {
+  directory: 'public/geo/china-provinces-directory.json',
+  geometry: 'public/geo/china-provinces-geometry.json',
+  provenance: 'public/geo/china-provinces.provenance.json',
+  sources: 'public/geo/data-sources.json',
+} as const
+
+/**
  * Scope 注册表。
  * 后续 TASK 新增生产资产时：把对应 scope 的 probes 路径替换/扩展为真实资产路径，或追加 customVerify
  * 即可，无需新建第二条校验管线（避免重复契约/双轨入口）。
@@ -71,11 +83,15 @@ const SCOPE_REGISTRY: Record<string, ScopeDescriptor> = {
     customVerify: verifyProductionTerrain,
   },
   provinces: {
-    label: '省级行政区（目录 + 几何）',
+    label: '生产省级边界资产（深度校验：34 省/港澳台/目录-几何双射/真值一致/环闭合/坐标范围/来源/审计）',
+    // probes 保留指向 tests/fixtures/legal 的代表夹具，仅为 `--scope all` 末尾的跨契约 bundle 核对
+    // （fixture 地点目录引用 CN-GD/CN-HI/CN-MO，需由 fixture 行政区目录解析）提供目录与几何。
+    // 本 scope 实际的资产校验由 customVerify 在生产资产上执行（与 terrain scope 同构）。
     probes: [
       { path: 'tests/fixtures/legal/admin-directory.json', expectedKind: 'administrative-directory' },
       { path: 'tests/fixtures/legal/admin-geometry.json', expectedKind: 'administrative-geometry' },
     ],
+    customVerify: verifyProductionProvinces,
   },
   places: {
     label: '地点目录',
@@ -233,6 +249,65 @@ function verifyProductionTerrain(): number {
     console.log('  ✓ 地势抽样不变量通过：青藏高于东部、盆地低于周边、浅海含负高程、深海截断到下限')
     console.log(
       `  ✓ ${PRODUCTION_TERRAIN.sources}（来源引用解析）+ ${PRODUCTION_TERRAIN.provenance}（完整性摘要逐项一致：SHA-256 / 字节数 / 统计量）`,
+    )
+  } else {
+    failures++
+    for (const err of outcome.errors) {
+      console.error(`  ✗ [${err.code}] ${err.path}: ${err.message}`)
+    }
+  }
+  return failures
+}
+
+/**
+ * 生产省级边界资产深度校验（TASK-004 provinces scope）。
+ * 加载目录、几何、来源注册表与审计 sidecar，调用 verifyProvincesAsset 一次性给出
+ * 34 省 / 港澳台 / 目录-几何双射 / 真值一致 / 环闭合 / 坐标范围 / 来源 / 审计的全部结论，
+ * 并打印抽样摘要（类型构成、坐标四至、数量统计）便于人工读图。
+ */
+function verifyProductionProvinces(): number {
+  console.log('▶ 校验 scope：provinces（生产省级边界资产 · 深度校验）')
+  let failures = 0
+  let directory: unknown
+  let geometry: unknown
+  let sources: unknown
+  let provenance: unknown = undefined
+  let directoryText: string | undefined = undefined
+  let geometryText: string | undefined = undefined
+  try {
+    directory = readJsonFile(PRODUCTION_PROVINCES.directory)
+    geometry = readJsonFile(PRODUCTION_PROVINCES.geometry)
+    sources = readJsonFile(PRODUCTION_PROVINCES.sources)
+    // 目录 / 几何的原始文本用于复算 SHA-256 防篡改锚点；与落盘字节同源（readFileSync 原样读出）。
+    directoryText = readFileSync(resolve(projectRoot, PRODUCTION_PROVINCES.directory), 'utf-8')
+    geometryText = readFileSync(resolve(projectRoot, PRODUCTION_PROVINCES.geometry), 'utf-8')
+    provenance = readJsonFile(PRODUCTION_PROVINCES.provenance)
+  } catch (cause) {
+    failures++
+    console.error(`  ✗ 生产省级边界资产文件读取失败：${(cause as Error).message}`)
+    return failures
+  }
+
+  const outcome = verifyProvincesAsset({
+    directory,
+    geometry,
+    sourcesRegistry: sources,
+    provenance,
+    directoryText,
+    geometryText,
+  })
+  if (outcome.ok) {
+    console.log(`  ✓ ${PRODUCTION_PROVINCES.directory}（${outcome.samples.directoryCount} 个省级行政区 · 目录契约通过）`)
+    console.log(`  ✓ ${PRODUCTION_PROVINCES.geometry}（${outcome.samples.geometryCount} 要素 · ${outcome.samples.polygonCount} 多边形 · ${outcome.samples.ringCount} 环 · ${outcome.samples.coordinateCount} 坐标）`)
+    console.log(
+      `  · 类型构成：省 ${outcome.samples.typeBreakdown.province} / 自治区 ${outcome.samples.typeBreakdown.autonomousRegion} / 直辖市 ${outcome.samples.typeBreakdown.municipality} / 特别行政区 ${outcome.samples.typeBreakdown.specialAdministrativeRegion}（几何 Polygon ${outcome.samples.geometryTypeBreakdown.polygon} / MultiPolygon ${outcome.samples.geometryTypeBreakdown.multiPolygon}）`,
+    )
+    console.log(
+      `  · 坐标四至：经度 [${outcome.samples.observedWest.toFixed(3)}, ${outcome.samples.observedEast.toFixed(3)}] / 纬度 [${outcome.samples.observedSouth.toFixed(3)}, ${outcome.samples.observedNorth.toFixed(3)}]（落在中国主图 [72,3,136,54]）`,
+    )
+    console.log('  ✓ 深度不变量通过：恰好 34 省、港 / 澳 / 台均在、目录-几何双射、与 34 省目录真值一致、所有环闭合')
+    console.log(
+      `  ✓ ${PRODUCTION_PROVINCES.sources}（来源引用解析）+ ${PRODUCTION_PROVINCES.provenance}（完整性摘要逐项一致：SHA-256 / 数量统计）`,
     )
   } else {
     failures++

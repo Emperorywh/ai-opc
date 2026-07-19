@@ -11,6 +11,16 @@
       "version": "ETOPO1 Ice Surface v2.2 / 经 Open Topo Data etopo1 端点抽样",
       "license": "NOAA NCEI 公共领域数据",
       "disclaimer": "ETOPO1 为公开科学地形数据集（含陆地高程与海洋水深），非中国官方审图数据；本资产经粗分辨率抽样后重采样到 4096²，仅供内部展示，公开发布前须取得自然资源主管部门审图号。"
+    },
+    {
+      "id": "src-datav-provinces",
+      "name": "阿里 DataV.GeoAtlas 省级边界",
+      "originUrl": "https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json",
+      "kind": "administrativeBoundary",
+      "isOfficialSurvey": false,
+      "version": "areas_v3 拉取快照（SHA-256 记录于 china-provinces.provenance.json）",
+      "license": "DataV.GeoAtlas 使用条款",
+      "disclaimer": "DataV 边界为非官方审图数据，不含九段线 / 南海岛礁，部分争议区画法非国标；仅供内部展示，不得作为正式出版 / 发布用途，公开发布前须取得自然资源主管部门审图号。"
     }
   ]
 }

@@ -119,7 +119,7 @@ public/ 静态资产（fetch 本地文件，无外网）
 |---|---|
 | `pnpm test` | 运行 vitest 测试基线（合法夹具通过 + 各类确定性失败） |
 | `pnpm verify:assets` | 运行资产校验 CLI，等价于 `--scope all` |
-| `pnpm verify:assets -- --scope terrain` | 只校验某 scope（terrain / provinces / places / political / sources） |
+| `pnpm verify:assets -- --scope provinces` | 只校验某 scope（terrain / provinces / places / political / sources） |
 | `pnpm lint` | oxlint 静态检查 |
 | `pnpm build` | `tsc -b && vite build`，确认契约层类型正确且测试/脚本不进浏览器包 |
 
@@ -139,6 +139,15 @@ public/ 静态资产（fetch 本地文件，无外网）
   clampedToMinCount）由校验侧逐项复算比对，SHA-256 防篡改锚点闭环。重建命令与**分辨率决策**
   （0.5° ETOPO1 被接受为 TASK-003 契约产物，视觉升级推迟到 TASK-004 依据 GPU 渲染判定）见
   `scripts/dem/README.md` §1A / §1B。
-- 尚未交付：34 省边界、省会点位、九段线/岛礁等生产资产，由后续 TASK-004 ~ TASK-006 产出并接入各 scope。
+- 已交付生产资产（TASK-004）：`public/geo/china-provinces-{directory,geometry}.json`
+  + `public/geo/china-provinces.provenance.json`，来源 `src-datav-provinces`（阿里 DataV.GeoAtlas
+  `100000_full.json`，已登记入 `public/geo/data-sources.json`）。provinces scope 接入**资产级深度校验**
+  （恰好 34 省 / 港澳台必在 / 目录-几何双射 / 与 34 省目录真值一致 / 所有环闭合 / 坐标落中国主图 /
+  来源审计，见 `scripts/verify-assets/provinces-deep.ts`）；34 省领域真值单一定义于
+  `scripts/provinces/province-catalog.ts`，标识方案为 `CN-<GB/T 2260 adcode>`。港 / 澳 / 台三者的
+  存在性在深度校验中另有**独立硬编码锚点**（不依赖目录），九段线 / 南海岛礁 / 争议区国标完整性仍由
+  TASK-006 独立闭环——本 TASK 只交付 DataV 基础 34 省，**不**声称已完成政治红线。重建命令见
+  `scripts/provinces/fetch-datav-provinces.ts`（离线取数，运行时零外网）。
+- 尚未交付：省会点位、九段线/岛礁等生产资产，由后续 TASK-005 ~ TASK-006 产出并接入各 scope。
 - 当前 `version` 仅有 `1.0.0`；后续如更换 DEM 源或修正边界，在
   `src/geo-contracts/codes.ts` 的 `KNOWN_DATA_VERSIONS` 登记新版本。

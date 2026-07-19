@@ -1,0 +1,34 @@
+{
+  "kind": "provinces-asset-provenance",
+  "assetDirectory": "china-provinces-directory.json",
+  "assetGeometry": "china-provinces-geometry.json",
+  "source": {
+    "sourceId": "src-datav-provinces",
+    "dataset": "阿里 DataV.GeoAtlas 省级边界（100000_full.json）",
+    "accessEndpoint": "https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json",
+    "note": "含省、自治区、直辖市、港澳特别行政区与台湾省；DataV 把九段线作为独立要素（100000_JD）随省级边界一并下发，本生产流程将其过滤，仅保留 34 省目录命中的行政区。"
+  },
+  "generation": {
+    "pipeline": "scripts/provinces/fetch-datav-provinces.ts",
+    "catalog": "scripts/provinces/province-catalog.ts（34 省领域真值）",
+    "processingParams": {
+      "geometryConversion": "GeoJSON [lon,lat] → 契约 {lon,lat} 命名字段，类型保留（Polygon / MultiPolygon）",
+      "topologyRepair": "none（不做拓扑修复 / 抽稀 / 政治要素补充；九段线 / 南海岛礁 / 争议区由 TASK-006 独立闭环）",
+      "ringClosure": "保留 DataV 原始闭合环（首尾点重合）"
+    },
+    "producedAt": "2026-07-19T06:31:37.310Z",
+    "producedBy": "TASK-004"
+  },
+  "integrity": {
+    "sourcePayloadSha256": "99adfeded5223848bbe37a0a12f8023e11ee12161c7800521c27db42fdeac275",
+    "directorySha256": "f8fdcc7bf0f8f8a6d48130db69f39998ab407fd19ea10e78e9621423b0b1317b",
+    "geometrySha256": "ae5594f5b9006aec00ff5eae119bb99a5365a1d673414b70a53850f0b6319da1",
+    "featureCount": 34,
+    "polygonCount": 329,
+    "ringCount": 329,
+    "coordinateCount": 24950,
+    "multiPolygonCount": 33,
+    "polygonOnlyCount": 1
+  },
+  "disclaimer": "本资产源自阿里 DataV.GeoAtlas 省级边界（非官方审图数据），不含九段线 / 南海岛礁，部分争议区画法非国标；仅供内部展示，不得作为正式出版 / 发布用途，公开发布前须取得自然资源主管部门审图号。"
+}
