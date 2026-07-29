@@ -143,6 +143,6 @@ GPU 在归一化 FloatType 纹理上做硬件双线性、再在着色器里线�
   分段默认 2048²、上限 4096²（配置项暴露），位移恒在 GPU，CPU 只建一份平面几何。
 - **分层设色**：fragment shader 按像素 UV 重采样同一纹理得真实 h（**不用 world-y**，它会偏色 k 倍），
   按 meta minH/maxH 归一化查 256×1 ramp（src/config/elevation-color-ramp 唯一事实源），叠加方向光
-  法线明暗（src/config/terrain-shading 唯一事实源）。
+  法线明暗（src/config/scene-atmosphere 唯一事实源，TASK-008 起）。
 - **CPU 查询**（本模块）：贴地 / 遮挡 / 海面以下判定共用同一份 uint16 pixels 的双线性米值查询，
   与 GPU 同源同解码（§3）。

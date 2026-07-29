@@ -223,6 +223,41 @@ describe('海面着色器结构不变量（验收 1、2、3）', () => {
   })
 })
 
+describe('海面片元雾结构不变量（TASK-008：与地形 / 场景雾同一 FogExp2 公式，SPEC §3.4）', () => {
+  it('顶点着色器透传世界坐标（vWorldPosition，只用于雾深计算；顶点仍无位移）', () => {
+    expect(SEA_SURFACE_VERTEX_SHADER).toContain('varying vec3 vWorldPosition')
+    expect(SEA_SURFACE_VERTEX_SHADER).toContain('vWorldPosition = worldPosition.xyz')
+  })
+
+  it('片元声明 uFogColor / uFogDensity 与 vWorldPosition（雾参数经 uniform 注入，不硬编码）', () => {
+    expect(SEA_SURFACE_FRAGMENT_SHADER).toContain('uniform vec3 uFogColor')
+    expect(SEA_SURFACE_FRAGMENT_SHADER).toContain('uniform float uFogDensity')
+    expect(SEA_SURFACE_FRAGMENT_SHADER).toContain('varying vec3 vWorldPosition')
+  })
+
+  it('雾深 = 相机到世界片元距离；fogFactor 复算 FogExp2 同一公式并夹到 [0,1]', () => {
+    expect(SEA_SURFACE_FRAGMENT_SHADER).toContain('distance(cameraPosition, vWorldPosition)')
+    expect(SEA_SURFACE_FRAGMENT_SHADER).toContain(
+      '1.0 - exp(-uFogDensity * uFogDensity * fogDepth * fogDepth)',
+    )
+    expect(SEA_SURFACE_FRAGMENT_SHADER).toContain('clamp(fogFactor, 0.0, 1.0)')
+  })
+
+  it('雾只调制 RGB 不动 alpha：mix 在 gl_FragColor 之前，输出仍为 vec4(color, uOpacity)', () => {
+    const fogIndex = SEA_SURFACE_FRAGMENT_SHADER.indexOf('mix(color, uFogColor, fogFactor)')
+    const outputIndex = SEA_SURFACE_FRAGMENT_SHADER.indexOf('gl_FragColor = vec4(color, uOpacity)')
+    expect(fogIndex).toBeGreaterThan(-1)
+    expect(outputIndex).toBeGreaterThan(fogIndex)
+  })
+
+  it('SeaSurface 从 scene-atmosphere 注入雾 uniform（与地形 / 场景雾同源；关闭时密度取 0）', () => {
+    const source = readSource('three/SeaSurface.tsx')
+    expect(source).toContain("from '../config/scene-atmosphere'")
+    expect(source).toContain('uFogColor: { value: new THREE.Vector3(...hexToShaderFloat3(fog.hex)) }')
+    expect(source).toContain('uFogDensity: { value: fog.enabled ? fog.density : 0 }')
+  })
+})
+
 describe('SeaSurface 组件装配（验收 1、2、3：透明渲染 / 统一时钟 / 配置唯一源）', () => {
   const source = readSource('three/SeaSurface.tsx')
 

@@ -42,12 +42,21 @@
  *   插值策略，断点 / 基线色 / ramp 描述不在着色器内复制。
  *
  * 深色地势照明（SPEC §3.1「叠加方向光产生的法线明暗」、§3.4）：
- * - 法线明暗的光向 / 光色 / 光强 / 半球环境光全部来自地形明暗照明配置
- *   （src/config/terrain-shading 的 TERRAIN_SHADING_CONFIG），由 ChinaTerrainMesh 注入 uniform——
- *   本片元不硬编码光向。地形不投递阴影贴图（SPEC §3.4「4096² 级阴影图成本过高」）：地势方向感由
- *   「方向光 Lambert 漫反射 + 半球环境光」体现，背光面保留环境补光可辨认（不致死黑）。
- * - 场景级氛围（背景、场景灯、可选轻雾）由 TASK-008 装配；本片元当前不含雾计算，雾若启用由
- *   TASK-008 以同一 FogExp2 公式补充。
+ * - 法线明暗的光向 / 光色 / 光强 / 半球环境光全部来自场景氛围配置
+ *   （src/config/scene-atmosphere 的 SCENE_ATMOSPHERE_CONFIG——TASK-008 起为照明唯一事实源，
+ *   吸收 TASK-006 terrain-shading），由 ChinaTerrainMesh 注入 uniform——本片元不硬编码光向。
+ *   地形不投递阴影贴图（SPEC §3.4「4096² 级阴影图成本过高」）：地势方向感由「方向光 Lambert
+ *   漫反射 + 半球环境光」体现，背光面保留环境补光可辨认（不致死黑）。
+ *
+ * 极轻微指数雾（SPEC §3.4「可选极轻微指数雾，柔化地图远缘与背景的衔接」，TASK-008 装配）：
+ * - 地形是自定义 ShaderMaterial，three.js 的 scene.fog 不会自动作用于本片元，故在片元内手动
+ *   复算与 FogExp2 同一公式（fogFactor = 1 − exp(−density²·depth²)），把光照后的颜色淡入雾色
+ *   （= 背景色，远缘无接缝）。雾深取「相机到世界片元的距离」（distance(cameraPosition,
+ *   vWorldPosition)；cameraPosition 是 ShaderMaterial 内建 uniform），与 scene.fog 的视线深度
+ *   仅在屏幕边缘有微小差异，视觉等价。
+ * - 雾色 / 雾密度经 uniform（uFogColor / uFogDensity）由 ChinaTerrainMesh 注入，与 SceneAtmosphere
+ *   的场景雾同读 SCENE_ATMOSPHERE_CONFIG——两处密度同源、永不漂移。uFogDensity=0（配置
+ *   FOG_ENABLED=false）时 fogFactor 恒为 0，片元零开销不做淡入。
  */
 
 /**
@@ -62,6 +71,12 @@
  * - uRise：入场升起进度 [0,1]（默认 1.0，TASK-013 入场编排驱动它做 0→1 插值；0 时地形为平面）。
  * - uPlaneWorldWidth / uPlaneWorldHeight：plane 在世界 x / z 方向的米制跨度（用于法线切线的水平尺度，
  *   使法线方向反映真实坡度而非 uv 步长）。
+ *
+ * varying 语义：
+ * - vWorldNormal：位移后法线（世界空间），供片元做 Lambert 漫反射与半球环境光插值。
+ * - vHeightmapUV：翻转对齐后的 heightmap UV，供片元按像素重采样真实高程（与顶点位移同方位）。
+ * - vWorldPosition：位移后顶点世界坐标，供片元做 FogExp2 雾深计算（相机到片元距离；只用于雾，
+ *   不参与查色——查色用 vHeightmapUV 重采样的真实 h）。
  */
 export const TERRAIN_VERTEX_SHADER = /* glsl */ `
 uniform sampler2D uHeightmap;
@@ -75,6 +90,7 @@ uniform float uPlaneWorldHeight;
 
 varying vec3 vWorldNormal;
 varying vec2 vHeightmapUV;
+varying vec3 vWorldPosition;
 
 // 把归一化高程码（code/65535）仿射解码为真实米制海拔。
 // 与 src/geo-contracts decodeUint16ToElevation 同一公式：h = normalized·(max−min) + min。
@@ -132,12 +148,15 @@ void main() {
   // 注意：**不**把 world-y 透传给片元查色——world-y 已含 k，用它查色会偏移 k 倍；
   // 片元自行重采样 heightmap 取真实 h（SPEC §3.1）。
   vec4 worldPosition = modelMatrix * vec4(displaced, 1.0);
+  // 透传世界坐标供片元做 FogExp2 雾深计算（相机到片元距离；只用于雾，不参与查色）。
+  vWorldPosition = worldPosition.xyz;
   gl_Position = projectionMatrix * viewMatrix * worldPosition;
 }
 `
 
 /**
- * 片元着色器：真实海拔分层设色 + 方向光法线明暗（Lambert 漫反射 + 半球环境光）（TASK-006）。
+ * 片元着色器：真实海拔分层设色 + 方向光法线明暗（Lambert 漫反射 + 半球环境光）+ 极轻微指数雾
+ * （TASK-006 位移与查色、TASK-008 雾）。
  *
  * 颜色完全由「真实米制海拔 h」决定，与垂直夸张系数 k 无关——片元按像素 UV 重新采样 heightmap 得 h，
  * 按 u = (h − minH)/(maxH − minH) 归一化（minH/maxH 来自经校验的元数据，与 SPEC §5.1 色阶域一致），
@@ -145,9 +164,10 @@ void main() {
  * 分段线性插值），着色器内不复制断点 / 颜色。法线只调制基线色的明暗（Lambert 漫反射 + 半球环境光），
  * 体现地势方向感；地形本身不投递阴影贴图（SPEC §3.4）。颜色不映射任何业务数据（纯地理语义）。
  *
- * 照明参数全部来自地形明暗照明配置（TERRAIN_SHADING_CONFIG），由 ChinaTerrainMesh 注入 uniform——
- * 本片元不硬编码光向 / 光色。地形是自定义 ShaderMaterial，不自动消费 three.js 场景灯，故照明参数
- * 需经 uniform 显式注入。
+ * 照明与雾参数全部来自场景氛围配置（SCENE_ATMOSPHERE_CONFIG，src/config/scene-atmosphere——
+ * TASK-008 起为照明 / 雾唯一事实源），由 ChinaTerrainMesh 注入 uniform——本片元不硬编码光向 / 光色 /
+ * 雾密度。地形是自定义 ShaderMaterial，不自动消费 three.js 场景灯与场景雾，故照明 / 雾参数需经
+ * uniform 显式注入（与 SceneAtmosphere 的场景灯 / 场景雾同读一份配置，永不漂移）。
  *
  * uniform 语义：
  * - uHeightmap：归一化高程码纹理（与顶点位移共用同一份，片元按像素重采样得真实 h）。
@@ -155,11 +175,14 @@ void main() {
  *   GPU 上传格式适配见 elevation-ramp-texture.ts）。
  * - uMinElevationMeters / uMaxElevationMeters：色阶归一化上下限（来自元数据，与色阶域一致）。
  * - uMainLightDirection：主光方向（surface-to-light，世界坐标，单位向量；西北偏高 → x<0、y>0、z<0）。
- *   来自 TERRAIN_SHADING_CONFIG.mainLight.direction。
+ *   来自 SCENE_ATMOSPHERE_CONFIG.mainLight.direction。
  * - uMainLightColor：主光颜色（[0,1]³，sRGB 字节 / 255，与 ramp 同一颜色空间约定）。
  * - uMainLightIntensity：主光强度（地势明暗的主要来源）。
  * - uHemisphereSkyColor / uHemisphereGroundColor：半球环境光天 / 地色（[0,1]³）。
  * - uHemisphereIntensity：半球环境光强度（低强度，保证背光面不死黑又不冲淡色阶）。
+ * - uFogColor：雾色（[0,1]³，= 背景色；远缘片元淡入背景形成无接缝过渡）。
+ * - uFogDensity：雾密度（1/米，FogExp2 density；远角雾因子 ~9%，不吞没南海 / 边界 / 标签）。
+ *   uFogDensity=0 时雾完全关闭（配置 FOG_ENABLED=false 的情形），片元不做任何淡入。
  */
 export const TERRAIN_FRAGMENT_SHADER = /* glsl */ `
 uniform sampler2D uHeightmap;
@@ -172,9 +195,12 @@ uniform float uMainLightIntensity;
 uniform vec3 uHemisphereSkyColor;
 uniform vec3 uHemisphereGroundColor;
 uniform float uHemisphereIntensity;
+uniform vec3 uFogColor;
+uniform float uFogDensity;
 
 varying vec3 vWorldNormal;
 varying vec2 vHeightmapUV;
+varying vec3 vWorldPosition;
 
 // 把归一化高程码仿射解码为真实米制海拔（与顶点着色器同一公式，与 decodeUint16ToElevation 同源）。
 float decodeElevationMeters(float normalized) {
@@ -210,6 +236,15 @@ void main() {
 
   // 颜色由真实海拔决定（baseColor），明暗由法线 ×照明决定（ambient + main）；二者解耦。
   vec3 color = baseColor * (ambient + mainContribution);
+
+  // 极轻微指数雾（SPEC §3.4「可选极轻微指数雾」）：按相机到片元距离复算与 three.js FogExp2 同一
+  // 公式（fogFactor = 1 − exp(−density²·depth²)），把光照后的颜色淡入雾色（= 背景色），柔化地图
+  // 远缘与背景的衔接。uFogDensity=0（配置 FOG_ENABLED=false）时 fogFactor 恒为 0，片元零开销。
+  // cameraPosition 是 ShaderMaterial 内建 uniform（世界相机坐标）。
+  float fogDepth = distance(cameraPosition, vWorldPosition);
+  float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * fogDepth * fogDepth);
+  fogFactor = clamp(fogFactor, 0.0, 1.0);
+  color = mix(color, uFogColor, fogFactor);
 
   gl_FragColor = vec4(color, 1.0);
 }

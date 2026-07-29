@@ -44,9 +44,10 @@
  *   的时间项都是 uTime·speed。测试据此断言「着色器内 uTime 声明恰一次」「两层 sin 均含 uTime 项」。
  *
  * 与 TASK-008（场景氛围）的边界：
- * - 可选轻雾（SPEC §3.4）由 TASK-008 统一装配；地形片元当前同样不含雾计算（见 terrain-shaders.ts
- *   文件头）。若 TASK-008 启用雾，应以同一 FogExp2 公式同时补进地形与海面片元，本模块不预先携带
- *   雾参数。
+ * - 可选轻雾（SPEC §3.4）已由 TASK-008 装配：雾色 / 雾密度的事实源是 src/config/scene-atmosphere
+ *   （SCENE_ATMOSPHERE_CONFIG.fog），以同一 FogExp2 公式同时补进地形与海面片元（见
+ *   terrain-shaders.ts / sea-surface-shaders.ts）。本模块不携带任何雾参数——海面层只消费「海面
+ *   语义」参数，雾是场景氛围横切关注点，归场景氛围配置。
  */
 
 import { MAIN_MAP_WORLD_BOUNDS } from '../lib/projection'

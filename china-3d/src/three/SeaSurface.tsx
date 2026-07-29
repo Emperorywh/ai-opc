@@ -6,10 +6,11 @@
  *   + 海面着色器（src/three/sea-surface-shaders）装配成一张位于 y=0、半透明、双层流动的 plane mesh」。
  *   约束数值全部来自配置层，本组件不复制任何海平面高度 / 透明度 / 颜色 / 波动常量，也不在组件内
  *   维护隐式海面状态。
- * - 本组件依赖：配置层（SEA_SURFACE_CONFIG —— 海面参数唯一源；hexToShaderFloat3 —— 颜色空间转换
- *   唯一实现，来自 src/config/terrain-shading 的共享约定）、本层着色器（SEA_SURFACE_VERTEX_SHADER /
- *   SEA_SURFACE_FRAGMENT_SHADER）、three / R3F（useFrame）。**不**读取 GeoJSON / heightmap / 行政区
- *   数据——海面是独立渲染层，不承担地表分层设色、相机或边界职责。
+ * - 本组件依赖：配置层（SEA_SURFACE_CONFIG —— 海面参数唯一源；SCENE_ATMOSPHERE_CONFIG —— 雾参数
+ *   唯一源，TASK-008 起；hexToShaderFloat3 —— 颜色空间转换唯一实现，来自 src/config/scene-atmosphere
+ *   的共享约定）、本层着色器（SEA_SURFACE_VERTEX_SHADER / SEA_SURFACE_FRAGMENT_SHADER）、
+ *   three / R3F（useFrame）。**不**读取 GeoJSON / heightmap / 行政区数据——海面是独立渲染层，
+ *   不承担地表分层设色、相机或边界职责。
  *
  * 海平面 = y=0（同一米制，与地形同源）：
  * - mesh position.y = SEA_LEVEL_Y_METERS = 0。地形真实海拔 h 经 vertex shader 位移到世界 y = h·k，
@@ -35,8 +36,9 @@
  *   改本组件 useMemo 持有的初始对象不会到达 GPU（海面会静止）。后续 TASK 做「水面入场淡入」
  *   （SPEC §4.3，每帧调 uOpacity）同样必须写 materialRef.current.uniforms。
  *
- * 与后续任务的边界：入场「水面随后淡入」（SPEC §4.3）与场景轻雾（SPEC §3.4）由后续 TASK 以受控
- * 方式扩展（经材质 uniforms 调 uOpacity / 补 FogExp2 片元），本组件不预埋相关参数。
+ * 与后续任务的边界：入场「水面随后淡入」（SPEC §4.3）由后续 TASK 以受控方式扩展（经材质 uniforms
+ * 调 uOpacity），本组件不预埋相关参数。场景轻雾（SPEC §3.4）已由 TASK-008 装配：雾色 / 雾密度经
+ * uFogColor / uFogDensity 注入（与地形片元、场景雾同读 SCENE_ATMOSPHERE_CONFIG，见着色器文件头）。
  */
 
 import { useMemo, useRef } from 'react'
@@ -44,7 +46,7 @@ import type { ReactNode } from 'react'
 import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
 import { SEA_SURFACE_CONFIG } from '../config/sea-surface'
-import { hexToShaderFloat3 } from '../config/terrain-shading'
+import { SCENE_ATMOSPHERE_CONFIG, hexToShaderFloat3 } from '../config/scene-atmosphere'
 import { SEA_SURFACE_FRAGMENT_SHADER, SEA_SURFACE_VERTEX_SHADER } from './sea-surface-shaders'
 
 /**
@@ -55,11 +57,12 @@ import { SEA_SURFACE_FRAGMENT_SHADER, SEA_SURFACE_VERTEX_SHADER } from './sea-su
  */
 export function SeaSurface(): ReactNode {
   const { colorHex, opacity, planeLayout, segments, waves } = SEA_SURFACE_CONFIG
+  const { fog } = SCENE_ATMOSPHERE_CONFIG
 
-  // 初始 uniforms 挂载期一次构造：唯一时间输入 uTime 初值 0 + 静态 color/opacity/wave 参数。
-  // SEA_SURFACE_CONFIG 是模块级冻结常量（colorHex / opacity / waves 引用永不变化），故依赖数组
-  // 虽列出它们也永不触发重建。注意：R3F v9 会把本对象逐项拷贝进材质自身的 uniforms（稳定目标
-  // 引用合并），本对象只承担「初始值」角色；运行循环的 uTime 写入走 materialRef（见下）。
+  // 初始 uniforms 挂载期一次构造：唯一时间输入 uTime 初值 0 + 静态 color/opacity/wave/fog 参数。
+  // SEA_SURFACE_CONFIG 与 SCENE_ATMOSPHERE_CONFIG 都是模块级冻结常量（colorHex / opacity / waves / fog
+  // 引用永不变化），故依赖数组虽列出它们也永不触发重建。注意：R3F v9 会把本对象逐项拷贝进材质自身的
+  // uniforms（稳定目标引用合并），本对象只承担「初始值」角色；运行循环的 uTime 写入走 materialRef（见下）。
   const initialUniforms = useMemo(
     () => ({
       // 统一时间输入：唯一的时间 uniform，初值 0；每帧由 useFrame 经 materialRef 写入材质 uniforms。
@@ -80,8 +83,11 @@ export function SeaSurface(): ReactNode {
       uLayer2Speed: { value: waves.layer2.speed },
       uLayer2Amplitude: { value: waves.layer2.amplitude },
       uLayer2Phase: { value: waves.layer2.phase },
+      // 极轻微指数雾（SPEC §3.4，TASK-008）：雾色 = 背景色（远缘无接缝）；雾关闭时密度取 0（片元零开销）。
+      uFogColor: { value: new THREE.Vector3(...hexToShaderFloat3(fog.hex)) },
+      uFogDensity: { value: fog.enabled ? fog.density : 0 },
     }),
-    [colorHex, opacity, waves],
+    [colorHex, opacity, waves, fog],
   )
 
   // 材质实例 ref：R3F v9 对 <shaderMaterial uniforms={...}> 做「稳定目标引用」合并（拷贝而非替换

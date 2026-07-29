@@ -114,6 +114,44 @@ describe('片元着色器结构不变量（验收 2：真实 h 查 ramp，不用
   })
 })
 
+describe('片元雾结构不变量（TASK-008：与场景雾同一 FogExp2 公式，SPEC §3.4）', () => {
+  it('顶点着色器透传世界坐标（vWorldPosition = worldPosition.xyz，只用于雾深计算）', () => {
+    expect(TERRAIN_VERTEX_SHADER).toContain('varying vec3 vWorldPosition')
+    expect(TERRAIN_VERTEX_SHADER).toContain('vWorldPosition = worldPosition.xyz')
+  })
+
+  it('片元声明 uFogColor / uFogDensity 与 vWorldPosition（雾参数经 uniform 注入，不硬编码）', () => {
+    expect(TERRAIN_FRAGMENT_SHADER).toContain('uniform vec3 uFogColor')
+    expect(TERRAIN_FRAGMENT_SHADER).toContain('uniform float uFogDensity')
+    expect(TERRAIN_FRAGMENT_SHADER).toContain('varying vec3 vWorldPosition')
+  })
+
+  it('雾深 = 相机到世界片元距离；fogFactor 复算 FogExp2 同一公式并夹到 [0,1]', () => {
+    expect(TERRAIN_FRAGMENT_SHADER).toContain('distance(cameraPosition, vWorldPosition)')
+    expect(TERRAIN_FRAGMENT_SHADER).toContain(
+      '1.0 - exp(-uFogDensity * uFogDensity * fogDepth * fogDepth)',
+    )
+    expect(TERRAIN_FRAGMENT_SHADER).toContain('clamp(fogFactor, 0.0, 1.0)')
+  })
+
+  it('雾在光照之后、输出之前应用（mix 淡入雾色，不改变查色与明暗语义）', () => {
+    const lightingIndex = TERRAIN_FRAGMENT_SHADER.indexOf('baseColor * (ambient + mainContribution)')
+    const fogIndex = TERRAIN_FRAGMENT_SHADER.indexOf('mix(color, uFogColor, fogFactor)')
+    const outputIndex = TERRAIN_FRAGMENT_SHADER.indexOf('gl_FragColor = vec4(color, 1.0)')
+    expect(lightingIndex).toBeGreaterThan(-1)
+    expect(fogIndex).toBeGreaterThan(lightingIndex)
+    expect(outputIndex).toBeGreaterThan(fogIndex)
+  })
+
+  it('ChinaTerrainMesh 从 scene-atmosphere 注入雾 uniform（雾关闭时密度取 0，片元零开销）', () => {
+    const source = readSource('three/ChinaTerrainMesh.tsx')
+    expect(source).toContain("from '../config/scene-atmosphere'")
+    expect(source).toContain('SCENE_ATMOSPHERE_CONFIG')
+    expect(source).toContain('uFogColor: { value: new THREE.Vector3(...hexToShaderFloat3(fog.hex)) }')
+    expect(source).toContain('uFogDensity: { value: fog.enabled ? fog.density : 0 }')
+  })
+})
+
 describe('CPU 端无逐顶点几何构建（验收 1：SPEC §7.1 红线）', () => {
   // CPU 端逐顶点写 position 的典型模式；任一出现在 src 即违反 SPEC §7.1。
   const FORBIDDEN_PATTERNS = [

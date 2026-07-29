@@ -1,34 +1,40 @@
 /**
  * 大屏页面骨架（SPEC §3.4 / §11）。
  *
- * 当前装配：全视口深蓝黑容器 + 标题区 + 3D 地形画布（TASK-006 GPU 位移地形 + TASK-007 动态海面）。
- * 海拔色阶图例、合规角标、省界、标签、附图、入场编排、相机限位等由后续任务
- * 按 SPEC §11 目录结构挂载（TASK-016 做最终总装）。
+ * 当前装配：全视口深蓝黑容器 + 标题区 + 3D 地形画布（TASK-006 GPU 位移地形 + TASK-007 动态海面
+ * + TASK-008 场景氛围与受约束相机）。海拔色阶图例、合规角标、省界、标签、附图、入场编排等由后续
+ * 任务按 SPEC §11 目录结构挂载（TASK-016 做最终总装）。
  *
- * 标题区文案来自页面静态文案唯一事实源（src/lib/static-copy.ts），
- * 字体子集覆盖校验以同一事实源断言所需汉字无缺失（SPEC §3.7）。
+ * 标题区文案来自页面静态文案唯一事实源（src/lib/static-copy.ts），字体子集覆盖校验以同一事实源
+ * 断言所需汉字无缺失（SPEC §3.7）。
  *
- * 相机（临时静态机位）：按 SPEC §4.1「东南方向斜俯视」置于地图东南上方看向主图中心，
- * 使青藏高原在画面左上隆起、东部平原在右下，凸显西高东低。OrbitControls 与俯仰 / 缩放 /
- * 平移限位由 TASK-008 正式装配并替换本静态机位；FOV / 距离系数 / 方位角在此为一次性
- * 派生（与 TASK-008 将登记的相机约束同源决策：方位角 45°、仰角 30°、距离 = 半对角线 ×2.1、
- * FOV 42°），不在别处复制第二套机位。
+ * 场景氛围（TASK-008，SPEC §3.4）：SceneAtmosphere 把 SCENE_ATMOSPHERE_CONFIG 装配成深蓝黑纯色
+ * 背景 + 可选极轻指数雾 + 低强度半球环境光 + 单盏西北偏高方向主光（地形 / 海面的自定义着色器经
+ * uniform 消费同一份配置，场景雾与片元雾同源）；渲染器阴影图按配置显式关闭（地形不投阴影贴图）。
+ *
+ * 相机（TASK-008，SPEC §4.1）：MapOrbitControls 装配受约束的东南斜俯视 OrbitControls——默认机位
+ * （方位角 45°、仰角 30°、距离 = 半对角线 ×2.1）使青藏高原在画面左上隆起、东部平原在右下；
+ * 距离 / 极角 / target 三道边界由纯计算契约（src/three/camera-constraints）强制，近裁剪面随相机
+ * 高度动态跟随（与 TASK-007 深度精度修复协同）。Canvas camera prop 的 FOV / near 初值 / far /
+ * 初始位置全部取自 MAP_CAMERA_CONSTRAINTS 与 DEFAULT_CAMERA_POSE（同一事实源，无第二套机位常量）。
  */
 import { useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { PAGE_SUBTITLE, PAGE_TITLE } from './lib/static-copy'
-import { MAIN_MAP_WORLD_BOUNDS } from './lib/projection'
 import {
   resolveTerrainConfigOrThrow,
   type TerrainRenderConfig,
 } from './config/terrain-config'
+import { SCENE_ATMOSPHERE_CONFIG } from './config/scene-atmosphere'
 import { ChinaTerrainMesh } from './three/ChinaTerrainMesh'
 import { SeaSurface } from './three/SeaSurface'
+import { SceneAtmosphere } from './three/SceneAtmosphere'
+import { MapOrbitControls } from './three/MapOrbitControls'
+import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from './three/camera-constraints'
 import {
   loadHeightmapTexture,
   type HeightmapTextureLoadResult,
 } from './three/load-heightmap-texture'
-import { TERRAIN_PLANE_LAYOUT } from './three/terrain-layout'
 
 /** heightmap 加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为平面 fallback）。 */
 type HeightmapState =
@@ -86,46 +92,6 @@ function resolveRuntimeTerrainConfig(): TerrainRenderConfig {
   return resolveTerrainConfigOrThrow(input)
 }
 
-/** 主图世界半对角线（米）：相机距离 / 视锥的统一尺度（与 plane 布局同源，均自主图世界包围盒派生）。 */
-const MAP_HALF_DIAGONAL_METERS =
-  Math.hypot(
-    MAIN_MAP_WORLD_BOUNDS.maxX - MAIN_MAP_WORLD_BOUNDS.minX,
-    MAIN_MAP_WORLD_BOUNDS.maxZ - MAIN_MAP_WORLD_BOUNDS.minZ,
-  ) / 2
-
-/** 相机 FOV（度）：42° 兼顾整张版图入画与地势起伏可读性。 */
-const CAMERA_FOV_DEGREES = 42
-/**
- * 相机 near（米）：尽量大以保留深度缓冲精度（near/far 比远好于极端比例）。
- *
- * TASK-007 起海面与近零高程陆地共面（y≈0）：24 位深度缓冲的精度 ≈ z²/(near·2²⁴)，相机距图心
- * ≈ 半对角线 ×2.1 ≈ 10.4Mm，near=1000 时图心精度 ≈ 6.4km——远大于沿岸低地的世界高度（h≈0–100m
- * → y≈0–200m），海面（y=0）与低地落入同一深度桶，透明海面会经 LessEqualDepth 盖过陆地着色。
- * 取 near = 半对角线 ×0.5（≈2.47Mm，仍远小于最近图角 ≈5.4Mm，>2 倍余量）后全图精度 0.7–5.7m，
- * 低地与海面干净分离（h≈0 的水线像素本就是海岸交界）。
- * 注意：TASK-008 装配 OrbitControls 缩放限位时，minDistance 须与本 near 协同设计（拉近时 near
- * 应随动或收紧），避免近裁剪切入版图。
- */
-const CAMERA_NEAR_METERS = MAP_HALF_DIAGONAL_METERS * 0.5
-/** 相机 far（米）：整张版图（含地形起伏与远角）都落在视锥内不被远裁剪。 */
-const CAMERA_FAR_METERS = MAP_HALF_DIAGONAL_METERS * 8
-
-/**
- * 默认静态机位（SPEC §4.1 东南斜俯视；TASK-008 将以受约束 OrbitControls 正式接管）。
- * 方位角 45°（从 +Z 南向 +X 东量起 → 东南）、仰角 30°、距离 = 半对角线 ×2.1；
- * 注视点 = 主图世界中心 (0, 0, centerZ)（与 plane 定位共用同一份 centerZ 派生）。
- */
-const DEFAULT_CAMERA_POSITION: readonly [number, number, number] = (() => {
-  const azimuthRad = (45 * Math.PI) / 180
-  const elevationRad = (30 * Math.PI) / 180
-  const distance = MAP_HALF_DIAGONAL_METERS * 2.1
-  return [
-    Math.cos(elevationRad) * Math.sin(azimuthRad) * distance,
-    Math.sin(elevationRad) * distance,
-    TERRAIN_PLANE_LAYOUT.centerZ + Math.cos(elevationRad) * Math.cos(azimuthRad) * distance,
-  ]
-})()
-
 /** 运行时地形配置（模块加载时解析一次；非法 URL 覆盖值在此确定性暴露）。 */
 const RUNTIME_TERRAIN_CONFIG: TerrainRenderConfig | { readonly error: string } = (() => {
   try {
@@ -163,18 +129,30 @@ function App() {
         {heightmap.phase === 'ready' ? (
           <Canvas
             camera={{
-              fov: CAMERA_FOV_DEGREES,
-              near: CAMERA_NEAR_METERS,
-              far: CAMERA_FAR_METERS,
-              position: [...DEFAULT_CAMERA_POSITION],
+              // FOV / near 初值 / far / 初始位置全部来自相机约束纯计算契约（同一事实源）。
+              // near 初值 = 默认机位高度处的动态 near；挂载后由 MapOrbitControls 每帧跟随相机高度。
+              fov: MAP_CAMERA_CONSTRAINTS.fovDegrees,
+              near: MAP_CAMERA_CONSTRAINTS.initialNear,
+              far: MAP_CAMERA_CONSTRAINTS.far,
+              position: [
+                DEFAULT_CAMERA_POSE.position.x,
+                DEFAULT_CAMERA_POSE.position.y,
+                DEFAULT_CAMERA_POSE.position.z,
+              ],
             }}
+            // 渲染器阴影图显式关闭（SPEC §3.4：地形不投递阴影贴图；配置层结构性 false）。
+            shadows={SCENE_ATMOSPHERE_CONFIG.shadowsEnabled}
             // DPR 上限 2（SPEC §7.3，防 4K 屏 ×高 DPR 爆显存）；预算正式配置由 TASK-015 登记。
             dpr={[1, 2]}
-            onCreated={({ camera }) => {
-              // 静态机位看向主图世界中心（target 与 plane 定位共用同一份 centerZ 派生）。
-              camera.lookAt(0, 0, TERRAIN_PLANE_LAYOUT.centerZ)
-            }}
           >
+            {/* 深蓝黑背景 + 可选轻雾 + 半球环境光 + 单盏西北偏高主光（SPEC §3.4）。 */}
+            <SceneAtmosphere />
+            {/*
+              受约束东南斜俯视轨道相机（SPEC §4.1）：距离 / 极角 / target 三道边界 + 动态 near。
+              当前无入场动画（TASK-013 将接入），交互恒启用——enabled 是受控 prop，入场状态机
+              届时以显式状态驱动它，本页不预埋第二套交互开关。
+            */}
+            <MapOrbitControls enabled />
             <ChinaTerrainMesh heightmap={heightmap.heightmap} config={RUNTIME_TERRAIN_CONFIG} />
             <SeaSurface />
           </Canvas>
