@@ -1,0 +1,286 @@
+{
+  "kind": "political-boundary",
+  "version": "1.0.0",
+  "crs": "EPSG:4326",
+  "features": [
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 1,
+      "coordinates": [
+        {
+          "lon": 121,
+          "lat": 24.5
+        },
+        {
+          "lon": 121.5,
+          "lat": 22.5
+        },
+        {
+          "lon": 122,
+          "lat": 20.5
+        }
+      ]
+    },
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 2,
+      "coordinates": [
+        {
+          "lon": 120,
+          "lat": 21
+        },
+        {
+          "lon": 119.5,
+          "lat": 19.5
+        },
+        {
+          "lon": 119,
+          "lat": 18
+        }
+      ]
+    },
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 3,
+      "coordinates": [
+        {
+          "lon": 118.5,
+          "lat": 17.5
+        },
+        {
+          "lon": 118,
+          "lat": 16
+        },
+        {
+          "lon": 117.5,
+          "lat": 14.5
+        }
+      ]
+    },
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 4,
+      "coordinates": [
+        {
+          "lon": 117,
+          "lat": 14
+        },
+        {
+          "lon": 116.5,
+          "lat": 12.5
+        },
+        {
+          "lon": 116,
+          "lat": 11
+        }
+      ]
+    },
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 5,
+      "coordinates": [
+        {
+          "lon": 115.5,
+          "lat": 11
+        },
+        {
+          "lon": 115,
+          "lat": 10
+        },
+        {
+          "lon": 114.5,
+          "lat": 9
+        }
+      ]
+    },
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 6,
+      "coordinates": [
+        {
+          "lon": 114.5,
+          "lat": 9.5
+        },
+        {
+          "lon": 114,
+          "lat": 8
+        },
+        {
+          "lon": 113.5,
+          "lat": 7
+        }
+      ]
+    },
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 7,
+      "coordinates": [
+        {
+          "lon": 113.5,
+          "lat": 7.5
+        },
+        {
+          "lon": 113,
+          "lat": 6.5
+        },
+        {
+          "lon": 112.5,
+          "lat": 5.5
+        }
+      ]
+    },
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 8,
+      "coordinates": [
+        {
+          "lon": 112,
+          "lat": 6
+        },
+        {
+          "lon": 111,
+          "lat": 5.5
+        },
+        {
+          "lon": 110,
+          "lat": 5
+        }
+      ]
+    },
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 9,
+      "coordinates": [
+        {
+          "lon": 117,
+          "lat": 6
+        },
+        {
+          "lon": 116,
+          "lat": 5
+        },
+        {
+          "lon": 115,
+          "lat": 4
+        }
+      ]
+    },
+    {
+      "type": "nineDashLineSegment",
+      "segmentIndex": 10,
+      "coordinates": [
+        {
+          "lon": 122,
+          "lat": 25
+        },
+        {
+          "lon": 122.5,
+          "lat": 24
+        },
+        {
+          "lon": 123,
+          "lat": 23
+        }
+      ]
+    },
+    {
+      "type": "islandOrReefPoint",
+      "name": "钓鱼岛",
+      "coordinate": {
+        "lon": 123.46,
+        "lat": 25.75
+      }
+    },
+    {
+      "type": "islandOrReefPoint",
+      "name": "赤尾屿",
+      "coordinate": {
+        "lon": 124.55,
+        "lat": 25.92
+      }
+    },
+    {
+      "type": "islandOrReefPoint",
+      "name": "曾母暗沙",
+      "coordinate": {
+        "lon": 112.3,
+        "lat": 3.58
+      }
+    },
+    {
+      "type": "islandOrReefPoint",
+      "name": "黄岩岛",
+      "coordinate": {
+        "lon": 117.75,
+        "lat": 15.13
+      }
+    },
+    {
+      "type": "islandOrReefPoint",
+      "name": "永兴岛",
+      "coordinate": {
+        "lon": 112.33,
+        "lat": 16.83
+      }
+    },
+    {
+      "type": "disputedBoundaryCorrection",
+      "targetRegion": "藏南",
+      "geometry": {
+        "type": "Polygon",
+        "rings": [
+          [
+            {
+              "lon": 92,
+              "lat": 27
+            },
+            {
+              "lon": 97,
+              "lat": 27
+            },
+            {
+              "lon": 97,
+              "lat": 29.5
+            },
+            {
+              "lon": 92,
+              "lat": 29.5
+            }
+          ]
+        ]
+      },
+      "basis": "按中国主张画法补充藏南范围，来源为公开标准地图衍生数据，非官方审图。"
+    },
+    {
+      "type": "disputedBoundaryCorrection",
+      "targetRegion": "阿克赛钦",
+      "geometry": {
+        "type": "Polygon",
+        "rings": [
+          [
+            {
+              "lon": 78,
+              "lat": 34.5
+            },
+            {
+              "lon": 80,
+              "lat": 34.5
+            },
+            {
+              "lon": 80,
+              "lat": 36
+            },
+            {
+              "lon": 78,
+              "lat": 36
+            }
+          ]
+        ]
+      },
+      "basis": "按中国主张画法补充阿克赛钦范围，来源为公开标准地图衍生数据，非官方审图。"
+    }
+  ],
+  "source": {
+    "sourceId": "src-project-political"
+  }
+}

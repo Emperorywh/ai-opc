@@ -1,0 +1,4 @@
+# 静态资产的 provenance 审计锚点（SHA-256）按 LF 字节计算。
+# 钉住 eol=lf 保证任何平台（含 core.autocrlf=true 的 Windows）检出后字节稳定，
+# 使 public/geo 与 public/terrain 下资产的完整性摘要在 verify:assets / 测试中可复算闭环。
+public/**/*.json text eol=lf

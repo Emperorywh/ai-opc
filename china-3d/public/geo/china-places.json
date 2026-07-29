@@ -1,0 +1,694 @@
+{
+  "kind": "place-directory",
+  "version": "1.0.0",
+  "crs": "EPSG:4326",
+  "entries": [
+    {
+      "id": "CN-110000-anchor",
+      "adminId": "CN-110000",
+      "role": "provinceNameAnchor",
+      "name": "北京",
+      "coordinate": {
+        "lon": 116.4074,
+        "lat": 39.9042
+      }
+    },
+    {
+      "id": "CN-110000-capital",
+      "adminId": "CN-110000",
+      "role": "administrativeCapital",
+      "name": "北京",
+      "coordinate": {
+        "lon": 116.4074,
+        "lat": 39.9042
+      }
+    },
+    {
+      "id": "CN-120000-anchor",
+      "adminId": "CN-120000",
+      "role": "provinceNameAnchor",
+      "name": "天津",
+      "coordinate": {
+        "lon": 117.2009,
+        "lat": 39.0842
+      }
+    },
+    {
+      "id": "CN-120000-capital",
+      "adminId": "CN-120000",
+      "role": "administrativeCapital",
+      "name": "天津",
+      "coordinate": {
+        "lon": 117.2009,
+        "lat": 39.0842
+      }
+    },
+    {
+      "id": "CN-130000-anchor",
+      "adminId": "CN-130000",
+      "role": "provinceNameAnchor",
+      "name": "河北",
+      "coordinate": {
+        "lon": 114.5149,
+        "lat": 38.0428
+      }
+    },
+    {
+      "id": "CN-130000-capital",
+      "adminId": "CN-130000",
+      "role": "administrativeCapital",
+      "name": "石家庄",
+      "coordinate": {
+        "lon": 114.5149,
+        "lat": 38.0428
+      }
+    },
+    {
+      "id": "CN-140000-anchor",
+      "adminId": "CN-140000",
+      "role": "provinceNameAnchor",
+      "name": "山西",
+      "coordinate": {
+        "lon": 112.5489,
+        "lat": 37.8706
+      }
+    },
+    {
+      "id": "CN-140000-capital",
+      "adminId": "CN-140000",
+      "role": "administrativeCapital",
+      "name": "太原",
+      "coordinate": {
+        "lon": 112.5489,
+        "lat": 37.8706
+      }
+    },
+    {
+      "id": "CN-150000-anchor",
+      "adminId": "CN-150000",
+      "role": "provinceNameAnchor",
+      "name": "内蒙古",
+      "coordinate": {
+        "lon": 116.05,
+        "lat": 43.95
+      },
+      "anchorAdjustmentNote": "内蒙古自治区东西狭长，省会呼和浩特偏居西南；锚点取中部锡林郭勒一带（已 point-in-polygon 验证落在省域内）以便省名标签居中可读。"
+    },
+    {
+      "id": "CN-150000-capital",
+      "adminId": "CN-150000",
+      "role": "administrativeCapital",
+      "name": "呼和浩特",
+      "coordinate": {
+        "lon": 111.751,
+        "lat": 40.8426
+      }
+    },
+    {
+      "id": "CN-210000-anchor",
+      "adminId": "CN-210000",
+      "role": "provinceNameAnchor",
+      "name": "辽宁",
+      "coordinate": {
+        "lon": 123.4315,
+        "lat": 41.8057
+      }
+    },
+    {
+      "id": "CN-210000-capital",
+      "adminId": "CN-210000",
+      "role": "administrativeCapital",
+      "name": "沈阳",
+      "coordinate": {
+        "lon": 123.4315,
+        "lat": 41.8057
+      }
+    },
+    {
+      "id": "CN-220000-anchor",
+      "adminId": "CN-220000",
+      "role": "provinceNameAnchor",
+      "name": "吉林",
+      "coordinate": {
+        "lon": 125.3235,
+        "lat": 43.8171
+      }
+    },
+    {
+      "id": "CN-220000-capital",
+      "adminId": "CN-220000",
+      "role": "administrativeCapital",
+      "name": "长春",
+      "coordinate": {
+        "lon": 125.3235,
+        "lat": 43.8171
+      }
+    },
+    {
+      "id": "CN-230000-anchor",
+      "adminId": "CN-230000",
+      "role": "provinceNameAnchor",
+      "name": "黑龙江",
+      "coordinate": {
+        "lon": 124.4,
+        "lat": 46.6
+      },
+      "anchorAdjustmentNote": "黑龙江省会哈尔滨偏居南部；锚点取中部松嫩平原一带（已 point-in-polygon 验证落在省域内）以便省名标签居中可读。"
+    },
+    {
+      "id": "CN-230000-capital",
+      "adminId": "CN-230000",
+      "role": "administrativeCapital",
+      "name": "哈尔滨",
+      "coordinate": {
+        "lon": 126.5349,
+        "lat": 45.8038
+      }
+    },
+    {
+      "id": "CN-310000-anchor",
+      "adminId": "CN-310000",
+      "role": "provinceNameAnchor",
+      "name": "上海",
+      "coordinate": {
+        "lon": 121.4737,
+        "lat": 31.2304
+      }
+    },
+    {
+      "id": "CN-310000-capital",
+      "adminId": "CN-310000",
+      "role": "administrativeCapital",
+      "name": "上海",
+      "coordinate": {
+        "lon": 121.4737,
+        "lat": 31.2304
+      }
+    },
+    {
+      "id": "CN-320000-anchor",
+      "adminId": "CN-320000",
+      "role": "provinceNameAnchor",
+      "name": "江苏",
+      "coordinate": {
+        "lon": 118.7969,
+        "lat": 32.0603
+      }
+    },
+    {
+      "id": "CN-320000-capital",
+      "adminId": "CN-320000",
+      "role": "administrativeCapital",
+      "name": "南京",
+      "coordinate": {
+        "lon": 118.7969,
+        "lat": 32.0603
+      }
+    },
+    {
+      "id": "CN-330000-anchor",
+      "adminId": "CN-330000",
+      "role": "provinceNameAnchor",
+      "name": "浙江",
+      "coordinate": {
+        "lon": 120.1551,
+        "lat": 30.2741
+      }
+    },
+    {
+      "id": "CN-330000-capital",
+      "adminId": "CN-330000",
+      "role": "administrativeCapital",
+      "name": "杭州",
+      "coordinate": {
+        "lon": 120.1551,
+        "lat": 30.2741
+      }
+    },
+    {
+      "id": "CN-340000-anchor",
+      "adminId": "CN-340000",
+      "role": "provinceNameAnchor",
+      "name": "安徽",
+      "coordinate": {
+        "lon": 117.2272,
+        "lat": 31.8206
+      }
+    },
+    {
+      "id": "CN-340000-capital",
+      "adminId": "CN-340000",
+      "role": "administrativeCapital",
+      "name": "合肥",
+      "coordinate": {
+        "lon": 117.2272,
+        "lat": 31.8206
+      }
+    },
+    {
+      "id": "CN-350000-anchor",
+      "adminId": "CN-350000",
+      "role": "provinceNameAnchor",
+      "name": "福建",
+      "coordinate": {
+        "lon": 119.2965,
+        "lat": 26.0745
+      }
+    },
+    {
+      "id": "CN-350000-capital",
+      "adminId": "CN-350000",
+      "role": "administrativeCapital",
+      "name": "福州",
+      "coordinate": {
+        "lon": 119.2965,
+        "lat": 26.0745
+      }
+    },
+    {
+      "id": "CN-360000-anchor",
+      "adminId": "CN-360000",
+      "role": "provinceNameAnchor",
+      "name": "江西",
+      "coordinate": {
+        "lon": 115.8579,
+        "lat": 28.682
+      }
+    },
+    {
+      "id": "CN-360000-capital",
+      "adminId": "CN-360000",
+      "role": "administrativeCapital",
+      "name": "南昌",
+      "coordinate": {
+        "lon": 115.8579,
+        "lat": 28.682
+      }
+    },
+    {
+      "id": "CN-370000-anchor",
+      "adminId": "CN-370000",
+      "role": "provinceNameAnchor",
+      "name": "山东",
+      "coordinate": {
+        "lon": 117.1201,
+        "lat": 36.6512
+      }
+    },
+    {
+      "id": "CN-370000-capital",
+      "adminId": "CN-370000",
+      "role": "administrativeCapital",
+      "name": "济南",
+      "coordinate": {
+        "lon": 117.1201,
+        "lat": 36.6512
+      }
+    },
+    {
+      "id": "CN-410000-anchor",
+      "adminId": "CN-410000",
+      "role": "provinceNameAnchor",
+      "name": "河南",
+      "coordinate": {
+        "lon": 113.6253,
+        "lat": 34.7466
+      }
+    },
+    {
+      "id": "CN-410000-capital",
+      "adminId": "CN-410000",
+      "role": "administrativeCapital",
+      "name": "郑州",
+      "coordinate": {
+        "lon": 113.6253,
+        "lat": 34.7466
+      }
+    },
+    {
+      "id": "CN-420000-anchor",
+      "adminId": "CN-420000",
+      "role": "provinceNameAnchor",
+      "name": "湖北",
+      "coordinate": {
+        "lon": 114.3055,
+        "lat": 30.5928
+      }
+    },
+    {
+      "id": "CN-420000-capital",
+      "adminId": "CN-420000",
+      "role": "administrativeCapital",
+      "name": "武汉",
+      "coordinate": {
+        "lon": 114.3055,
+        "lat": 30.5928
+      }
+    },
+    {
+      "id": "CN-430000-anchor",
+      "adminId": "CN-430000",
+      "role": "provinceNameAnchor",
+      "name": "湖南",
+      "coordinate": {
+        "lon": 112.9388,
+        "lat": 28.2282
+      }
+    },
+    {
+      "id": "CN-430000-capital",
+      "adminId": "CN-430000",
+      "role": "administrativeCapital",
+      "name": "长沙",
+      "coordinate": {
+        "lon": 112.9388,
+        "lat": 28.2282
+      }
+    },
+    {
+      "id": "CN-440000-anchor",
+      "adminId": "CN-440000",
+      "role": "provinceNameAnchor",
+      "name": "广东",
+      "coordinate": {
+        "lon": 113.2644,
+        "lat": 23.1291
+      }
+    },
+    {
+      "id": "CN-440000-capital",
+      "adminId": "CN-440000",
+      "role": "administrativeCapital",
+      "name": "广州",
+      "coordinate": {
+        "lon": 113.2644,
+        "lat": 23.1291
+      }
+    },
+    {
+      "id": "CN-450000-anchor",
+      "adminId": "CN-450000",
+      "role": "provinceNameAnchor",
+      "name": "广西",
+      "coordinate": {
+        "lon": 108.3669,
+        "lat": 22.817
+      }
+    },
+    {
+      "id": "CN-450000-capital",
+      "adminId": "CN-450000",
+      "role": "administrativeCapital",
+      "name": "南宁",
+      "coordinate": {
+        "lon": 108.3669,
+        "lat": 22.817
+      }
+    },
+    {
+      "id": "CN-460000-anchor",
+      "adminId": "CN-460000",
+      "role": "provinceNameAnchor",
+      "name": "海南",
+      "coordinate": {
+        "lon": 110.199,
+        "lat": 20.044
+      }
+    },
+    {
+      "id": "CN-460000-capital",
+      "adminId": "CN-460000",
+      "role": "administrativeCapital",
+      "name": "海口",
+      "coordinate": {
+        "lon": 110.199,
+        "lat": 20.044
+      }
+    },
+    {
+      "id": "CN-500000-anchor",
+      "adminId": "CN-500000",
+      "role": "provinceNameAnchor",
+      "name": "重庆",
+      "coordinate": {
+        "lon": 106.5516,
+        "lat": 29.563
+      }
+    },
+    {
+      "id": "CN-500000-capital",
+      "adminId": "CN-500000",
+      "role": "administrativeCapital",
+      "name": "重庆",
+      "coordinate": {
+        "lon": 106.5516,
+        "lat": 29.563
+      }
+    },
+    {
+      "id": "CN-510000-anchor",
+      "adminId": "CN-510000",
+      "role": "provinceNameAnchor",
+      "name": "四川",
+      "coordinate": {
+        "lon": 104.0668,
+        "lat": 30.5728
+      }
+    },
+    {
+      "id": "CN-510000-capital",
+      "adminId": "CN-510000",
+      "role": "administrativeCapital",
+      "name": "成都",
+      "coordinate": {
+        "lon": 104.0668,
+        "lat": 30.5728
+      }
+    },
+    {
+      "id": "CN-520000-anchor",
+      "adminId": "CN-520000",
+      "role": "provinceNameAnchor",
+      "name": "贵州",
+      "coordinate": {
+        "lon": 106.6302,
+        "lat": 26.647
+      }
+    },
+    {
+      "id": "CN-520000-capital",
+      "adminId": "CN-520000",
+      "role": "administrativeCapital",
+      "name": "贵阳",
+      "coordinate": {
+        "lon": 106.6302,
+        "lat": 26.647
+      }
+    },
+    {
+      "id": "CN-530000-anchor",
+      "adminId": "CN-530000",
+      "role": "provinceNameAnchor",
+      "name": "云南",
+      "coordinate": {
+        "lon": 102.7183,
+        "lat": 25.0389
+      }
+    },
+    {
+      "id": "CN-530000-capital",
+      "adminId": "CN-530000",
+      "role": "administrativeCapital",
+      "name": "昆明",
+      "coordinate": {
+        "lon": 102.7183,
+        "lat": 25.0389
+      }
+    },
+    {
+      "id": "CN-540000-anchor",
+      "adminId": "CN-540000",
+      "role": "provinceNameAnchor",
+      "name": "西藏",
+      "coordinate": {
+        "lon": 92.05,
+        "lat": 31.48
+      },
+      "anchorAdjustmentNote": "西藏自治区省会拉萨偏居东南；锚点取中部那曲一带（已 point-in-polygon 验证落在省域内）以便省名标签居中可读。"
+    },
+    {
+      "id": "CN-540000-capital",
+      "adminId": "CN-540000",
+      "role": "administrativeCapital",
+      "name": "拉萨",
+      "coordinate": {
+        "lon": 91.1409,
+        "lat": 29.65
+      }
+    },
+    {
+      "id": "CN-610000-anchor",
+      "adminId": "CN-610000",
+      "role": "provinceNameAnchor",
+      "name": "陕西",
+      "coordinate": {
+        "lon": 108.9398,
+        "lat": 34.3416
+      }
+    },
+    {
+      "id": "CN-610000-capital",
+      "adminId": "CN-610000",
+      "role": "administrativeCapital",
+      "name": "西安",
+      "coordinate": {
+        "lon": 108.9398,
+        "lat": 34.3416
+      }
+    },
+    {
+      "id": "CN-620000-anchor",
+      "adminId": "CN-620000",
+      "role": "provinceNameAnchor",
+      "name": "甘肃",
+      "coordinate": {
+        "lon": 100.45,
+        "lat": 38.93
+      },
+      "anchorAdjustmentNote": "甘肃省呈狭长河西走廊，省会兰州偏居东南；锚点取走廊中部张掖一带（已 point-in-polygon 验证落在省域内）以便省名标签居中可读。"
+    },
+    {
+      "id": "CN-620000-capital",
+      "adminId": "CN-620000",
+      "role": "administrativeCapital",
+      "name": "兰州",
+      "coordinate": {
+        "lon": 103.8343,
+        "lat": 36.0611
+      }
+    },
+    {
+      "id": "CN-630000-anchor",
+      "adminId": "CN-630000",
+      "role": "provinceNameAnchor",
+      "name": "青海",
+      "coordinate": {
+        "lon": 101.7782,
+        "lat": 36.6171
+      }
+    },
+    {
+      "id": "CN-630000-capital",
+      "adminId": "CN-630000",
+      "role": "administrativeCapital",
+      "name": "西宁",
+      "coordinate": {
+        "lon": 101.7782,
+        "lat": 36.6171
+      }
+    },
+    {
+      "id": "CN-640000-anchor",
+      "adminId": "CN-640000",
+      "role": "provinceNameAnchor",
+      "name": "宁夏",
+      "coordinate": {
+        "lon": 106.2309,
+        "lat": 38.4872
+      }
+    },
+    {
+      "id": "CN-640000-capital",
+      "adminId": "CN-640000",
+      "role": "administrativeCapital",
+      "name": "银川",
+      "coordinate": {
+        "lon": 106.2309,
+        "lat": 38.4872
+      }
+    },
+    {
+      "id": "CN-650000-anchor",
+      "adminId": "CN-650000",
+      "role": "provinceNameAnchor",
+      "name": "新疆",
+      "coordinate": {
+        "lon": 87.6168,
+        "lat": 43.8256
+      }
+    },
+    {
+      "id": "CN-650000-capital",
+      "adminId": "CN-650000",
+      "role": "administrativeCapital",
+      "name": "乌鲁木齐",
+      "coordinate": {
+        "lon": 87.6168,
+        "lat": 43.8256
+      }
+    },
+    {
+      "id": "CN-710000-anchor",
+      "adminId": "CN-710000",
+      "role": "provinceNameAnchor",
+      "name": "台湾",
+      "coordinate": {
+        "lon": 121.5654,
+        "lat": 25.033
+      }
+    },
+    {
+      "id": "CN-710000-capital",
+      "adminId": "CN-710000",
+      "role": "administrativeCapital",
+      "name": "台北",
+      "coordinate": {
+        "lon": 121.5654,
+        "lat": 25.033
+      }
+    },
+    {
+      "id": "CN-810000-anchor",
+      "adminId": "CN-810000",
+      "role": "provinceNameAnchor",
+      "name": "香港",
+      "coordinate": {
+        "lon": 114.1694,
+        "lat": 22.3193
+      }
+    },
+    {
+      "id": "CN-810000-capital",
+      "adminId": "CN-810000",
+      "role": "administrativeCapital",
+      "name": "香港",
+      "coordinate": {
+        "lon": 114.1694,
+        "lat": 22.3193
+      }
+    },
+    {
+      "id": "CN-820000-anchor",
+      "adminId": "CN-820000",
+      "role": "provinceNameAnchor",
+      "name": "澳门",
+      "coordinate": {
+        "lon": 113.5439,
+        "lat": 22.1987
+      }
+    },
+    {
+      "id": "CN-820000-capital",
+      "adminId": "CN-820000",
+      "role": "administrativeCapital",
+      "name": "澳门",
+      "coordinate": {
+        "lon": 113.5439,
+        "lat": 22.1987
+      }
+    }
+  ],
+  "source": {
+    "sourceId": "src-project-capitals"
+  }
+}

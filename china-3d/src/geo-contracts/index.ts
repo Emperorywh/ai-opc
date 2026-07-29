@@ -75,6 +75,22 @@ export {
   type AdministrativeRegionType,
 } from './admin-directory'
 
+// 省级行政区几何（标识 → 多边形/多多边形）
+export {
+  validateAdministrativeGeometry,
+  type AdministrativeGeometryContract,
+  type AdministrativeGeometryFeature,
+} from './geometry'
+
+// 数据来源注册表（非官方审图免责声明红线）
+export {
+  validateDataSourceRegistry,
+  RECOGNIZED_SOURCE_KINDS,
+  type DataSourceDeclaration,
+  type DataSourceKind,
+  type DataSourceRegistryContract,
+} from './source'
+
 // 地点目录（省名锚点 + 省级行政中心）
 export {
   validatePlaceDirectory,
@@ -93,3 +109,22 @@ export {
   type PoliticalBoundaryContract,
   type PoliticalBoundaryFeature,
 } from './political'
+
+// SPEC §6 红线点名领域真值（十段线段序号 / 台湾东侧段 / 点名岛礁 / 点名争议区）
+export {
+  EXPECTED_NINE_DASH_SEGMENT_COUNT,
+  POLITICAL_SOURCE_ID,
+  REQUIRED_DISPUTED_REGIONS,
+  REQUIRED_ISLAND_NAMES,
+  REQUIRED_NINE_DASH_SEGMENT_INDICES,
+  TAIWAN_EAST_SEGMENT_INDEX,
+} from './political-catalog'
+
+// 统一验证入口（按 kind 分发 + 跨契约引用核对）
+export {
+  readContractKind,
+  validateContractBundle,
+  validateContractByKind,
+  type ContractBundle,
+  type ContractKind,
+} from './validate'

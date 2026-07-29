@@ -1,0 +1,46 @@
+{
+  "kind": "data-source-registry",
+  "version": "1.0.0",
+  "sources": [
+    {
+      "id": "src-etopo1-noaa",
+      "name": "NOAA ETOPO1 全球地形（经 Open Topo Data 取数）",
+      "originUrl": "https://ngdc.noaa.gov/mgg/global/global.html",
+      "kind": "digitalElevationModel",
+      "isOfficialSurvey": false,
+      "version": "ETOPO1 Ice Surface v2.2 / 经 Open Topo Data etopo1 端点抽样",
+      "license": "NOAA NCEI 公共领域数据",
+      "disclaimer": "ETOPO1 为公开科学地形数据集（含陆地高程与海洋水深），非中国官方审图数据；本资产经粗分辨率抽样后重采样到 4096²，仅供内部展示，公开发布前须取得自然资源主管部门审图号。"
+    },
+    {
+      "id": "src-datav-provinces",
+      "name": "阿里 DataV.GeoAtlas 省级边界",
+      "originUrl": "https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json",
+      "kind": "administrativeBoundary",
+      "isOfficialSurvey": false,
+      "version": "areas_v3 拉取快照（SHA-256 记录于 china-provinces.provenance.json）",
+      "license": "DataV.GeoAtlas 使用条款",
+      "disclaimer": "DataV 边界为非官方审图数据，不含九段线 / 南海岛礁，部分争议区画法非国标；仅供内部展示，不得作为正式出版 / 发布用途，公开发布前须取得自然资源主管部门审图号。"
+    },
+    {
+      "id": "src-project-capitals",
+      "name": "项目维护省名锚点与省级行政中心目录",
+      "originUrl": "offline://project-maintained/china-places.json",
+      "kind": "placeGazetteer",
+      "isOfficialSurvey": false,
+      "version": "项目维护 v1（34 省 × 2 角色，SHA-256 记录于 china-places.provenance.json）",
+      "license": "内部（坐标取自公开标准地图衍生数据）",
+      "disclaimer": "项目维护的省名锚点与省会/首府/直辖市中心/特别行政区中心目录，坐标取自公开标准地图衍生数据，非官方审图数据；仅供内部展示，不得作为正式出版 / 发布用途，公开发布前须取得自然资源主管部门审图号。"
+    },
+    {
+      "id": "src-project-political",
+      "name": "项目自补九段线、南海岛礁与争议区修正（衍生）",
+      "originUrl": "offline://project-maintained/china-political-boundary.json",
+      "kind": "politicalBoundarySupplement",
+      "isOfficialSurvey": false,
+      "version": "项目维护 v1（十段线 + 点名岛礁 + 争议区修正，SHA-256 记录于 china-political-boundary.provenance.json）",
+      "license": "内部（坐标取自公开标准地图衍生数据 / 自然资源部标准地图服务衍生）",
+      "disclaimer": "项目自行维护的政治边界补充数据：九段线（含台湾东侧段的标准十段画法）、南海主要岛礁与钓鱼岛/赤尾屿等附属岛屿点位、藏南与阿克赛钦争议区按中国主张画法的修正。坐标取自公开标准地图衍生数据，非自然资源主管部门官方审图数据；完整南海诸岛岛礁名录与九段线/争议区几何顶点的国标逐点一致性以人工对照公开标准地图核对为准（见 docs/political-review-record.md）；仅供内部展示，不得作为正式出版 / 发布用途，公开发布前必须取得自然资源主管部门审图号。"
+    }
+  ]
+}
