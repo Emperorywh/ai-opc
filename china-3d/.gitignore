@@ -12,6 +12,19 @@ dist
 dist-ssr
 *.local
 
+# Python 字节码与缓存（仅 scripts/dem 离线生产脚本可能产生，绝不进版本库）
+__pycache__/
+*.pyc
+*.pyo
+
+# DEM 源数据缓存与临时拼接产物（fetch-etopo1-grid 的抽样栅格 / Copernicus 瓦片缓存 / 临时输出）。
+# 这些是「源数据缓存」，不是产品资产；产品仅 public/terrain/*.r16 + *.meta.json + *.provenance.json。
+scripts/dem/.cache/
+scripts/dem/cache/
+dem-cache/
+*.tmp.r16
+*.tmp.meta.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

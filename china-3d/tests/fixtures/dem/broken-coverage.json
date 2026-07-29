@@ -1,0 +1,14 @@
+{
+  "format": "dem-tile-fixture-v1",
+  "crs": "EPSG:4326",
+  "bounds": { "west": 100, "south": 30, "east": 110, "north": 40 },
+  "width": 4,
+  "height": 4,
+  "nodata": null,
+  "values": [
+    100, 200, 300, 400,
+    100, 200, 300, 400,
+    100, 200, 300, 400,
+    100, 200, 300, 400
+  ]
+}
