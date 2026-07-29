@@ -1,8 +1,8 @@
 /**
  * 大屏页面骨架（SPEC §3.4 / §11）。
  *
- * 当前装配：全视口深蓝黑容器 + 标题区 + 3D 地形画布（TASK-006 GPU 位移地形）。
- * 海拔色阶图例、合规角标、海面、省界、标签、附图、入场编排、相机限位等由后续任务
+ * 当前装配：全视口深蓝黑容器 + 标题区 + 3D 地形画布（TASK-006 GPU 位移地形 + TASK-007 动态海面）。
+ * 海拔色阶图例、合规角标、省界、标签、附图、入场编排、相机限位等由后续任务
  * 按 SPEC §11 目录结构挂载（TASK-016 做最终总装）。
  *
  * 标题区文案来自页面静态文案唯一事实源（src/lib/static-copy.ts），
@@ -23,6 +23,7 @@ import {
   type TerrainRenderConfig,
 } from './config/terrain-config'
 import { ChinaTerrainMesh } from './three/ChinaTerrainMesh'
+import { SeaSurface } from './three/SeaSurface'
 import {
   loadHeightmapTexture,
   type HeightmapTextureLoadResult,
@@ -94,8 +95,18 @@ const MAP_HALF_DIAGONAL_METERS =
 
 /** 相机 FOV（度）：42° 兼顾整张版图入画与地势起伏可读性。 */
 const CAMERA_FOV_DEGREES = 42
-/** 相机 near（米）：尽量大以保留深度缓冲精度（near/far 比远好于极端比例）。 */
-const CAMERA_NEAR_METERS = Math.max(MAP_HALF_DIAGONAL_METERS * 0.0002, 1000)
+/**
+ * 相机 near（米）：尽量大以保留深度缓冲精度（near/far 比远好于极端比例）。
+ *
+ * TASK-007 起海面与近零高程陆地共面（y≈0）：24 位深度缓冲的精度 ≈ z²/(near·2²⁴)，相机距图心
+ * ≈ 半对角线 ×2.1 ≈ 10.4Mm，near=1000 时图心精度 ≈ 6.4km——远大于沿岸低地的世界高度（h≈0–100m
+ * → y≈0–200m），海面（y=0）与低地落入同一深度桶，透明海面会经 LessEqualDepth 盖过陆地着色。
+ * 取 near = 半对角线 ×0.5（≈2.47Mm，仍远小于最近图角 ≈5.4Mm，>2 倍余量）后全图精度 0.7–5.7m，
+ * 低地与海面干净分离（h≈0 的水线像素本就是海岸交界）。
+ * 注意：TASK-008 装配 OrbitControls 缩放限位时，minDistance 须与本 near 协同设计（拉近时 near
+ * 应随动或收紧），避免近裁剪切入版图。
+ */
+const CAMERA_NEAR_METERS = MAP_HALF_DIAGONAL_METERS * 0.5
 /** 相机 far（米）：整张版图（含地形起伏与远角）都落在视锥内不被远裁剪。 */
 const CAMERA_FAR_METERS = MAP_HALF_DIAGONAL_METERS * 8
 
@@ -165,6 +176,7 @@ function App() {
             }}
           >
             <ChinaTerrainMesh heightmap={heightmap.heightmap} config={RUNTIME_TERRAIN_CONFIG} />
+            <SeaSurface />
           </Canvas>
         ) : (
           <p className="screen-status" role="status">
