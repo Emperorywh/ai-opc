@@ -2,3 +2,6 @@
 # 钉住 eol=lf 保证任何平台（含 core.autocrlf=true 的 Windows）检出后字节稳定，
 # 使 public/geo 与 public/terrain 下资产的完整性摘要在 verify:assets / 测试中可复算闭环。
 public/**/*.json text eol=lf
+# 字体子集二进制按 binary 钉住（不做行尾转换），保证 public/fonts 下字体字节跨平台稳定，
+# 清单 integrity.fontSha256 防篡改锚点可复算闭环（SPEC §3.7）。
+public/fonts/*.ttf binary

@@ -14,6 +14,7 @@
 
 import { validateAdministrativeDirectory } from './admin-directory'
 import { validateAdministrativeGeometry } from './geometry'
+import { validateLabelFontManifest } from './label-font'
 import { validatePlaceDirectory } from './places'
 import { validatePoliticalBoundary } from './political'
 import { validateDataSourceRegistry, type DataSourceRegistryContract } from './source'
@@ -34,6 +35,7 @@ export type ContractKind =
   | 'place-directory'
   | 'political-boundary'
   | 'data-source-registry'
+  | 'label-font-manifest'
 
 const KIND_TO_LABEL: Record<ContractKind, string> = {
   'terrain-meta': '地形元数据',
@@ -42,6 +44,7 @@ const KIND_TO_LABEL: Record<ContractKind, string> = {
   'place-directory': '地点目录',
   'political-boundary': '政治边界补充数据',
   'data-source-registry': '数据来源注册表',
+  'label-font-manifest': '标签字体清单',
 }
 
 /**
@@ -66,6 +69,8 @@ export function validateContractByKind(payload: unknown): ContractValidationOutc
       return validatePoliticalBoundary(payload)
     case 'data-source-registry':
       return validateDataSourceRegistry(payload)
+    case 'label-font-manifest':
+      return validateLabelFontManifest(payload)
     default:
       return invalid([
         error(

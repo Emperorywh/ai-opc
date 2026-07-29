@@ -6,6 +6,8 @@
  * 深度不变量。TASK-004 接入 geo scopes：sources（生产来源注册表）、provinces（DataV 省级边界
  * 目录 + 几何）、places（省名锚点 + 省级行政中心目录）、political（九段线十段画法 / 岛礁 /
  * 争议区补充资产，SPEC §6 红线），并在 --scope all 末尾追加一次全量生产资产的跨契约引用核对。
+ * TASK-005 接入 fonts scope：校验 public/fonts 下的 CJK 标签字体子集（清单结构 + 字符覆盖 +
+ * SFNT/cmap 字形映射 + 体积上限 + 完整性锚点，SPEC §3.7）。
  * 后续 TASK 新增生产资产时，在 SCOPE_REGISTRY 追加对应 scope 即可，无需新建第二条校验管线
  * （避免重复契约/双轨入口）。
  *
@@ -32,6 +34,7 @@ import { verifyTerrainAsset } from './terrain-deep'
 import { verifyProvincesAsset } from './provinces-deep'
 import { verifyPlacesAsset } from './places-deep'
 import { verifyPoliticalAsset } from './political-deep'
+import { LABEL_FONT_MAX_BYTES, verifyLabelFontAsset } from './fonts-deep'
 
 const projectRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
 
@@ -81,6 +84,17 @@ const PRODUCTION_POLITICAL = {
   provenance: 'public/geo/china-political-boundary.provenance.json',
 } as const
 
+/**
+ * 标签字体子集资产路径（相对项目根）。fonts scope 校验这套生产资产（SPEC §3.7）。
+ * 字体二进制（占位字形，KB 级）+ 字符清单 + 审计 sidecar；字符来源为 places / political
+ * 生产契约与页面静态文案（src/lib/static-copy.ts）。
+ */
+const PRODUCTION_FONTS = {
+  font: 'public/fonts/china-labels-font.subset.ttf',
+  manifest: 'public/fonts/china-labels-font.manifest.json',
+  provenance: 'public/fonts/china-labels-font.provenance.json',
+} as const
+
 /** Scope 注册表。后续 TASK 新增生产资产时在此追加 scope。 */
 const SCOPE_REGISTRY: Record<string, ScopeDescriptor> = {
   sources: {
@@ -102,6 +116,10 @@ const SCOPE_REGISTRY: Record<string, ScopeDescriptor> = {
   political: {
     label: '政治边界补充资产（深度校验：十段线/台湾东侧段/点名岛礁/点名争议区/坐标范围/非官方审图来源/审计）',
     customVerify: verifyProductionPolitical,
+  },
+  fonts: {
+    label: '标签字体子集资产（深度校验：清单结构/字符全覆盖/SFNT-cmap 字形映射/体积上限/完整性锚点）',
+    customVerify: verifyProductionFonts,
   },
 }
 
@@ -448,6 +466,70 @@ function verifyProductionPolitical(): number {
     )
     console.log(
       '  ⚠ 自动校验只覆盖 SPEC §6 点名必备项；南海诸岛完整岛礁名录、九段线/争议区几何顶点与国标逐点一致性属人工核对（见 docs/political-review-record.md）；全部数据为非官方审图数据，公开发布前须取得审图号。',
+    )
+  } else {
+    failures++
+    for (const err of outcome.errors) {
+      console.error(`  ✗ [${err.code}] ${err.path}: ${err.message}`)
+    }
+  }
+  return failures
+}
+
+/**
+ * 标签字体子集资产深度校验（TASK-005 fonts scope，SPEC §3.7）。
+ * 加载字体清单、字体二进制、生产地点 / 政治契约（字符来源）与审计 sidecar，调用
+ * verifyLabelFontAsset 一次性给出清单结构 / 字符全覆盖 / sourceStrings 保真 / SFNT-cmap
+ * 字形映射 / 体积上限 / 完整性锚点的全部结论，并打印抽样摘要（字符数、字节数、来源构成）
+ * 便于人工审计。
+ */
+function verifyProductionFonts(): number {
+  console.log('▶ 校验 scope：fonts（标签字体子集资产 · 深度校验）')
+  let failures = 0
+  let manifest: unknown
+  let fontBytes: Uint8Array
+  let places: unknown
+  let political: unknown
+  let provenance: unknown = undefined
+  let manifestText: string | undefined = undefined
+  let placesText: string | undefined = undefined
+  let politicalText: string | undefined = undefined
+  try {
+    manifest = readJsonFile(PRODUCTION_FONTS.manifest)
+    fontBytes = readFileSync(resolve(projectRoot, PRODUCTION_FONTS.font))
+    places = readJsonFile(PRODUCTION_PLACES.places)
+    political = readJsonFile(PRODUCTION_POLITICAL.political)
+    // 清单 / 输入契约的原始文本用于复算 SHA-256 防篡改锚点；与落盘字节同源（readFileSync 原样读出）。
+    manifestText = readJsonText(PRODUCTION_FONTS.manifest)
+    placesText = readJsonText(PRODUCTION_PLACES.places)
+    politicalText = readJsonText(PRODUCTION_POLITICAL.political)
+    provenance = readJsonFile(PRODUCTION_FONTS.provenance)
+  } catch (cause) {
+    failures++
+    console.error(`  ✗ 标签字体子集资产文件读取失败：${(cause as Error).message}`)
+    return failures
+  }
+
+  const outcome = verifyLabelFontAsset({
+    manifest,
+    fontBytes,
+    manifestText,
+    places,
+    political,
+    provenance,
+    placesText,
+    politicalText,
+  })
+  if (outcome.ok) {
+    console.log(
+      `  ✓ ${PRODUCTION_FONTS.manifest}（${outcome.samples.characterCount} 字符 · 清单契约通过 · 字符来源：省名/省会名 ${outcome.samples.placeNameCount} + 岛礁名 ${outcome.samples.islandNameCount} + 静态文案 ${outcome.samples.staticCopyCount}）`,
+    )
+    console.log(
+      `  ✓ ${PRODUCTION_FONTS.font}（${outcome.samples.fontByteLength} 字节 ≪ 上限 ${LABEL_FONT_MAX_BYTES} · ${outcome.samples.numGlyphs} 字形 · cmap 映射 ${outcome.samples.cmapChecked ? '逐字核验通过' : '未执行'}）`,
+    )
+    console.log('  ✓ 深度不变量通过：34 省名 + 省会名 + 附图标注岛礁名 + 合规角标免责声明全部字符被清单覆盖（缺失字符检测可确定性失败）')
+    console.log(
+      `  ✓ ${PRODUCTION_FONTS.provenance}（完整性摘要逐项一致：字体 / 清单 SHA-256、字符数、字节数 + 输入契约哈希锚点）`,
     )
   } else {
     failures++

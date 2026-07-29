@@ -1,0 +1,43 @@
+{
+  "kind": "label-font-asset-provenance",
+  "assetFont": "china-labels-font.subset.ttf",
+  "assetManifest": "china-labels-font.manifest.json",
+  "source": {
+    "inputs": [
+      {
+        "path": "public/geo/china-places.json",
+        "role": "省名 + 省会名（地点目录契约 entries[].name）",
+        "sha256": "694d9b7ef9c70f42a4bcdac4e21f53caecf105dca5bdcc8afe02b1b423fac2a5"
+      },
+      {
+        "path": "public/geo/china-political-boundary.json",
+        "role": "附图标注岛礁名（政治边界契约 islandOrReefPoint.name）",
+        "sha256": "efd91ad124d09fe5c8c022541d23d3a6079f72d7c7081644cab87a342f2e3f31"
+      },
+      {
+        "path": "src/lib/static-copy.ts",
+        "role": "页面静态文案唯一事实源（附图标题 + 合规角标免责声明/审图号占位/数据源署名 + 页面标题区）",
+        "note": "源代码由 git 跟踪，不钉哈希（行尾序列随平台检出变化）；文案漂移由字符覆盖校验与逐字节重产比对检出。"
+      }
+    ],
+    "networkAccess": "none（字符来源全部为项目内契约与静态文案，生产期零外网）"
+  },
+  "generation": {
+    "pipeline": "scripts/fonts/build-font-subset.ts",
+    "processingParams": {
+      "characterSet": "extractCharactersFromStrings（码点升序去重）",
+      "glyphStrategy": "占位矩形字形（非可读汉字），troika 可离线加载；正式发布前由人工替换为可读 CJK 字体子集",
+      "sfnt": "TrueType（cmap format 4 / glyf+loca 长格式 / head.checksumAdjustment 回填）",
+      "networkAccess": "none"
+    },
+    "producedAt": "2026-07-29T19:02:06.277Z",
+    "producedBy": "TASK-005"
+  },
+  "integrity": {
+    "fontSha256": "7059f19629a2fe69f3d2543cf80e735289e5ebfa7743485b7488d61e11255183",
+    "manifestSha256": "56c68f651c9329bf1245a3f53686f40a9932caac1c8417332a897184de0adead",
+    "characterCount": 187,
+    "fontByteLength": 10484
+  },
+  "disclaimer": "本字体子集为项目确定性生成的离线占位字体（字形为占位矩形，非可读汉字），仅供内部展示，不得作为正式出版 / 发布用途；正式发布前须以可读 CJK 字体子集替换并取得自然资源主管部门审图号。"
+}

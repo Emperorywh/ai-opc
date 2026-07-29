@@ -100,6 +100,14 @@ export {
   type PlaceRole,
 } from './places'
 
+// 标签字体清单（CJK 字体子集字符清单 + 完整性锚点）
+export {
+  validateLabelFontManifest,
+  type LabelFontManifestContract,
+  type LabelFontManifestIntegrity,
+  type LabelFontManifestSourceStrings,
+} from './label-font'
+
 // 政治边界补充数据（九段线 / 岛礁点 / 争议区修正）
 export {
   validatePoliticalBoundary,
