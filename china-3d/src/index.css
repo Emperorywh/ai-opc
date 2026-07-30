@@ -79,3 +79,39 @@ body {
   letter-spacing: 2px;
   color: var(--text-secondary);
 }
+
+/*
+ * 南海诸岛 2D 标准附图（TASK-012，SPEC §3.8）。
+ *
+ * 右下角矩形 DOM overlay，独立于 3D 画布（挂在 Canvas 之外，不进入 3D 渲染循环）。半透明深色面板 +
+ * 细发光描边，与页面深色科技风一致；SVG 按 viewBox 等比缩放（宽度随面板、高度由墨卡托比例派生于
+ * viewBox，见 src/config/south-china-sea-inset）。右下角为海域方向，不遮挡主图核心地形区。
+ * 附图纯静态展示：pointer-events: none 使相机交互穿透（不参与 hover、无 click），与「纯地理展示」一致。
+ */
+.scs-inset {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 10;
+  width: 240px;
+  padding: 10px 12px 12px;
+  background: rgba(14, 20, 36, 0.62);
+  border: 1px solid rgba(159, 232, 216, 0.22);
+  border-radius: 8px;
+  box-shadow: 0 0 18px rgba(159, 232, 216, 0.1);
+  pointer-events: none;
+}
+
+.scs-inset-caption {
+  margin: 0 0 6px;
+  font-size: 13px;
+  letter-spacing: 4px;
+  color: var(--text-primary);
+  text-shadow: 0 0 12px rgba(159, 232, 216, 0.3);
+}
+
+.scs-inset-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}

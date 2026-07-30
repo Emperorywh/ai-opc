@@ -3,8 +3,8 @@
  *
  * 当前装配：全视口深蓝黑容器 + 标题区 + 3D 地形画布（TASK-006 GPU 位移地形 + TASK-007 动态海面
  * + TASK-008 场景氛围与受约束相机 + TASK-009 贴地省界与 hover 拾取 + TASK-011 十段线与南海岛礁
- * 政治要素）。海拔色阶图例、合规角标、南海附图、入场编排等由后续任务按 SPEC §11 目录结构挂载
- * （TASK-016 做最终总装）。
+ * 政治要素）+ 右下角南海诸岛 2D 附图 DOM overlay（TASK-012）。海拔色阶图例、合规角标、入场编排等
+ * 由后续任务按 SPEC §11 目录结构挂载（TASK-016 做最终总装）。
  *
  * 标题区文案来自页面静态文案唯一事实源（src/lib/static-copy.ts），字体子集覆盖校验以同一事实源
  * 断言所需汉字无缺失（SPEC §3.7）。
@@ -51,6 +51,14 @@
  * 契约加载失败与准备期红线断言失败（缺段 / 缺点）均按 SPEC §6 红线显式暴露为整页错误，绝不静默
  * 渲染一张缺十段线 / 岛礁的地图。本 TASK 不宣称取得审图号，内部展示状态下验收（政治边界补充数据
  * 为非官方审图数据，见 docs/political-review-record.md）。
+ *
+ * 南海诸岛 2D 附图（TASK-012，SPEC §3.8 / §5.4 / §6 红线）：右下角矩形 SVG DOM overlay，挂在 3D
+ * Canvas 之外（不进入 3D 渲染循环，纯静态，pointer-events: none 使相机交互穿透）。与主图政治要素层
+ * 复用同一份 PoliticalBoundaryContract（模块级单例 Promise 去重，SPEC §5.4 单一事实源），经领域纯函数
+ * prepareSouthChinaSeaInset 完成「红线完整性断言（与主图同一共享扫描单源）→ projectToInset 同一墨卡托
+ * 投影的 2D 子范围映射 → 岛礁标注确定性摆放（右 / 左 / 上 / 下候选序，框内不互叠）」，交
+ * SouthChinaSeaInset 渲染十段虚线 + 岛礁光点 + 规范名称标注。准备失败（红线缺段 / 缺点、投影失败）
+ * 与主图政治要素同一通道按 SPEC §6 红线暴露为整页错误，绝不静默显示残缺附图。
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -87,6 +95,7 @@ import { preparePlaceLabels, collectRenderedPlaceLabelStrings } from './lib/plac
 import { loadPoliticalBoundary } from './lib/political-boundary'
 import { preparePoliticalFeatures } from './lib/political-features'
 import type { PreparedPoliticalFeatures } from './lib/political-features'
+import { SouthChinaSeaInset } from './components/SouthChinaSeaInset'
 import {
   LabelFontLoadError,
   loadLabelFontManifest,
@@ -526,6 +535,9 @@ function App() {
   // 政治要素准备期错误（红线缺段 / 缺点、投影 / 高程查询失败）：由 PoliticalFeaturesLayer 上报，
   // 按 SPEC §6 红线显式暴露为整页错误（见 assetErrorMessage）。
   const [politicalPrepError, setPoliticalPrepError] = useState<string | null>(null)
+  // 南海附图准备期错误（TASK-012，红线缺段 / 缺点、附图子范围投影失败）：由 SouthChinaSeaInset 上报，
+  // 与主图政治要素同一通道按 SPEC §6 红线显式暴露为整页错误（不静默显示残缺附图）。
+  const [insetPrepError, setInsetPrepError] = useState<string | null>(null)
 
   // 配置非法（如 URL 覆盖越界）：确定性失败，显式暴露，不带病渲染。
   if ('error' in RUNTIME_TERRAIN_CONFIG) {
@@ -542,9 +554,10 @@ function App() {
     )
   }
 
-  // 省界几何 / 标签资产（地点目录 / 字体清单）/ 政治边界契约的加载失败与政治要素准备失败，
-  // 均按政治红线（SPEC §6：边界完整、台湾 / 港澳标注齐全、十段线含台湾东侧段与岛礁点位完整是
-  // 事故级问题）显式暴露为整页错误：不渲染一张缺省界、缺标注或缺十段线 / 岛礁的地图。
+  // 省界几何 / 标签资产（地点目录 / 字体清单）/ 政治边界契约的加载失败、政治要素与南海附图的准备
+  // 失败，均按政治红线（SPEC §6：边界完整、台湾 / 港澳标注齐全、十段线含台湾东侧段与岛礁点位完整、
+  // 右下 2D 附图作为合规惯例存在，是事故级问题）显式暴露为整页错误：不渲染一张缺省界、缺标注、
+  // 缺十段线 / 岛礁或缺附图的地图。
   const assetErrorMessage =
     geometry.phase === 'error'
       ? `省界数据加载失败：${geometry.message}`
@@ -554,7 +567,9 @@ function App() {
           ? `政治边界数据加载失败：${political.message}`
           : politicalPrepError !== null
             ? `政治要素准备失败：${politicalPrepError}`
-            : null
+            : insetPrepError !== null
+              ? `南海附图准备失败：${insetPrepError}`
+              : null
 
   return (
     <main className="screen">
@@ -617,6 +632,16 @@ function App() {
           </p>
         )}
       </section>
+      {/*
+        南海诸岛 2D 标准附图（TASK-012，SPEC §3.8 / §5.4 / §6 红线）：右下角矩形 SVG DOM overlay，
+        挂在 3D Canvas 之外（不进入 3D 渲染循环，纯静态，pointer-events: none 使相机交互穿透），
+        与主图政治要素复用同一份契约（模块级单例 Promise 去重）。仅在地形就绪、无整页错误且政治
+        契约就绪时呈现；准备失败经 onPrepError 进入整页错误通道（届时本组件随整页错误一同卸载，
+        不静默显示残缺附图）。
+      */}
+      {heightmap.phase === 'ready' && assetErrorMessage === null && political.phase === 'ready' && (
+        <SouthChinaSeaInset contract={political.contract} onPrepError={setInsetPrepError} />
+      )}
     </main>
   )
 }
