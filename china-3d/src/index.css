@@ -356,3 +356,59 @@ body {
   font-size: 10px;
   opacity: 0.9;
 }
+
+/*
+ * 运行时恢复状态诊断（TASK-015，SPEC §7.4）。
+ *
+ * context-lost / restoring / restore-failed 期间的全屏覆盖，独立于 3D 画布（挂在 Canvas 之外，不进入
+ * 3D 渲染循环）。半透明深蓝黑底（与页面骨架同色系的半透明形态）告知「在恢复」而非「坏了」；
+ * restore-failed 形态叠加可诊断错误与刷新指引，不自动降级 / 重试。pointer-events: none 指针穿透——
+ * 交互已由 App 的相机锁（runtimePhase !== 'running' 时 OrbitControls enabled=false）统一关闭，本层
+ * 不新增交互面。z-index 高于加载 Loader（z-20）：GPU 健康诊断是最高优先级反馈（加载期 context 丢失
+ * 时也应可见）；资产红线错误页（screen-status）出现时本 overlay 不挂载，无双错误界面。
+ */
+.runtime-status--full {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(7, 11, 22, 0.78);
+  pointer-events: none;
+}
+
+.runtime-status-title {
+  font-size: 16px;
+  letter-spacing: 6px;
+  color: var(--text-primary);
+  text-shadow: 0 0 16px rgba(159, 232, 216, 0.3);
+}
+
+.runtime-status-detail {
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--text-secondary);
+}
+
+.runtime-status-error {
+  max-width: 60%;
+  font-size: 13px;
+  line-height: 1.8;
+  letter-spacing: 1px;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.runtime-status-hint {
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--text-secondary);
+}
+
+.runtime-status--failed .runtime-status-title {
+  color: #ffb4a8;
+  text-shadow: 0 0 16px rgba(255, 180, 168, 0.35);
+}

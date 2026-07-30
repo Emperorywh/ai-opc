@@ -4,8 +4,8 @@
  * 当前装配：全视口深蓝黑容器 + 标题区 + 3D 地形画布（TASK-006 GPU 位移地形 + TASK-007 动态海面
  * + TASK-008 场景氛围与受约束相机 + TASK-009 贴地省界与 hover 拾取 + TASK-011 十段线与南海岛礁
  * 政治要素）+ 右下角南海诸岛 2D 附图 DOM overlay（TASK-012）+ 加载进度与入场动画编排（TASK-013）
- * + 左侧海拔色阶图例与左下合规角标 DOM overlay（TASK-014）。性能预算登记与最终总装由后续任务
- * 按 SPEC §11 目录结构承载（TASK-015 / TASK-016）。
+ * + 左侧海拔色阶图例与左下合规角标 DOM overlay（TASK-014）+ 长时运行稳定性与性能预算登记
+ * （TASK-015：context 丢失 / 恢复集中编排 + resize 防抖 + DPR 上限唯一事实源）。
  *
  * 标题区文案来自页面静态文案唯一事实源（src/lib/static-copy.ts），字体子集覆盖校验以同一事实源
  * 断言所需汉字无缺失（SPEC §3.7）。
@@ -81,8 +81,21 @@
  * heightmap 同一去重语义）——**不**计入 trackedAssets：合规角标是纯 DOM overlay，不参与入场
  * 资产就绪判定、不阻塞相机解锁 / 升起动画；但其加载 / 契约失败**不**静默省略角标（缺免责声明
  * 的页面违反 SPEC §8），按本页统一「绝不静默退化」原则进入整页错误通道显式暴露。
+ *
+ * 长时运行稳定性（TASK-015，SPEC §7.3 / §7.4）：RuntimeLifecycleController 是 Canvas 内「WebGL
+ * context 丢失 / 恢复 + resize」的唯一监听点与生命周期状态机的唯一驱动器——丢失时 preventDefault
+ * 阻止默认不可恢复行为、暂停视觉推进（runtimeFrameRef.paused=true：EntranceController 冻结入场
+ * elapsed 且恢复后从原位继续、SeaSurface 冻结水面 uTime），并经 runtimePhase 驱动
+ * RuntimeStatusOverlay 的 DOM 状态提示与相机交互锁；恢复时遍历场景把全部纹理 / 材质置
+ * needsUpdate=true（从同一份 CPU 源重新上传 GPU，绝不重新 fetch / 重新解码 32MB .r16），重建
+ * 成功回 running、重建抛错 / 恢复超时 → restore-failed 显式终态 + 可诊断错误（不自动降级 / 重试）。
+ * resize 经 160ms 防抖提交最终尺寸（连续输入只保留最后一次），同步渲染器 setSize 与相机 aspect。
+ * Canvas dpr 取自 RENDER_BUDGET_CONFIG.dprMin / dprMax（= [1, 2]，SPEC §7.3 的唯一事实源，
+ * R3F 在区间内取 Math.min(devicePixelRatio, dprMax)）；性能预算（显存 / draw call / 4096² 档位
+ * 策略 / 无流式无低清 fallback / 逐帧分配禁止）全部登记在 src/config/render-budget.ts，实测方法与
+ * 无头验证记录见 docs/performance-measurement-record.md。
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { PAGE_SUBTITLE, PAGE_TITLE } from './lib/static-copy'
@@ -90,6 +103,7 @@ import {
   resolveTerrainConfigOrThrow,
   type TerrainRenderConfig,
 } from './config/terrain-config'
+import { RENDER_BUDGET_CONFIG } from './config/render-budget'
 import { SCENE_ATMOSPHERE_CONFIG } from './config/scene-atmosphere'
 import { PROVINCE_BORDERS_CONFIG } from './config/province-borders'
 import { PLACE_LABELS_CONFIG } from './config/place-labels'
@@ -99,6 +113,7 @@ import { SeaSurface } from './three/SeaSurface'
 import { SceneAtmosphere } from './three/SceneAtmosphere'
 import { MapOrbitControls } from './three/MapOrbitControls'
 import { EntranceController } from './three/EntranceController'
+import { RuntimeLifecycleController } from './three/RuntimeLifecycleController'
 import { ProvinceHoverProvider } from './three/ProvinceHoverProvider'
 import { ProvinceBorders } from './three/ProvinceBorders'
 import { ProvinceHoverPicker } from './three/ProvinceHoverPicker'
@@ -125,10 +140,12 @@ import {
   type EntrancePhase,
   type TrackedAssetState,
 } from './lib/entrance-state'
+import type { RuntimeFrame, RuntimeLifecyclePhase } from './lib/runtime-lifecycle'
 import { SouthChinaSeaInset } from './components/SouthChinaSeaInset'
 import { Loader } from './components/ui/Loader'
 import { ElevationLegend } from './components/ui/ElevationLegend'
 import { ComplianceBadge } from './components/ui/ComplianceBadge'
+import { RuntimeStatusOverlay } from './components/ui/RuntimeStatusOverlay'
 import { loadDataSourceRegistry } from './lib/data-source-registry'
 import {
   LabelFontLoadError,
@@ -681,11 +698,38 @@ function App() {
     readiness.failed ? 'error' : 'loading',
   )
 
-  // 受约束相机的交互启停（TASK-008 启停契约 + TASK-013 入场交互锁，SPEC §4.3「动画期间锁相机交互，
-  // 结束后释放 OrbitControls」）：单一显式布尔 = 入场到达 interactive。loading / error / 三个动画阶段
-  // 锁定相机（无意义旋转 / 探索未就绪或正在入场的场景）。该阶段单调到达，故交互只在入场完成后解锁
-  // （不会提前 / 重复解锁）；enabled 是受控 prop，不存在第二套交互开关。
-  const interactionEnabled = isEntranceInteractive(entrancePhase)
+  // 运行时生命周期（TASK-015 集中编排，SPEC §7.4）：runtimeFrameRef 是 Canvas 内外共享的「集中编排 →
+  // 各消费者」信号载体，RuntimeLifecycleController 在 context 阶段切换时原地写其 phase + paused，
+  // EntranceController / SeaSurface 各自 useFrame 只读 paused 决定是否冻结视觉推进（不各自监听 context
+  // 事件——集中编排契约）。runtimePhase 是 React state（仅阶段切换更新，约 0–数次：正常 24h 运行可能
+  // 从不切换），驱动 DOM 诊断（RuntimeStatusOverlay）与相机交互锁。committedSize 是 resize 防抖提交后
+  // 的最终尺寸（= 最后一次输入），可供 overlay 派生尺寸消费。
+  const runtimeFrameRef = useRef<RuntimeFrame>({ phase: 'running', paused: false })
+  const [runtimePhase, setRuntimePhase] = useState<RuntimeLifecyclePhase>('running')
+  const [runtimeFailureMessage, setRuntimeFailureMessage] = useState<string | null>(null)
+  // 阶段切换回调（仅切换时调用——RuntimeLifecycleController 内部已去重）：写 React state 驱动 DOM
+  // 诊断。用 useCallback 固定身份，避免下游因回调身份变化重渲染 / 重注册（集中编排的回调边界稳定）。
+  const handleRuntimePhaseChange = useCallback(
+    (phase: RuntimeLifecyclePhase, failureMessage: string | null) => {
+      setRuntimePhase(phase)
+      setRuntimeFailureMessage(failureMessage)
+    },
+    [],
+  )
+  // resize 提交回调（防抖窗口结束后调用）：记录最终尺寸，可供 overlay 派生消费。当前 overlay 均用 CSS
+  // 响应式布局（不依赖 JS 尺寸），此处保留单一回调入口以备消费；零开销（无 overlay 消费时不触发重渲染）。
+  const handleCommittedSize = useCallback((width: number, height: number) => {
+    void width
+    void height
+  }, [])
+
+  // 受约束相机的交互启停（TASK-008 启停契约 + TASK-013 入场交互锁 + TASK-015 运行时锁，SPEC §4.3
+  // 「动画期间锁相机交互，结束后释放 OrbitControls」）：单一显式布尔 = 入场到达 interactive **且**
+  // 运行时处于 running。loading / error / 三个动画阶段锁定相机（无意义旋转 / 探索未就绪或正在入场的
+  // 场景）；context-lost / restoring / restore-failed 亦锁定（场景冻结 / 损坏，无意义交互）。两条件
+  // 均单调到达，故交互只在「入场完成 && 运行正常」时解锁（不会提前 / 重复解锁）；enabled 是受控
+  // prop，不存在第二套交互开关。
+  const interactionEnabled = isEntranceInteractive(entrancePhase) && runtimePhase === 'running'
 
   // 配置非法（如 URL 覆盖越界）：确定性失败，显式暴露，不带病渲染。
   if ('error' in RUNTIME_TERRAIN_CONFIG) {
@@ -749,22 +793,44 @@ function App() {
             }}
             // 渲染器阴影图显式关闭（SPEC §3.4：地形不投递阴影贴图；配置层结构性 false）。
             shadows={SCENE_ATMOSPHERE_CONFIG.shadowsEnabled}
-            // DPR 上限 2（SPEC §7.3，防 4K 屏 ×高 DPR 爆显存）；预算正式配置由 TASK-015 登记。
-            dpr={[1, 2]}
+            // DPR 区间 [1, 2]（SPEC §7.3）：上限 2 是结构性钳制，防 4K 屏 ×高 DPR 爆显存；唯一事实源
+            // 为 RENDER_BUDGET_CONFIG（src/config/render-budget，TASK-015），R3F 在区间内取
+            // Math.min(devicePixelRatio, dprMax)。
+            dpr={[RENDER_BUDGET_CONFIG.dprMin, RENDER_BUDGET_CONFIG.dprMax]}
           >
             {/* 深蓝黑背景 + 可选轻雾 + 半球环境光 + 单盏西北偏高主光（SPEC §3.4）。 */}
             <SceneAtmosphere />
+            {/*
+              运行时生命周期集中编排器（TASK-015，SPEC §7.4）：Canvas 内唯一监听 webglcontextlost /
+              webglcontextrestored 的组件 + 唯一 resize 防抖提交点。把 context 事件 / GPU 重建结果 /
+              防抖后尺寸翻译为集中信号——阶段切换时原地写共享 runtimeFrameRef（EntranceController /
+              SeaSurface 各自 useFrame 只读 paused 决定冻结视觉推进，不各自监听 context）+ 回调上层
+              驱动 DOM 诊断（RuntimeStatusOverlay）与相机交互锁；resize 防抖后提交最终尺寸同步渲染器 /
+              相机。context 丢失时 preventDefault（阻止默认不可恢复行为）+ 暂停视觉推进；恢复时遍历
+              场景重建 GPU 纹理 / 材质（复用同一份 CPU 高程像素，绝不重新解码 .r16）；重建抛错 / 恢复
+              超时 → restore-failed（显式终态 + 诊断，不回退旧实现 / 远程 fallback）。无几何 / 无 DOM
+              输出。监听器挂载期注册一次、卸载移除一次（无重复监听）；不新建 THREE.Clock（视觉时钟仍由
+              R3F 共享 clock 承载，本组件的 setTimeout 仅用于 context 恢复超时与 resize 防抖，非动画时钟）。
+            */}
+            <RuntimeLifecycleController
+              onPhaseChange={handleRuntimePhaseChange}
+              runtimeFrame={runtimeFrameRef}
+              onCommittedSize={handleCommittedSize}
+            />
             {/*
               入场编排驱动器（TASK-013 单一显式状态流 / 单一时间源，SPEC §4.3）：Canvas 内每帧从
               R3F 共享 clock 派生入场 elapsed、deriveEntrancePhase 得当前阶段，原地写入共享
               entranceFrameRef（各渲染层 useFrame 只读消费派生 rise / 透明度），阶段切换时回调
               setEntrancePhase 驱动 Loader 与相机交互锁。置于其余 useFrame 消费者之前挂载，使同帧
-              内先写入场帧、后被各层读取（订阅顺序 = 挂载顺序）。无几何 / 无 DOM 输出。
+              内先写入场帧、后被各层读取（订阅顺序 = 挂载顺序）。注入共享运行时帧（TASK-015）：
+              context-lost / restoring 期间冻结入场推进，恢复后把暂停时长折叠进起始偏移从原位继续。
+              无几何 / 无 DOM 输出。
             */}
             <EntranceController
               readiness={readiness}
               onPhaseChange={setEntrancePhase}
               entranceFrame={entranceFrameRef}
+              runtimeFrame={runtimeFrameRef}
             />
             {/*
               受约束东南斜俯视轨道相机（SPEC §4.1）：距离 / 极角 / target 三道边界 + 动态 near。
@@ -783,8 +849,9 @@ function App() {
               config={RUNTIME_TERRAIN_CONFIG}
               entranceFrame={entranceFrameRef}
             />
-            {/* 动态海面（TASK-007）+ 入场淡入（TASK-013）：水面随水面 / 边界阶段平滑淡入。 */}
-            <SeaSurface entranceFrame={entranceFrameRef} />
+            {/* 动态海面（TASK-007）+ 入场淡入（TASK-013）：水面随水面 / 边界阶段平滑淡入。
+                注入共享运行时帧（TASK-015）：context-lost / restoring 期间冻结水面 uTime。 */}
+            <SeaSurface entranceFrame={entranceFrameRef} runtimeFrame={runtimeFrameRef} />
             {/*
               省级贴地边界、hover 拾取与省名标签 / 省会光点（TASK-009 / TASK-010，SPEC §3.6 /
               §3.7 / §4.2 / §7.5）：共享 hover 焦点状态由 ProvinceHoverProvider 保管（Canvas
@@ -812,6 +879,17 @@ function App() {
       */}
       {heightmap.phase !== 'error' && assetErrorMessage === null && (
         <Loader readiness={readiness} phase={entrancePhase} />
+      )}
+      {/*
+        运行时恢复状态诊断（TASK-015，SPEC §7.4「丢失时暂停渲染并给出状态提示」）：context-lost /
+        restoring / restore-failed 期间的全屏半透明覆盖，挂在 3D Canvas 之外（不进入 3D 渲染循环）。
+        阶段来自集中编排器（RuntimeLifecycleController），本 overlay 只消费——不监听 context 事件
+        （集中编排契约）。running 无输出（不干扰画布）；restore-failed 显示可诊断错误 + 刷新指引，
+        不自动降级 / 重试 / 远程 fallback。仅在画布挂载（heightmap 就绪）且无整页错误时呈现——
+        资产红线错误页优先（无双错误界面）。
+      */}
+      {heightmap.phase === 'ready' && assetErrorMessage === null && (
+        <RuntimeStatusOverlay phase={runtimePhase} failureMessage={runtimeFailureMessage} />
       )}
       {/*
         南海诸岛 2D 标准附图（TASK-012，SPEC §3.8 / §5.4 / §6 红线）：右下角矩形 SVG DOM overlay，

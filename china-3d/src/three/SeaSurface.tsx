@@ -41,6 +41,12 @@
  * uniforms 语义同一条 materialRef 路径），使海面在省名标签淡入完成后随水面 / 边界阶段平滑淡入；
  * 未注入时 uOpacity 恒为配置基线值。场景轻雾（SPEC §3.4）已由 TASK-008 装配：雾色 / 雾密度经
  * uFogColor / uFogDensity 注入（与地形片元、场景雾同读 SCENE_ATMOSPHERE_CONFIG，见着色器文件头）。
+ *
+ * 运行时暂停（TASK-015 集中编排，SPEC §7.4）：注入共享 runtimeFrame 时，本组件 useFrame 先检查
+ * runtimeFrame.paused——context-lost / restoring 期间直接 return（不写 uTime / uOpacity），水面波动
+ * 冻结、透明度保持暂停前值。本组件**不**监听 context 事件——paused 由 RuntimeLifecycleController
+ * 单点写入 runtimeFrame，本组件只读消费（集中编排契约）。恢复后下一帧直接接续 R3F 共享 clock
+ * （sin 周期相位跳变不可感知）。
  */
 
 import { useMemo, useRef } from 'react'
@@ -51,9 +57,10 @@ import { SEA_SURFACE_CONFIG } from '../config/sea-surface'
 import { SCENE_ATMOSPHERE_CONFIG, hexToShaderFloat3 } from '../config/scene-atmosphere'
 import { ENTRANCE_DURATIONS } from '../config/entrance'
 import { computeSceneLayerOpacity, type EntranceFrame } from '../lib/entrance-state'
+import type { RuntimeFrame } from '../lib/runtime-lifecycle'
 import { SEA_SURFACE_FRAGMENT_SHADER, SEA_SURFACE_VERTEX_SHADER } from './sea-surface-shaders'
 
-/** SeaSurface 的 props：可选的共享入场帧（不注入时海面加载完成即直接可见）。 */
+/** SeaSurface 的 props：可选的共享入场帧与共享运行时帧（不注入时海面加载完成即直接可见、不检查暂停）。 */
 export interface SeaSurfaceProps {
   /**
    * 共享入场帧（TASK-013 单一时间源，SPEC §4.3「水面…随后淡入」）。注入时每帧由本组件 useFrame 把
@@ -62,6 +69,11 @@ export interface SeaSurfaceProps {
    * 海面加载完成即直接可见）。
    */
   readonly entranceFrame?: RefObject<EntranceFrame> | null
+  /**
+   * 共享运行时帧（TASK-015 集中编排，SPEC §7.4）。注入时本组件 useFrame 先检查 runtimeFrame.paused：
+   * context-lost / restoring 期间冻结 uTime / uOpacity 写入（水面静止）。未注入时不检查暂停。
+   */
+  readonly runtimeFrame?: RefObject<RuntimeFrame> | null
 }
 
 /**
@@ -71,7 +83,7 @@ export interface SeaSurfaceProps {
  * （useFrame），不建独立时钟；入场淡入透明度只读共享入场帧派生（同一 elapsed、同一纯函数，与省界 /
  * 十段线同阶段同步淡入），不私设计时器。
  */
-export function SeaSurface({ entranceFrame = null }: SeaSurfaceProps = {}): ReactNode {
+export function SeaSurface({ entranceFrame = null, runtimeFrame = null }: SeaSurfaceProps = {}): ReactNode {
   const { colorHex, opacity, planeLayout, segments, waves } = SEA_SURFACE_CONFIG
   const { fog } = SCENE_ATMOSPHERE_CONFIG
   // 入场接管判定：注入共享入场帧即由入场状态机调制 uOpacity（初始 0 = 不可见，淡入阶段 0→1×基线）；
@@ -123,6 +135,13 @@ export function SeaSurface({ entranceFrame = null }: SeaSurfaceProps = {}): Reac
   // 共用同一 elapsed（共享入场帧）与同一纯函数，故水面 / 省界 / 十段线 / 岛礁光点同阶段同步淡入，
   // 不存在逐层私设计时器。entranceFrame 未注入时不触碰 uOpacity（保持配置基线值，回退边界）。
   useFrame((state) => {
+    // 运行时暂停（TASK-015 集中编排，SPEC §7.4）：context-lost / restoring 期间冻结 uTime / uOpacity——
+    // 不推进波动、不改透明度，水面静止。paused 由 RuntimeLifecycleController 单点写入 runtimeFrame，
+    // 本组件只读消费（不监听 context 事件）。恢复后下一帧直接接续 R3F 共享 clock（sin 周期相位跳变
+    // 不可感知）。
+    if (runtimeFrame !== null && runtimeFrame !== undefined && runtimeFrame.current.paused) {
+      return
+    }
     const material = materialRef.current
     if (material === null) return
     material.uniforms.uTime.value = state.clock.getElapsedTime()

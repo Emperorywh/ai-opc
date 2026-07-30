@@ -458,9 +458,12 @@ describe('App 总装接线（验收 1、3：进度来自真实资产、相机锁
     expect(source).toContain('entranceFrame={entranceFrameRef}')
   })
 
-  it('相机交互锁：enabled={interactionEnabled}，单一布尔 = isEntranceInteractive(entrancePhase)', () => {
+  it('相机交互锁：enabled={interactionEnabled}，单一布尔 = isEntranceInteractive(entrancePhase) 且运行时 running（TASK-015）', () => {
     expect(source).toContain('isEntranceInteractive(entrancePhase)')
-    expect(code).toContain('const interactionEnabled = isEntranceInteractive(entrancePhase)')
+    // TASK-015 起交互锁为「入场 interactive && 运行时 running」单一合取布尔。
+    expect(code).toContain(
+      "const interactionEnabled = isEntranceInteractive(entrancePhase) && runtimePhase === 'running'",
+    )
     expect(source).toContain('<MapOrbitControls enabled={interactionEnabled} />')
     // 无第二套交互开关：App 内不再出现恒启用的 enabled 写法。
     expect(code).not.toContain('<MapOrbitControls enabled />')
@@ -471,7 +474,7 @@ describe('App 总装接线（验收 1、3：进度来自真实资产、相机锁
     const terrainIndex = source.indexOf('<ChinaTerrainMesh')
     expect(terrainIndex).toBeGreaterThan(-1)
     expect(source.indexOf('entranceFrame={entranceFrameRef}', terrainIndex)).toBeGreaterThan(terrainIndex)
-    expect(source).toContain('<SeaSurface entranceFrame={entranceFrameRef} />')
+    expect(source).toContain('<SeaSurface entranceFrame={entranceFrameRef} runtimeFrame={runtimeFrameRef} />')
     // 场景内容层（省界 / 标签 / 政治要素）经 TerrainSceneLayers 透传。
     expect(source).toContain('entranceFrame={entranceFrame}')
   })

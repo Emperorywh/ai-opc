@@ -374,11 +374,11 @@ describe('波动数值仿真（验收 1、4：时间驱动流动且细微，不�
 })
 
 describe('App 总装（验收 4：海面挂载进 3D 画布）', () => {
-  it('App 在 Canvas 内、地形之后挂载 <SeaSurface />（同一画布，透明通道后绘；TASK-013 起注入共享入场帧）', () => {
+  it('App 在 Canvas 内、地形之后挂载 <SeaSurface />（同一画布，透明通道后绘；TASK-013 起注入共享入场帧，TASK-015 起注入共享运行时帧）', () => {
     const source = readFileSync(resolve(srcRoot, 'App.tsx'), 'utf-8')
     expect(source).toContain("from './three/SeaSurface'")
     const terrainIndex = source.indexOf('<ChinaTerrainMesh')
-    const seaIndex = source.indexOf('<SeaSurface entranceFrame={entranceFrameRef} />')
+    const seaIndex = source.indexOf('<SeaSurface entranceFrame={entranceFrameRef} runtimeFrame={runtimeFrameRef} />')
     const canvasCloseIndex = source.indexOf('</Canvas>')
     expect(terrainIndex).toBeGreaterThan(-1)
     expect(seaIndex).toBeGreaterThan(terrainIndex)
