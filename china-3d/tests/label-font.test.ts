@@ -161,7 +161,7 @@ describe('页面静态文案唯一事实源（static-copy）', () => {
 
   it('收集器返回全部文案、顺序固定、无空串', () => {
     const copy = collectStaticCopyStrings()
-    expect(copy.length).toBeGreaterThanOrEqual(8)
+    expect(copy.length).toBeGreaterThanOrEqual(7)
     expect(copy.every((s) => typeof s === 'string' && s.length > 0)).toBe(true)
     // 顺序固定：两次收集逐条一致（字体清单确定性重产的前提）。
     expect(collectStaticCopyStrings()).toEqual(copy)

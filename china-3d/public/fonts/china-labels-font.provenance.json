@@ -16,7 +16,7 @@
       },
       {
         "path": "src/lib/static-copy.ts",
-        "role": "页面静态文案唯一事实源（附图标题 + 合规角标免责声明/审图号占位/数据源署名 + 页面标题区）",
+        "role": "页面静态文案唯一事实源（附图标题 + 合规角标免责声明/审图号占位/署名引导词 + 页面标题区）",
         "note": "源代码由 git 跟踪，不钉哈希（行尾序列随平台检出变化）；文案漂移由字符覆盖校验与逐字节重产比对检出。"
       }
     ],
@@ -30,14 +30,14 @@
       "sfnt": "TrueType（cmap format 4 / glyf+loca 长格式 / head.checksumAdjustment 回填）",
       "networkAccess": "none"
     },
-    "producedAt": "2026-07-29T19:02:06.277Z",
+    "producedAt": "2026-07-30T11:13:23.807Z",
     "producedBy": "TASK-005"
   },
   "integrity": {
-    "fontSha256": "7059f19629a2fe69f3d2543cf80e735289e5ebfa7743485b7488d61e11255183",
-    "manifestSha256": "56c68f651c9329bf1245a3f53686f40a9932caac1c8417332a897184de0adead",
-    "characterCount": 187,
-    "fontByteLength": 10484
+    "fontSha256": "7d85c0c08484987f95506b7e86ebdd6b10eac1dabfbff977bffe2e4f861f932c",
+    "manifestSha256": "f83ae6909fe513f1cf78f26c668853615a5aad1393b65aa2ff2b39344bc941ce",
+    "characterCount": 157,
+    "fontByteLength": 8924
   },
   "disclaimer": "本字体子集为项目确定性生成的离线占位字体（字形为占位矩形，非可读汉字），仅供内部展示，不得作为正式出版 / 发布用途；正式发布前须以可读 CJK 字体子集替换并取得自然资源主管部门审图号。"
 }

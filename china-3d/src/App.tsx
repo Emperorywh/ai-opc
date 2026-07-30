@@ -3,8 +3,9 @@
  *
  * 当前装配：全视口深蓝黑容器 + 标题区 + 3D 地形画布（TASK-006 GPU 位移地形 + TASK-007 动态海面
  * + TASK-008 场景氛围与受约束相机 + TASK-009 贴地省界与 hover 拾取 + TASK-011 十段线与南海岛礁
- * 政治要素）+ 右下角南海诸岛 2D 附图 DOM overlay（TASK-012）+ 加载进度与入场动画编排（TASK-013）。
- * 海拔色阶图例、合规角标等由后续任务按 SPEC §11 目录结构挂载（TASK-016 做最终总装）。
+ * 政治要素）+ 右下角南海诸岛 2D 附图 DOM overlay（TASK-012）+ 加载进度与入场动画编排（TASK-013）
+ * + 左侧海拔色阶图例与左下合规角标 DOM overlay（TASK-014）。性能预算登记与最终总装由后续任务
+ * 按 SPEC §11 目录结构承载（TASK-015 / TASK-016）。
  *
  * 标题区文案来自页面静态文案唯一事实源（src/lib/static-copy.ts），字体子集覆盖校验以同一事实源
  * 断言所需汉字无缺失（SPEC §3.7）。
@@ -70,6 +71,16 @@
  * 各自标量写入材质——单一时间源，无第二份 clock / 计时器。阶段切换（约 4 次）经 setEntrancePhase
  * 驱动 Loader 阶段提示与 MapOrbitControls enabled（loading / 动画期间锁定相机，到达 interactive
  * 一次性释放）。资产失败 → error 终态：入场不启动，红线整页错误通道展示诊断、相机保持锁定。
+ *
+ * 外围 UI（TASK-014，SPEC §8 / §9）：左侧竖向贴边海拔色阶图例（ElevationLegend，色条渐变与
+ * 六个关键刻度 0/1000/2000/3500/5000/8848m 的颜色 / 位置全部经 prepareElevationLegend 从
+ * TASK-006 色阶唯一事实源派生——sampleElevationColor 与 normalizeElevationToRampU 和地表片元
+ * 着色器同源，图例不复制断点 / 颜色）+ 左下角低调合规角标（ComplianceBadge，审图号占位
+ * GS(202x)xxxx 号（待取得）+ 从来源注册表派生的必备来源署名 + SPEC §8 完整免责声明）。
+ * 数据来源注册表（public/geo/data-sources.json）经 loadDataSourceRegistryOnce 单例加载（与
+ * heightmap 同一去重语义）——**不**计入 trackedAssets：合规角标是纯 DOM overlay，不参与入场
+ * 资产就绪判定、不阻塞相机解锁 / 升起动画；但其加载 / 契约失败**不**静默省略角标（缺免责声明
+ * 的页面违反 SPEC §8），按本页统一「绝不静默退化」原则进入整页错误通道显式暴露。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
@@ -116,6 +127,9 @@ import {
 } from './lib/entrance-state'
 import { SouthChinaSeaInset } from './components/SouthChinaSeaInset'
 import { Loader } from './components/ui/Loader'
+import { ElevationLegend } from './components/ui/ElevationLegend'
+import { ComplianceBadge } from './components/ui/ComplianceBadge'
+import { loadDataSourceRegistry } from './lib/data-source-registry'
 import {
   LabelFontLoadError,
   loadLabelFontManifest,
@@ -124,6 +138,7 @@ import {
 import type { TerrainWorldYSampler } from './lib/label-occlusion'
 import type {
   AdministrativeGeometryContract,
+  DataSourceRegistryContract,
   LabelFontManifestContract,
   PlaceDirectoryContract,
   PoliticalBoundaryContract,
@@ -166,6 +181,16 @@ type PoliticalBoundaryState =
   | { readonly phase: 'error'; readonly message: string }
 
 /**
+ * 数据来源注册表加载状态：加载中 / 就绪 / 失败。
+ * 失败不静默省略合规角标（缺 SPEC §8 免责声明的页面看似正常实则不合规），按本页统一
+ * 「绝不静默退化」原则进入整页错误通道显式暴露。
+ */
+type DataSourceRegistryState =
+  | { readonly phase: 'loading' }
+  | { readonly phase: 'ready'; readonly contract: DataSourceRegistryContract }
+  | { readonly phase: 'error'; readonly message: string }
+
+/**
  * 模块级 heightmap 加载 Promise（单例）：全页面只取数 / 解码 / 建纹理一次。
  * React StrictMode 的开发期双挂载会让 effect 触发两次——以模块级 Promise 去重，
  * 杜绝 32MB 资产被重复 fetch / 解码、GPU 纹理被建两份。
@@ -194,6 +219,17 @@ let politicalBoundaryPromise: Promise<PoliticalBoundaryContract> | null = null
 function loadPoliticalBoundaryOnce(): Promise<PoliticalBoundaryContract> {
   politicalBoundaryPromise ??= loadPoliticalBoundary()
   return politicalBoundaryPromise
+}
+
+/**
+ * 模块级数据来源注册表加载 Promise（单例）：与 heightmap 同一去重语义（StrictMode 双挂载安全），
+ * 全页面只取数 / 校验一次。该注册表是 TASK-004 来源声明契约的生产事实源，合规角标
+ * （ComplianceBadge）从中派生必备来源署名，不复制来源名称字面量。
+ */
+let dataSourceRegistryPromise: Promise<DataSourceRegistryContract> | null = null
+function loadDataSourceRegistryOnce(): Promise<DataSourceRegistryContract> {
+  dataSourceRegistryPromise ??= loadDataSourceRegistry()
+  return dataSourceRegistryPromise
 }
 
 /** 标签资产就绪产物：地点目录 + 已过结构与覆盖校验的字体清单。 */
@@ -293,6 +329,33 @@ function usePoliticalBoundary(): PoliticalBoundaryState {
   useEffect(() => {
     let cancelled = false
     loadPoliticalBoundaryOnce()
+      .then((contract) => {
+        if (!cancelled) setState({ phase: 'ready', contract })
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setState({ phase: 'error', message: cause instanceof Error ? cause.message : String(cause) })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return state
+}
+
+/**
+ * 加载数据来源注册表（资产访问层 loadDataSourceRegistry），就绪后返回经契约校验的 contract。
+ *
+ * 独立性：本 hook **不**计入 trackedAssets（不参与入场资产就绪判定、不阻塞相机解锁 / 升起
+ * 动画）——合规角标是纯 DOM overlay，其加载只决定角标何时呈现；但失败经 assetErrorMessage
+ * 整页暴露（不静默省略角标，见 DataSourceRegistryState 注释）。
+ */
+function useDataSourceRegistry(): DataSourceRegistryState {
+  const [state, setState] = useState<DataSourceRegistryState>({ phase: 'loading' })
+  useEffect(() => {
+    let cancelled = false
+    loadDataSourceRegistryOnce()
       .then((contract) => {
         if (!cancelled) setState({ phase: 'ready', contract })
       })
@@ -567,6 +630,7 @@ function App() {
   const geometry = useProvinceGeometry()
   const labelAssets = usePlaceLabelAssets()
   const political = usePoliticalBoundary()
+  const dataSources = useDataSourceRegistry()
   // 政治要素准备期错误（红线缺段 / 缺点、投影 / 高程查询失败）：由 PoliticalFeaturesLayer 上报，
   // 按 SPEC §6 红线显式暴露为整页错误（见 assetErrorMessage）。
   const [politicalPrepError, setPoliticalPrepError] = useState<string | null>(null)
@@ -638,10 +702,11 @@ function App() {
     )
   }
 
-  // 省界几何 / 标签资产（地点目录 / 字体清单）/ 政治边界契约的加载失败、政治要素与南海附图的准备
-  // 失败，均按政治红线（SPEC §6：边界完整、台湾 / 港澳标注齐全、十段线含台湾东侧段与岛礁点位完整、
-  // 右下 2D 附图作为合规惯例存在，是事故级问题）显式暴露为整页错误：不渲染一张缺省界、缺标注、
-  // 缺十段线 / 岛礁或缺附图的地图。任一错误出现即整页暴露（不等其他资产就绪）。
+  // 省界几何 / 标签资产（地点目录 / 字体清单）/ 政治边界契约 / 数据来源注册表的加载失败、政治
+  // 要素与南海附图的准备失败，均按政治红线（SPEC §6：边界完整、台湾 / 港澳标注齐全、十段线含
+  // 台湾东侧段与岛礁点位完整、右下 2D 附图作为合规惯例存在，是事故级问题）或合规底线（SPEC §8：
+  // 缺来源注册表即缺必备署名与免责声明）显式暴露为整页错误：不渲染一张缺省界、缺标注、缺
+  // 十段线 / 岛礁、缺附图或缺合规署名的地图。任一错误出现即整页暴露（不等其他资产就绪）。
   const assetErrorMessage =
     heightmap.phase === 'error'
       ? `地形数据加载失败：${heightmap.message}`
@@ -651,11 +716,13 @@ function App() {
           ? `标签数据加载失败：${labelAssets.message}`
           : political.phase === 'error'
             ? `政治边界数据加载失败：${political.message}`
-            : politicalPrepError !== null
-              ? `政治要素准备失败：${politicalPrepError}`
-              : insetPrepError !== null
-                ? `南海附图准备失败：${insetPrepError}`
-                : null
+            : dataSources.phase === 'error'
+              ? `数据来源注册表加载失败：${dataSources.message}`
+              : politicalPrepError !== null
+                ? `政治要素准备失败：${politicalPrepError}`
+                : insetPrepError !== null
+                  ? `南海附图准备失败：${insetPrepError}`
+                  : null
 
   return (
     <main className="screen">
@@ -755,6 +822,27 @@ function App() {
       */}
       {heightmap.phase === 'ready' && assetErrorMessage === null && political.phase === 'ready' && (
         <SouthChinaSeaInset contract={political.contract} onPrepError={setInsetPrepError} />
+      )}
+      {/*
+        海拔色阶图例（TASK-014，SPEC §9）：左侧竖向贴边 DOM overlay，挂在 3D Canvas 之外（不进
+        入 3D 渲染循环，纯静态，pointer-events: none 指针穿透）。色条渐变与六个关键刻度
+        （0 / 1000 / 2000 / 3500 / 5000 / 8848m）的颜色 / 位置全部经领域层 prepareElevationLegend
+        从 TASK-006 色阶唯一事实源派生（sampleElevationColor / normalizeElevationToRampU，与地表
+        片元着色器同一采样器与归一化），不复制断点 / 颜色；0m 标注「海平面」使水下色段有读图
+        含义。无资产依赖、挂载即稳定呈现；loading 期间由全屏 Loader 覆盖，资产 / 准备失败时随
+        整页错误通道一并隐藏（错误页不叠任何外围 UI）。
+      */}
+      {assetErrorMessage === null && <ElevationLegend />}
+      {/*
+        合规角标（TASK-014，SPEC §8 / §6）：左下角低调 DOM overlay，挂在 3D Canvas 之外。审图号
+        占位为未送审形态（字面 GS(202x)xxxx 号（待取得），不伪造已批复号码）；必备来源署名
+        （DEM / 行政区边界 / 政治边界补充）从来源注册表派生，不复制来源名称字面量；完整免责声明
+        （非官方 / 仅内部 / 不得正式出版发布）取得真实审图号前不得删除。dataSources 就绪时挂载；
+        不计入 trackedAssets（独立 overlay，不影响入场 / 相机 / 场景），其加载失败经上方整页
+        错误通道显式暴露（不静默省略角标）。
+      */}
+      {assetErrorMessage === null && dataSources.phase === 'ready' && (
+        <ComplianceBadge registry={dataSources.contract} />
       )}
     </main>
   )
