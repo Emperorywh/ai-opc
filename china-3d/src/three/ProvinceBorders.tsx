@@ -38,14 +38,23 @@
  *   NDC 深度偏移（applyLineDepthBias）：把省界片元在 NDC 空间整体推近约 80 个深度 ULP——使其恒
  *   胜过同位置地表（消除闪烁），仍被真正更近的山体（NDC 差远大于偏移）正确遮挡。这是大屏尺度下
  *   「省界贴地又不闪烁」的主防线，领域层 epsilon 是浮点对齐的辅助防线。
+ *
+ * 入场淡入（TASK-013，SPEC §4.3「水面、边界线随后淡入」）：
+ * - 注入共享入场帧（entranceFrame）时，父级单一 useFrame 每帧把 computeSceneLayerOpacity(elapsed)
+ *   （领域层纯函数 + ENTRANCE_DURATIONS 冻结时序，与海面 / 十段线同一函数同一 elapsed）写入全部
+ *   省界线材质的 opacity——34 省界随水面 / 边界阶段同步淡入。材质经子组件 useLayoutEffect 登记到
+ *   父级数组 ref（卸载清空槽位），不各开 useFrame、不私设计时器；未注入入场帧时 opacity 恒 1。
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { Line } from '@react-three/drei'
 import * as THREE from 'three'
+import { useFrame } from '@react-three/fiber'
 import { PROVINCE_BORDERS_CONFIG } from '../config/province-borders'
 import { PROVINCE_HOVER_CONFIG } from '../config/province-hover'
+import { ENTRANCE_DURATIONS } from '../config/entrance'
+import { computeSceneLayerOpacity, type EntranceFrame } from '../lib/entrance-state'
 import { useHoveredProvince } from './province-hover'
 import { applyLineDepthBias } from './line-depth-bias'
 import type { PreparedProvinceBorder, PreparedProvinceBorders } from '../lib/province-borders'
@@ -88,24 +97,42 @@ function flatEndpointsToTriplets(
 function ProvinceBorderLine({
   border,
   hoveredAdminId,
+  initialOpacity,
+  materialSlot,
+  materialsRef,
 }: {
   readonly border: PreparedProvinceBorder
   readonly hoveredAdminId: string | null
+  /** 挂载期初始透明度（入场接管时 0 = 不可见，未接管时 1；逐帧由父级统一 useFrame 接管）。 */
+  readonly initialOpacity: number
+  /** 本省界线材质在父级 materialsRef 数组中的下标（入场淡入时由父级统一寻址写 opacity）。 */
+  readonly materialSlot: number
+  /** 父级维护的省界线材质数组 ref：本组件挂载时登记、卸载时清空对应槽位。 */
+  readonly materialsRef: RefObject<(THREE.Material | null)[]>
 }): null | ReactNode {
-  // drei Line 实例引用，用于挂载后在其 material 上注入 NDC 深度偏移。
+  // drei Line 实例引用，用于挂载后在其 material 上注入 NDC 深度偏移并登记到父级材质数组。
   const lineRef = useRef<React.ComponentRef<typeof Line>>(null)
   // 端点三元组化（挂载期一次，segments 模式按三元组两两成对解释为线段）。
   const points = useMemo(
     () => flatEndpointsToTriplets(border.segmentEndpointsFlat),
     [border.segmentEndpointsFlat],
   )
-  // 挂载后注入深度偏移：drei 在创建 LineMaterial 并经 primitive attach 后，lineRef.current.material
-  // 已就绪；applyLineDepthBias 内置 needsUpdate=true 强制重编译使注入在首帧生效。
+  // 挂载后注入深度偏移 + 登记材质：drei 在创建 LineMaterial 并经 primitive attach 后，
+  // lineRef.current.material 已就绪；applyLineDepthBias 内置 needsUpdate=true 强制重编译使注入在
+  // 首帧生效。材质同时登记到父级 materialsRef[materialSlot]（卸载清空槽位），供父级单一 useFrame
+  // 统一写入场淡入 opacity——避免 34 个省界各开 useFrame（不私设计时器）。
   useLayoutEffect(() => {
     const line = lineRef.current as { material: THREE.Material } | null
     if (line === null) return
     applyLineDepthBias(line.material as THREE.ShaderMaterial, PROVINCE_BORDERS_CONFIG.depthBiasNdc)
-  }, [])
+    // 材质数组引用在 effect 内取一次（父级 useRef 数组身份恒定），登记 / 清理共用同一变量，
+    // 不在 cleanup 里重新解引用 ref.current（react-hooks/exhaustive-deps）。
+    const materials = materialsRef.current
+    materials[materialSlot] = line.material
+    return () => {
+      materials[materialSlot] = null
+    }
+  }, [materialSlot, materialsRef])
 
   if (border.segmentCount === 0) return null
 
@@ -129,6 +156,10 @@ function ProvinceBorderLine({
       points={points}
       color={colorHex}
       lineWidth={lineWidthPx}
+      // 初始透明度（drei 把 rest props 同时落到 Line2 与 LineMaterial，opacity 在 LineMaterial 上
+      // 生效）：入场接管时 0 = 首个绘制帧即不可见，不依赖帧订阅时序；逐帧由父级 useFrame 接管
+      // （opacity prop 恒定，React 重渲染不会回写覆盖逐帧值——R3F 仅应用变化项）。
+      opacity={initialOpacity}
       // 半透明 + 不写深度：省界在透明通道绘制、不竞争深度，水下地形 / 陆地已写深度决定可见性。
       transparent
       depthWrite={false}
@@ -140,26 +171,62 @@ function ProvinceBorderLine({
   )
 }
 
-/** ProvinceBorders 的 props：只接收领域层准备好的贴地线段；hover 状态经 context 消费，不经 props。 */
+/** ProvinceBorders 的 props：只接收领域层准备好的贴地线段 + 可选共享入场帧；hover 状态经 context 消费，不经 props。 */
 export interface ProvinceBordersProps {
   /** 领域层 prepareProvinceBorders 的产物（已 densify + 贴地 + 按行政区分组）。 */
   readonly borders: PreparedProvinceBorders
+  /**
+   * 共享入场帧（TASK-013 单一时间源，SPEC §4.3「边界线随后淡入」）。注入时每帧由本组件单一
+   * useFrame 把 computeSceneLayerOpacity(elapsed) 写入全部省界线材质的 opacity，使省界在省名标签
+   * 淡入完成后随水面 / 边界阶段平滑淡入。未注入时不写 opacity（材质 opacity 默认 1，省界加载完成
+   * 即直接可见）。
+   */
+  readonly entranceFrame?: RefObject<EntranceFrame> | null
 }
 
 /**
  * 渲染全部省级贴地边界（按行政区分组，浅青白 additive 发光，NDC 深度偏移抗 z-fighting，与海面
- * 透明共存；据共享 hover 焦点加亮加粗焦点省界、压暗非焦点省界、无焦点基线）。
+ * 透明共存；据共享 hover 焦点加亮加粗焦点省界、压暗非焦点省界、无焦点基线；据共享入场帧统一淡入）。
  *
  * 本组件不承担 densify / 高程采样 / 投影（领域层职责），不读取 GeoJSON / heightmap，不做拾取——
- * 它只是 PreparedProvinceBorders + 共享 hover 焦点状态的纯渲染边界。
+ * 它只是 PreparedProvinceBorders + 共享 hover 焦点状态 + 共享入场帧的纯渲染边界。
  */
-export function ProvinceBorders({ borders }: ProvinceBordersProps): ReactNode {
+export function ProvinceBorders({ borders, entranceFrame = null }: ProvinceBordersProps): ReactNode {
   // 唯一焦点源：共享 hover context（ProvinceHoverPicker 写入；TASK-010 标签模块同源消费）。
   const hoveredAdminId = useHoveredProvince()
+  // 入场接管判定：注入共享入场帧即由入场状态机调制 opacity（初始 0 = 不可见）；未注入时初始 1。
+  const entranceActive = entranceFrame !== null && entranceFrame !== undefined
+  // 全部省界线材质的登记数组（ProvinceBorderLine 挂载时按 materialSlot 登记、卸载时清空）。
+  // 单一 useFrame 据共享入场帧统一写 opacity，避免 34 个省界各开 useFrame（SPEC §7.4 统一时钟）。
+  const materialsRef = useRef<(THREE.Material | null)[]>([])
+
+  // 入场淡入（TASK-013）：注入共享入场帧时，每帧把全部省界材质 opacity 设为
+  // computeSceneLayerOpacity(elapsed)。LineMaterial 的 opacity setter 写入其 uniforms.opacity.value，
+  // 片元着色器按之缩放 alpha；AdditiveBlending 下 alpha 缩放加贡献，故 opacity 0→1 即省界从不可见
+  // 到完全发光淡入。与 SeaSurface / PoliticalFeatures 共用同一 computeSceneLayerOpacity（同一
+  // elapsed、同一函数），故水面 / 省界 / 十段线同阶段同步淡入。entranceFrame 未注入时本回调直接
+  // return（opacity 保持初始 1，回退边界）。每帧只写既有材质的标量字段——零对象分配。
+  useFrame(() => {
+    if (entranceFrame === null || entranceFrame === undefined) return
+    const opacity = computeSceneLayerOpacity(entranceFrame.current.elapsedSeconds, ENTRANCE_DURATIONS)
+    for (const material of materialsRef.current) {
+      if (material !== null && material !== undefined) {
+        material.opacity = opacity
+      }
+    }
+  })
+
   return (
     <group>
-      {borders.borders.map((border) => (
-        <ProvinceBorderLine key={border.adminId} border={border} hoveredAdminId={hoveredAdminId} />
+      {borders.borders.map((border, index) => (
+        <ProvinceBorderLine
+          key={border.adminId}
+          border={border}
+          hoveredAdminId={hoveredAdminId}
+          initialOpacity={entranceActive ? 0 : 1}
+          materialSlot={index}
+          materialsRef={materialsRef}
+        />
       ))}
     </group>
   )

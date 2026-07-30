@@ -36,28 +36,47 @@
  *   改本组件 useMemo 持有的初始对象不会到达 GPU（海面会静止）。后续 TASK 做「水面入场淡入」
  *   （SPEC §4.3，每帧调 uOpacity）同样必须写 materialRef.current.uniforms。
  *
- * 与后续任务的边界：入场「水面随后淡入」（SPEC §4.3）由后续 TASK 以受控方式扩展（经材质 uniforms
- * 调 uOpacity），本组件不预埋相关参数。场景轻雾（SPEC §3.4）已由 TASK-008 装配：雾色 / 雾密度经
+ * 与入场编排的边界（TASK-013，SPEC §4.3「水面、边界线随后淡入」）：注入共享入场帧时，uOpacity =
+ * 配置基线透明度 × computeSceneLayerOpacity(elapsed)（经材质 uniforms 写入，与本文件头的 R3F v9
+ * uniforms 语义同一条 materialRef 路径），使海面在省名标签淡入完成后随水面 / 边界阶段平滑淡入；
+ * 未注入时 uOpacity 恒为配置基线值。场景轻雾（SPEC §3.4）已由 TASK-008 装配：雾色 / 雾密度经
  * uFogColor / uFogDensity 注入（与地形片元、场景雾同读 SCENE_ATMOSPHERE_CONFIG，见着色器文件头）。
  */
 
 import { useMemo, useRef } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
 import { SEA_SURFACE_CONFIG } from '../config/sea-surface'
 import { SCENE_ATMOSPHERE_CONFIG, hexToShaderFloat3 } from '../config/scene-atmosphere'
+import { ENTRANCE_DURATIONS } from '../config/entrance'
+import { computeSceneLayerOpacity, type EntranceFrame } from '../lib/entrance-state'
 import { SEA_SURFACE_FRAGMENT_SHADER, SEA_SURFACE_VERTEX_SHADER } from './sea-surface-shaders'
+
+/** SeaSurface 的 props：可选的共享入场帧（不注入时海面加载完成即直接可见）。 */
+export interface SeaSurfaceProps {
+  /**
+   * 共享入场帧（TASK-013 单一时间源，SPEC §4.3「水面…随后淡入」）。注入时每帧由本组件 useFrame 把
+   * 「配置基线透明度 × computeSceneLayerOpacity(elapsed)」写入材质 uniforms 的 uOpacity.value——
+   * 海面在省名标签淡入完成后随水面 / 边界阶段平滑淡入。未注入时不调制 uOpacity（保持配置基线值，
+   * 海面加载完成即直接可见）。
+   */
+  readonly entranceFrame?: RefObject<EntranceFrame> | null
+}
 
 /**
  * 装配并渲染动态半透明海面 mesh。
  *
  * 海面参数全部来自冻结的 SEA_SURFACE_CONFIG（海面参数唯一源）；动画时间来自 R3F 共享 clock
- * （useFrame），不建独立时钟。
+ * （useFrame），不建独立时钟；入场淡入透明度只读共享入场帧派生（同一 elapsed、同一纯函数，与省界 /
+ * 十段线同阶段同步淡入），不私设计时器。
  */
-export function SeaSurface(): ReactNode {
+export function SeaSurface({ entranceFrame = null }: SeaSurfaceProps = {}): ReactNode {
   const { colorHex, opacity, planeLayout, segments, waves } = SEA_SURFACE_CONFIG
   const { fog } = SCENE_ATMOSPHERE_CONFIG
+  // 入场接管判定：注入共享入场帧即由入场状态机调制 uOpacity（初始 0 = 不可见，淡入阶段 0→1×基线）；
+  // 未注入时 uOpacity 恒取配置基线值。初始 0 使首个绘制帧即不可见，不依赖帧订阅时序。
+  const entranceActive = entranceFrame !== null && entranceFrame !== undefined
 
   // 初始 uniforms 挂载期一次构造：唯一时间输入 uTime 初值 0 + 静态 color/opacity/wave/fog 参数。
   // SEA_SURFACE_CONFIG 与 SCENE_ATMOSPHERE_CONFIG 都是模块级冻结常量（colorHex / opacity / waves / fog
@@ -69,8 +88,9 @@ export function SeaSurface(): ReactNode {
       uTime: { value: 0 },
       // 深蓝青基线色（[0,1]³，字节 / 255；与地形照明同一颜色空间约定）。
       uColor: { value: new THREE.Vector3(...hexToShaderFloat3(colorHex)) },
-      // 基线透明度（0.6）——直接成为片元输出 alpha（半透明混合）。
-      uOpacity: { value: opacity },
+      // 基线透明度（0.6）——片元输出 alpha 的基线。入场接管时初始 0（不可见），逐帧由 useFrame 写入
+      // 「基线 × computeSceneLayerOpacity(elapsed)」（SPEC §4.3 水面随后淡入）；未接管时恒为基线值。
+      uOpacity: { value: entranceActive ? 0 : opacity },
       // 第一层流动波动参数（静态，挂载期一次设置）。
       uLayer1FrequencyU: { value: waves.layer1.frequencyU },
       uLayer1FrequencyV: { value: waves.layer1.frequencyV },
@@ -87,20 +107,28 @@ export function SeaSurface(): ReactNode {
       uFogColor: { value: new THREE.Vector3(...hexToShaderFloat3(fog.hex)) },
       uFogDensity: { value: fog.enabled ? fog.density : 0 },
     }),
-    [colorHex, opacity, waves, fog],
+    [colorHex, opacity, waves, fog, entranceActive],
   )
 
   // 材质实例 ref：R3F v9 对 <shaderMaterial uniforms={...}> 做「稳定目标引用」合并（拷贝而非替换
-  // 引用，见文件头），材质自身的 uniforms 才是渲染器每帧读取的对象——每帧 uTime 写入必须落在这里。
+  // 引用，见文件头），材质自身的 uniforms 才是渲染器每帧读取的对象——每帧 uTime / uOpacity 写入
+  // 必须落在这里。
   const materialRef = useRef<THREE.ShaderMaterial>(null)
 
   // 统一时钟 + 无分配循环：用 R3F 共享 clock 的 getElapsedTime()，不 new THREE.Clock() 建独立漂移
   // 时钟。每帧只把经过时间写进材质 uniforms 的 uTime.value（原始数字赋值，零对象分配）；其余静态
   // uniform 运行循环不触碰。
+  // 入场淡入（TASK-013，SPEC §4.3「水面、边界线随后淡入」）：注入共享入场帧时，同帧再把
+  // 「配置基线透明度 × computeSceneLayerOpacity(elapsed)」写进 uOpacity.value——与省界 / 十段线
+  // 共用同一 elapsed（共享入场帧）与同一纯函数，故水面 / 省界 / 十段线 / 岛礁光点同阶段同步淡入，
+  // 不存在逐层私设计时器。entranceFrame 未注入时不触碰 uOpacity（保持配置基线值，回退边界）。
   useFrame((state) => {
     const material = materialRef.current
-    if (material !== null) {
-      material.uniforms.uTime.value = state.clock.getElapsedTime()
+    if (material === null) return
+    material.uniforms.uTime.value = state.clock.getElapsedTime()
+    if (entranceFrame !== null && entranceFrame !== undefined) {
+      material.uniforms.uOpacity.value =
+        opacity * computeSceneLayerOpacity(entranceFrame.current.elapsedSeconds, ENTRANCE_DURATIONS)
     }
   })
 

@@ -40,10 +40,13 @@
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { Line } from '@react-three/drei'
 import * as THREE from 'three'
+import { useFrame } from '@react-three/fiber'
 import { POLITICAL_FEATURES_CONFIG } from '../config/political-features'
+import { ENTRANCE_DURATIONS } from '../config/entrance'
+import { computeSceneLayerOpacity, type EntranceFrame } from '../lib/entrance-state'
 import { applyLineDepthBias } from './line-depth-bias'
 import type {
   PreparedPoliticalFeatures,
@@ -74,8 +77,21 @@ function flatEndpointsToTriplets(
  * 无线段（segmentCount=0，理论上不发生——契约保证每段 ≥ 2 顶点）时返回 null，不渲染空 Line。
  * 暖琥珀 + 虚线 + AdditiveBlending + NDC 深度偏移，与省界（浅青白实线）视觉明确区分。
  */
-function PoliticalLineSegment({ line }: { readonly line: PreparedPoliticalLine }): null | ReactNode {
-  // drei Line 实例引用，用于挂载后在其 material 上注入 NDC 深度偏移。
+function PoliticalLineSegment({
+  line,
+  initialOpacity,
+  materialSlot,
+  materialsRef,
+}: {
+  readonly line: PreparedPoliticalLine
+  /** 挂载期初始透明度（入场接管时 0 = 不可见，未接管时 1；逐帧由父级统一 useFrame 接管）。 */
+  readonly initialOpacity: number
+  /** 本段线材质在父级 materialsRef 数组中的下标（入场淡入时由父级统一寻址写 opacity）。 */
+  readonly materialSlot: number
+  /** 父级维护的政治要素材质数组 ref：本组件挂载时登记、卸载时清空对应槽位。 */
+  readonly materialsRef: RefObject<(THREE.Material | null)[]>
+}): null | ReactNode {
+  // drei Line 实例引用，用于挂载后在其 material 上注入 NDC 深度偏移并登记到父级材质数组。
   const lineRef = useRef<React.ComponentRef<typeof Line>>(null)
   // 端点三元组化（挂载期一次，segments 模式按三元组两两成对解释为线段）。
   const points = useMemo(
@@ -83,12 +99,20 @@ function PoliticalLineSegment({ line }: { readonly line: PreparedPoliticalLine }
     [line.segmentEndpointsFlat],
   )
   // 挂载后注入深度偏移（与省界 applyLineDepthBias 同函数、同注入点；dashed 模式的片元丢弃在 fragment
-  // shader，与 vertex shader 的深度偏移正交，故二者共存）。
+  // shader，与 vertex shader 的深度偏移正交，故二者共存）。材质同时登记到父级
+  // materialsRef[materialSlot]（卸载清空槽位），供父级单一 useFrame 统一写入场淡入 opacity。
   useLayoutEffect(() => {
     const lineObj = lineRef.current as { material: THREE.Material } | null
     if (lineObj === null) return
     applyLineDepthBias(lineObj.material as THREE.ShaderMaterial, POLITICAL_FEATURES_CONFIG.depthBiasNdc)
-  }, [])
+    // 材质数组引用在 effect 内取一次（父级 useRef 数组身份恒定），登记 / 清理共用同一变量，
+    // 不在 cleanup 里重新解引用 ref.current（react-hooks/exhaustive-deps）。
+    const materials = materialsRef.current
+    materials[materialSlot] = lineObj.material
+    return () => {
+      materials[materialSlot] = null
+    }
+  }, [materialSlot, materialsRef])
 
   if (line.segmentCount === 0) return null
 
@@ -100,6 +124,9 @@ function PoliticalLineSegment({ line }: { readonly line: PreparedPoliticalLine }
       points={points}
       color={POLITICAL_FEATURES_CONFIG.lineColorHex}
       lineWidth={POLITICAL_FEATURES_CONFIG.lineWidthPx}
+      // 初始透明度（drei 把 rest props 同时落到 Line2 与 LineMaterial，opacity 在 LineMaterial 上
+      // 生效）：入场接管时 0 = 首个绘制帧即不可见，不依赖帧订阅时序；逐帧由父级 useFrame 接管。
+      opacity={initialOpacity}
       // 虚线节拍（SPEC §5.3「发光虚线」）：drei Line dashed 模式按 dashSize 实线 + gapSize 空白沿弧长重复，
       // 与省界实线区分。虚线逻辑在 LineMaterial 的 fragment shader（按 lineDistance 丢弃片元），与 vertex
       // shader 的 NDC 深度偏移正交，二者共存。颜色（暖琥珀 vs 浅青白）是最主干的区分手段，即便虚线因平台
@@ -127,7 +154,20 @@ function PoliticalLineSegment({ line }: { readonly line: PreparedPoliticalLine }
  *
  * 规范名称（钓鱼岛 / 赤尾屿 / 曾母暗沙等）的文本标注由后续统一标签任务呈现，本组件只画可见光点。
  */
-function PoliticalIslandPoint({ point }: { readonly point: PreparedPoliticalPoint }): ReactNode {
+function PoliticalIslandPoint({
+  point,
+  initialOpacity,
+  materialSlot,
+  materialsRef,
+}: {
+  readonly point: PreparedPoliticalPoint
+  /** 挂载期初始透明度（入场接管时 0 = 不可见，未接管时 1；逐帧由父级统一 useFrame 接管）。 */
+  readonly initialOpacity: number
+  /** 本光点材质在父级 materialsRef 数组中的下标（入场淡入时由父级统一寻址写 opacity）。 */
+  readonly materialSlot: number
+  /** 父级维护的政治要素材质数组 ref：本组件挂载时登记、卸载时清空对应槽位。 */
+  readonly materialsRef: RefObject<(THREE.Material | null)[]>
+}): ReactNode {
   const { pointColorHex, pointRadiusMeters } = POLITICAL_FEATURES_CONFIG
   return (
     <mesh position={[point.position[0], point.position[1], point.position[2]]} renderOrder={3}>
@@ -140,33 +180,85 @@ function PoliticalIslandPoint({ point }: { readonly point: PreparedPoliticalPoin
         MeshBasicMaterial：不参与光照（恒亮暖色，不受方向光 / 环境光影响），保证暗处仍可见。
         AdditiveBlending：暖琥珀加到帧缓冲呈发光；depthWrite=false 不写深度；transparent 配合 additive。
         depthTest 默认 true：光点被前方山体正确遮挡（山后不可见），在地表 / 海面之上可见。
+        ref 回调把材质登记到父级 materialsRef[materialSlot]（卸载时以 null 清空槽位），供父级单一
+        useFrame 统一写入场淡入 opacity；opacity 初值使首个绘制帧即与入场阶段一致。
       */}
-      <meshBasicMaterial color={pointColorHex} blending={THREE.AdditiveBlending} transparent depthWrite={false} />
+      <meshBasicMaterial
+        ref={(material: THREE.MeshBasicMaterial | null) => {
+          materialsRef.current[materialSlot] = material
+        }}
+        color={pointColorHex}
+        blending={THREE.AdditiveBlending}
+        transparent
+        depthWrite={false}
+        opacity={initialOpacity}
+      />
     </mesh>
   )
 }
 
-/** PoliticalFeatures 的 props：只接收领域层准备好的十段线 + 岛礁点位，不取数、不计算、不持有交互状态。 */
+/** PoliticalFeatures 的 props：只接收领域层准备好的十段线 + 岛礁点位 + 可选共享入场帧，不取数、不计算、不持有交互状态。 */
 export interface PoliticalFeaturesProps {
   /** 领域层 preparePoliticalFeatures 的产物（已红线完整性校验 + densify + 海平面贴合）。 */
   readonly features: PreparedPoliticalFeatures
+  /**
+   * 共享入场帧（TASK-013 单一时间源，SPEC §4.3「水面、边界线随后淡入」）。注入时每帧由本组件单一
+   * useFrame 把 computeSceneLayerOpacity(elapsed) 写入全部十段线 / 岛礁光点材质的 opacity，使政治
+   * 要素在省名标签淡入完成后随水面 / 边界阶段平滑淡入。未注入时不写 opacity（材质 opacity 默认 1，
+   * 政治要素加载完成即直接可见）。
+   */
+  readonly entranceFrame?: RefObject<EntranceFrame> | null
 }
 
 /**
  * 渲染全部政治边界补充要素（十段线各段 + 岛礁点位，暖琥珀虚线 + 发光光点，NDC 深度偏移抗 z-fighting，
- * 与海面 / 省界透明共存）。
+ * 与海面 / 省界透明共存；据共享入场帧统一淡入）。
  *
  * 本组件不承担红线完整性校验 / densify / 海平面贴合 / 投影（领域层职责），不读取政治边界资产 /
- * heightmap / hover 状态——它只是 PreparedPoliticalFeatures 的纯渲染边界。
+ * heightmap / hover 状态——它只是 PreparedPoliticalFeatures + 共享入场帧的纯渲染边界。
  */
-export function PoliticalFeatures({ features }: PoliticalFeaturesProps): ReactNode {
+export function PoliticalFeatures({ features, entranceFrame = null }: PoliticalFeaturesProps): ReactNode {
+  // 入场接管判定：注入共享入场帧即由入场状态机调制 opacity（初始 0 = 不可见）；未注入时初始 1。
+  const entranceActive = entranceFrame !== null && entranceFrame !== undefined
+  // 全部政治要素材质（十段线各段 + 岛礁光点）的登记数组：线段占前 features.lines.length 槽位，
+  // 光点占其后 features.points.length 槽位（下标在挂载期按同一次序分配、确定性对齐）。子组件挂载
+  // 时登记、卸载时清空；父级单一 useFrame 统一写 opacity（不各开 useFrame、不私设计时器）。
+  const materialsRef = useRef<(THREE.Material | null)[]>([])
+
+  // 入场淡入（TASK-013）：注入共享入场帧时，每帧把全部政治要素材质 opacity 设为
+  // computeSceneLayerOpacity(elapsed)。与 SeaSurface / ProvinceBorders 共用同一
+  // computeSceneLayerOpacity（同一 elapsed、同一函数），故水面 / 省界 / 十段线 / 岛礁光点同阶段
+  // 同步淡入。entranceFrame 未注入时本回调直接 return（opacity 保持初始 1，回退边界）。每帧只写
+  // 既有材质的标量字段——零对象分配。
+  useFrame(() => {
+    if (entranceFrame === null || entranceFrame === undefined) return
+    const opacity = computeSceneLayerOpacity(entranceFrame.current.elapsedSeconds, ENTRANCE_DURATIONS)
+    for (const material of materialsRef.current) {
+      if (material !== null && material !== undefined) {
+        material.opacity = opacity
+      }
+    }
+  })
+
   return (
     <group>
-      {features.lines.map((line) => (
-        <PoliticalLineSegment key={`nine-dash-${line.segmentIndex}`} line={line} />
+      {features.lines.map((line, index) => (
+        <PoliticalLineSegment
+          key={`nine-dash-${line.segmentIndex}`}
+          line={line}
+          initialOpacity={entranceActive ? 0 : 1}
+          materialSlot={index}
+          materialsRef={materialsRef}
+        />
       ))}
       {features.points.map((point, index) => (
-        <PoliticalIslandPoint key={`island-${index}-${point.name}`} point={point} />
+        <PoliticalIslandPoint
+          key={`island-${index}-${point.name}`}
+          point={point}
+          initialOpacity={entranceActive ? 0 : 1}
+          materialSlot={features.lines.length + index}
+          materialsRef={materialsRef}
+        />
       ))}
     </group>
   )

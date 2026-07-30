@@ -3,8 +3,8 @@
  *
  * 当前装配：全视口深蓝黑容器 + 标题区 + 3D 地形画布（TASK-006 GPU 位移地形 + TASK-007 动态海面
  * + TASK-008 场景氛围与受约束相机 + TASK-009 贴地省界与 hover 拾取 + TASK-011 十段线与南海岛礁
- * 政治要素）+ 右下角南海诸岛 2D 附图 DOM overlay（TASK-012）。海拔色阶图例、合规角标、入场编排等
- * 由后续任务按 SPEC §11 目录结构挂载（TASK-016 做最终总装）。
+ * 政治要素）+ 右下角南海诸岛 2D 附图 DOM overlay（TASK-012）+ 加载进度与入场动画编排（TASK-013）。
+ * 海拔色阶图例、合规角标等由后续任务按 SPEC §11 目录结构挂载（TASK-016 做最终总装）。
  *
  * 标题区文案来自页面静态文案唯一事实源（src/lib/static-copy.ts），字体子集覆盖校验以同一事实源
  * 断言所需汉字无缺失（SPEC §3.7）。
@@ -59,9 +59,20 @@
  * 投影的 2D 子范围映射 → 岛礁标注确定性摆放（右 / 左 / 上 / 下候选序，框内不互叠）」，交
  * SouthChinaSeaInset 渲染十段虚线 + 岛礁光点 + 规范名称标注。准备失败（红线缺段 / 缺点、投影失败）
  * 与主图政治要素同一通道按 SPEC §6 红线暴露为整页错误，绝不静默显示残缺附图。
+ *
+ * 加载与入场编排（TASK-013，SPEC §4.3 / §12.8）：四个资产加载状态机（heightmap / 省界几何 / 政治
+ * 边界 / 标签资产）的真实阶段经 computeAssetReadiness（领域纯函数，src/lib/entrance-state）聚合为
+ * ready / failed / loadedCount / totalCount——Loader 的 DOM 进度条只反映真实资产进度，不伪造计时。
+ * Canvas 内的 EntranceController 是单一帧循环驱动器：全部资产就绪的首帧幂等捕获 R3F 共享 clock 起始
+ * 时刻（动画只启动一次），每帧派生 elapsed 与当前阶段原地写入共享 entranceFrameRef（零分配）；各
+ * 渲染层（ChinaTerrainMesh 的 uRise 升起 ≈1.2s、PlaceLabels 省名自西向东错峰淡入、SeaSurface /
+ * ProvinceBorders / PoliticalFeatures 随后同步淡入）useFrame 只读该帧、调用同一组领域纯函数派生
+ * 各自标量写入材质——单一时间源，无第二份 clock / 计时器。阶段切换（约 4 次）经 setEntrancePhase
+ * 驱动 Loader 阶段提示与 MapOrbitControls enabled（loading / 动画期间锁定相机，到达 interactive
+ * 一次性释放）。资产失败 → error 终态：入场不启动，红线整页错误通道展示诊断、相机保持锁定。
  */
-import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { PAGE_SUBTITLE, PAGE_TITLE } from './lib/static-copy'
 import {
@@ -76,6 +87,7 @@ import { ChinaTerrainMesh } from './three/ChinaTerrainMesh'
 import { SeaSurface } from './three/SeaSurface'
 import { SceneAtmosphere } from './three/SceneAtmosphere'
 import { MapOrbitControls } from './three/MapOrbitControls'
+import { EntranceController } from './three/EntranceController'
 import { ProvinceHoverProvider } from './three/ProvinceHoverProvider'
 import { ProvinceBorders } from './three/ProvinceBorders'
 import { ProvinceHoverPicker } from './three/ProvinceHoverPicker'
@@ -95,7 +107,15 @@ import { preparePlaceLabels, collectRenderedPlaceLabelStrings } from './lib/plac
 import { loadPoliticalBoundary } from './lib/political-boundary'
 import { preparePoliticalFeatures } from './lib/political-features'
 import type { PreparedPoliticalFeatures } from './lib/political-features'
+import {
+  computeAssetReadiness,
+  isEntranceInteractive,
+  type EntranceFrame,
+  type EntrancePhase,
+  type TrackedAssetState,
+} from './lib/entrance-state'
 import { SouthChinaSeaInset } from './components/SouthChinaSeaInset'
+import { Loader } from './components/ui/Loader'
 import {
   LabelFontLoadError,
   loadLabelFontManifest,
@@ -309,10 +329,12 @@ function ProvinceBordersLayer({
   geometry,
   provider,
   exaggeration,
+  entranceFrame,
 }: {
   readonly geometry: AdministrativeGeometryContract
   readonly provider: ElevationProvider
   readonly exaggeration: number
+  readonly entranceFrame: RefObject<EntranceFrame>
 }): ReactNode {
   const prepared = useMemo(() => {
     try {
@@ -329,7 +351,7 @@ function ProvinceBordersLayer({
   }, [geometry, provider, exaggeration])
 
   if (prepared === null) return null
-  return <ProvinceBorders borders={prepared} />
+  return <ProvinceBorders borders={prepared} entranceFrame={entranceFrame} />
 }
 
 /**
@@ -353,10 +375,12 @@ function PlaceLabelsLayer({
   assets,
   provider,
   exaggeration,
+  entranceFrame,
 }: {
   readonly assets: { readonly places: PlaceDirectoryContract; readonly fontManifest: LabelFontManifestContract }
   readonly provider: ElevationProvider
   readonly exaggeration: number
+  readonly entranceFrame: RefObject<EntranceFrame>
 }): ReactNode {
   const prepared = useMemo(() => {
     try {
@@ -383,7 +407,7 @@ function PlaceLabelsLayer({
   )
 
   if (prepared === null) return null
-  return <PlaceLabels labels={prepared} terrainQuery={terrainQuery} />
+  return <PlaceLabels labels={prepared} terrainQuery={terrainQuery} entranceFrame={entranceFrame} />
 }
 
 /**
@@ -408,11 +432,13 @@ function PoliticalFeaturesLayer({
   contract,
   provider,
   exaggeration,
+  entranceFrame,
   onPrepError,
 }: {
   readonly contract: PoliticalBoundaryContract
   readonly provider: ElevationProvider
   readonly exaggeration: number
+  readonly entranceFrame: RefObject<EntranceFrame>
   readonly onPrepError: (message: string) => void
 }): ReactNode {
   // 显式判别联合：准备成功携带 features，失败携带 error（供 useEffect 上报与渲染分支收窄）。
@@ -440,7 +466,7 @@ function PoliticalFeaturesLayer({
   }, [prepared, onPrepError])
 
   if (!prepared.ok) return null
-  return <PoliticalFeatures features={prepared.features} />
+  return <PoliticalFeatures features={prepared.features} entranceFrame={entranceFrame} />
 }
 
 /**
@@ -458,6 +484,7 @@ function TerrainSceneLayers({
   labelAssets,
   political,
   exaggeration,
+  entranceFrame,
   onPoliticalPrepError,
 }: {
   readonly heightmap: HeightmapTextureLoadResult
@@ -465,6 +492,7 @@ function TerrainSceneLayers({
   readonly labelAssets: PlaceLabelAssetsState
   readonly political: PoliticalBoundaryState
   readonly exaggeration: number
+  readonly entranceFrame: RefObject<EntranceFrame>
   readonly onPoliticalPrepError: (message: string) => void
 }): ReactNode {
   // 由 heightmap 的 meta + pixels 构造共享 CPU ElevationProvider（与 GPU 位移同一份高程
@@ -481,18 +509,25 @@ function TerrainSceneLayers({
             geometry={geometry.contract}
             provider={provider}
             exaggeration={exaggeration}
+            entranceFrame={entranceFrame}
           />
           <ProvinceHoverPicker features={geometry.contract.features} />
         </>
       )}
       {labelAssets.phase === 'ready' && (
-        <PlaceLabelsLayer assets={labelAssets} provider={provider} exaggeration={exaggeration} />
+        <PlaceLabelsLayer
+          assets={labelAssets}
+          provider={provider}
+          exaggeration={exaggeration}
+          entranceFrame={entranceFrame}
+        />
       )}
       {political.phase === 'ready' && (
         <PoliticalFeaturesLayer
           contract={political.contract}
           provider={provider}
           exaggeration={exaggeration}
+          entranceFrame={entranceFrame}
           onPrepError={onPoliticalPrepError}
         />
       )}
@@ -539,6 +574,55 @@ function App() {
   // 与主图政治要素同一通道按 SPEC §6 红线显式暴露为整页错误（不静默显示残缺附图）。
   const [insetPrepError, setInsetPrepError] = useState<string | null>(null)
 
+  // 入场编排（TASK-013 单一显式状态流，SPEC §4.3）：把四个资产 hook 的真实状态映射为受跟踪资产
+  // 状态列表，由 computeAssetReadiness（纯函数）聚合为 ready / failed / loadedCount / totalCount——
+  // DOM 进度只反映真实资产（loadedCount / totalCount），不伪造计时进度。entranceFrameRef 是 Canvas
+  // 内外共享的「同一时间源」ref：EntranceController 每帧原地写入 phase + elapsed，各渲染层 useFrame
+  // 只读消费派生各自 rise / 透明度（不由组件私自计时）。entrancePhase 是 React state（仅阶段切换时
+  // 更新，约 4 次），驱动 DOM 加载反馈与相机交互锁——非每帧 setState。
+  const trackedAssets = useMemo<readonly TrackedAssetState[]>(
+    () => [
+      {
+        key: 'heightmap',
+        phase: heightmap.phase,
+        errorMessage: heightmap.phase === 'error' ? heightmap.message : null,
+      },
+      {
+        key: 'provinceGeometry',
+        phase: geometry.phase,
+        errorMessage: geometry.phase === 'error' ? geometry.message : null,
+      },
+      {
+        key: 'politicalBoundary',
+        phase: political.phase,
+        errorMessage: political.phase === 'error' ? political.message : null,
+      },
+      {
+        key: 'placeLabelAssets',
+        phase: labelAssets.phase,
+        errorMessage: labelAssets.phase === 'error' ? labelAssets.message : null,
+      },
+    ],
+    [heightmap, geometry, political, labelAssets],
+  )
+  const readiness = useMemo(() => computeAssetReadiness(trackedAssets), [trackedAssets])
+  // 入场帧 ref：初值 loading / elapsed=0；EntranceController（Canvas 内）每帧原地覆盖。useRef 在
+  // StrictMode 重挂载下保持同一对象（同 fiber），与 EntranceController 的起始时刻幂等捕获共同保证
+  // 「动画只启动一次」。
+  const entranceFrameRef = useRef<EntranceFrame>({ phase: 'loading', elapsedSeconds: 0 })
+  // 入场阶段（React state，仅阶段切换更新）：初值 = 资产失败即 error、否则 loading。EntranceController
+  // 在阶段切换帧回调 setEntrancePhase，驱动 Loader 与相机交互锁。非每帧 setState（逐帧视觉值走
+  // entranceFrameRef）。
+  const [entrancePhase, setEntrancePhase] = useState<EntrancePhase>(
+    readiness.failed ? 'error' : 'loading',
+  )
+
+  // 受约束相机的交互启停（TASK-008 启停契约 + TASK-013 入场交互锁，SPEC §4.3「动画期间锁相机交互，
+  // 结束后释放 OrbitControls」）：单一显式布尔 = 入场到达 interactive。loading / error / 三个动画阶段
+  // 锁定相机（无意义旋转 / 探索未就绪或正在入场的场景）。该阶段单调到达，故交互只在入场完成后解锁
+  // （不会提前 / 重复解锁）；enabled 是受控 prop，不存在第二套交互开关。
+  const interactionEnabled = isEntranceInteractive(entrancePhase)
+
   // 配置非法（如 URL 覆盖越界）：确定性失败，显式暴露，不带病渲染。
   if ('error' in RUNTIME_TERRAIN_CONFIG) {
     return (
@@ -557,19 +641,21 @@ function App() {
   // 省界几何 / 标签资产（地点目录 / 字体清单）/ 政治边界契约的加载失败、政治要素与南海附图的准备
   // 失败，均按政治红线（SPEC §6：边界完整、台湾 / 港澳标注齐全、十段线含台湾东侧段与岛礁点位完整、
   // 右下 2D 附图作为合规惯例存在，是事故级问题）显式暴露为整页错误：不渲染一张缺省界、缺标注、
-  // 缺十段线 / 岛礁或缺附图的地图。
+  // 缺十段线 / 岛礁或缺附图的地图。任一错误出现即整页暴露（不等其他资产就绪）。
   const assetErrorMessage =
-    geometry.phase === 'error'
-      ? `省界数据加载失败：${geometry.message}`
-      : labelAssets.phase === 'error'
-        ? `标签数据加载失败：${labelAssets.message}`
-        : political.phase === 'error'
-          ? `政治边界数据加载失败：${political.message}`
-          : politicalPrepError !== null
-            ? `政治要素准备失败：${politicalPrepError}`
-            : insetPrepError !== null
-              ? `南海附图准备失败：${insetPrepError}`
-              : null
+    heightmap.phase === 'error'
+      ? `地形数据加载失败：${heightmap.message}`
+      : geometry.phase === 'error'
+        ? `省界数据加载失败：${geometry.message}`
+        : labelAssets.phase === 'error'
+          ? `标签数据加载失败：${labelAssets.message}`
+          : political.phase === 'error'
+            ? `政治边界数据加载失败：${political.message}`
+            : politicalPrepError !== null
+              ? `政治要素准备失败：${politicalPrepError}`
+              : insetPrepError !== null
+                ? `南海附图准备失败：${insetPrepError}`
+                : null
 
   return (
     <main className="screen">
@@ -578,10 +664,9 @@ function App() {
         <p className="screen-subtitle">{PAGE_SUBTITLE}</p>
       </header>
       <section className="screen-stage" aria-label="3D 地形画布挂载区">
-        {heightmap.phase === 'ready' ? (
-          assetErrorMessage !== null ? (
-            <p className="screen-status" role="alert">{assetErrorMessage}</p>
-          ) : (
+        {assetErrorMessage !== null ? (
+          <p className="screen-status" role="alert">{assetErrorMessage}</p>
+        ) : heightmap.phase === 'ready' ? (
           <Canvas
             camera={{
               // FOV / near 初值 / far / 初始位置全部来自相机约束纯计算契约（同一事实源）。
@@ -603,18 +688,42 @@ function App() {
             {/* 深蓝黑背景 + 可选轻雾 + 半球环境光 + 单盏西北偏高主光（SPEC §3.4）。 */}
             <SceneAtmosphere />
             {/*
-              受约束东南斜俯视轨道相机（SPEC §4.1）：距离 / 极角 / target 三道边界 + 动态 near。
-              当前无入场动画（TASK-013 将接入），交互恒启用——enabled 是受控 prop，入场状态机
-              届时以显式状态驱动它，本页不预埋第二套交互开关。
+              入场编排驱动器（TASK-013 单一显式状态流 / 单一时间源，SPEC §4.3）：Canvas 内每帧从
+              R3F 共享 clock 派生入场 elapsed、deriveEntrancePhase 得当前阶段，原地写入共享
+              entranceFrameRef（各渲染层 useFrame 只读消费派生 rise / 透明度），阶段切换时回调
+              setEntrancePhase 驱动 Loader 与相机交互锁。置于其余 useFrame 消费者之前挂载，使同帧
+              内先写入场帧、后被各层读取（订阅顺序 = 挂载顺序）。无几何 / 无 DOM 输出。
             */}
-            <MapOrbitControls enabled />
-            <ChinaTerrainMesh heightmap={heightmap.heightmap} config={RUNTIME_TERRAIN_CONFIG} />
-            <SeaSurface />
+            <EntranceController
+              readiness={readiness}
+              onPhaseChange={setEntrancePhase}
+              entranceFrame={entranceFrameRef}
+            />
+            {/*
+              受约束东南斜俯视轨道相机（SPEC §4.1）：距离 / 极角 / target 三道边界 + 动态 near。
+              交互启停由入场状态机显式驱动（TASK-013，SPEC §4.3）：loading / error / 升起 / 标签
+              淡入 / 水面边界淡入期间 enabled=false 锁定相机，到达 interactive 一次性释放——
+              enabled 是受控 prop，无第二套交互开关。
+            */}
+            <MapOrbitControls enabled={interactionEnabled} />
+            {/*
+              GPU 位移地形（TASK-006）+ 入场升起（TASK-013）：共享入场帧注入后 uRise 由
+              computeTerrainRise(elapsed) 逐帧驱动 0→1，地形从平面升起 ≈1.2s（复用 GPU 位移，
+              零额外几何开销）。
+            */}
+            <ChinaTerrainMesh
+              heightmap={heightmap.heightmap}
+              config={RUNTIME_TERRAIN_CONFIG}
+              entranceFrame={entranceFrameRef}
+            />
+            {/* 动态海面（TASK-007）+ 入场淡入（TASK-013）：水面随水面 / 边界阶段平滑淡入。 */}
+            <SeaSurface entranceFrame={entranceFrameRef} />
             {/*
               省级贴地边界、hover 拾取与省名标签 / 省会光点（TASK-009 / TASK-010，SPEC §3.6 /
               §3.7 / §4.2 / §7.5）：共享 hover 焦点状态由 ProvinceHoverProvider 保管（Canvas
               子树内共享，省界与标签同源消费）；共享 ElevationProvider 由场景内容层统一构造，
-              省界层与标签层共用同一实例。无 click 行为。
+              省界层与标签层共用同一实例。无 click 行为。共享入场帧透传驱动「省名标签自西向东
+              错峰淡入 + 省界 / 十段线随水面边界阶段淡入」（TASK-013）。
             */}
             <TerrainSceneLayers
               heightmap={heightmap.heightmap}
@@ -622,16 +731,21 @@ function App() {
               labelAssets={labelAssets}
               political={political}
               exaggeration={RUNTIME_TERRAIN_CONFIG.exaggeration}
+              entranceFrame={entranceFrameRef}
               onPoliticalPrepError={setPoliticalPrepError}
             />
           </Canvas>
-          )
-        ) : (
-          <p className="screen-status" role="status">
-            {heightmap.phase === 'loading' ? '地形数据加载中…' : `地形数据加载失败：${heightmap.message}`}
-          </p>
-        )}
+        ) : null}
       </section>
+      {/*
+        加载 / 入场 DOM 反馈（TASK-013，SPEC §4.3）：loading 显示真实进度条（loadedCount /
+        totalCount，不伪造计时，全屏覆盖遮住平面态地形）；动画阶段显示底部极简阶段提示（不遮
+        画布，3D 动画本身即进度反馈）；interactive 无输出。资产加载失败 / 准备失败由上方红线
+        整页错误通道优先展示（此时不挂载本组件，避免双错误界面）。
+      */}
+      {heightmap.phase !== 'error' && assetErrorMessage === null && (
+        <Loader readiness={readiness} phase={entrancePhase} />
+      )}
       {/*
         南海诸岛 2D 标准附图（TASK-012，SPEC §3.8 / §5.4 / §6 红线）：右下角矩形 SVG DOM overlay，
         挂在 3D Canvas 之外（不进入 3D 渲染循环，纯静态，pointer-events: none 使相机交互穿透），

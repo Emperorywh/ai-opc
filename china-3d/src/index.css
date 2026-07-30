@@ -115,3 +115,89 @@ body {
   width: 100%;
   height: auto;
 }
+
+/*
+ * 加载与入场 DOM 反馈（TASK-013，SPEC §4.3）。
+ *
+ * 两种形态：
+ * - --full：loading / error 阶段的全屏覆盖。不透明深蓝黑底（与页面骨架同一渐变）遮住尚未入场的场景
+ *   （地形仍在平面态），进度条只反映真实受跟踪资产（loadedCount / totalCount），不伪造计时进度。
+ * - --hint：入场动画阶段的底部极简提示，不覆盖画布（3D 动画本身即进度反馈）；pointer-events: none
+ *   使相机交互穿透（此时相机仍被入场状态机锁定，此处不新增交互面）。
+ */
+.entrance-loader--full {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: linear-gradient(180deg, var(--bg-deep) 0%, var(--bg-deep-raised) 100%);
+}
+
+.entrance-loader-title {
+  font-size: 15px;
+  letter-spacing: 6px;
+  color: var(--text-primary);
+  text-shadow: 0 0 16px rgba(159, 232, 216, 0.3);
+}
+
+.entrance-loader-bar {
+  width: 320px;
+  height: 4px;
+  overflow: hidden;
+  background: rgba(159, 232, 216, 0.12);
+  border: 1px solid rgba(159, 232, 216, 0.25);
+  border-radius: 2px;
+}
+
+.entrance-loader-bar-fill {
+  height: 100%;
+  background: var(--accent-glow);
+  border-radius: 2px;
+  box-shadow: 0 0 12px rgba(159, 232, 216, 0.55);
+  transition: width 0.25s ease-out;
+}
+
+.entrance-loader-progress {
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--text-secondary);
+}
+
+.entrance-loader-error {
+  max-width: 60%;
+  font-size: 13px;
+  line-height: 1.8;
+  letter-spacing: 1px;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.entrance-loader-hint {
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--text-secondary);
+}
+
+.entrance-loader--hint {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  z-index: 10;
+  padding: 8px 18px;
+  background: rgba(14, 20, 36, 0.62);
+  border: 1px solid rgba(159, 232, 216, 0.22);
+  border-radius: 8px;
+  box-shadow: 0 0 18px rgba(159, 232, 216, 0.1);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.entrance-loader-phase {
+  font-size: 12px;
+  letter-spacing: 4px;
+  color: var(--text-secondary);
+}

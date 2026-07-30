@@ -64,19 +64,32 @@
  *   （缺字即不渲染标签 + 整页错误状态），本组件只在「覆盖校验通过」后挂载，故 font prop
  *   指向的字体已保证覆盖所有将渲染的字符（省名 + 省会名）。
  *
+ * 入场错峰淡入（TASK-013，SPEC §4.3「省名标签依次淡入，按地理顺序错峰，如自西向东」）：
+ * - 注入共享入场帧（entranceFrame）时，本组件单一 useFrame 每帧把「省名标签按自西向东（世界 x
+ *   升序，+X = 东）错峰的入场透明度（computeProvinceLabelOpacity）」与「遮挡 / 焦点目标」**乘法
+ *   合成**为阻尼目标写入 troika fillOpacity——西部省名先亮、东部后亮；省会光点与省会名小字随省名
+ *   淡入阶段整体淡入（computeAncillaryLabelOpacity，非错峰）。入场完成后入场透明度恒 1，合成退化
+ *   为纯遮挡 / 焦点目标（TASK-010 行为无回归）。未注入入场帧时不施加入场透明度（=1，直接可见）。
+ *
  * 非官方审图限制（SPEC §6 / §8）：
  * - 本组件只呈现省名 / 省会光点 / 省会名文本与光点，不添加审图号角标、不通过任何视觉手段
  *   宣称已审图。
  */
 
 import { useMemo, useRef } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Billboard, Text } from '@react-three/drei'
 import * as THREE from 'three'
 import { PLACE_LABELS_CONFIG } from '../config/place-labels'
 import { PROVINCE_HOVER_CONFIG } from '../config/province-hover'
 import { LABEL_OCCLUSION_CONFIG } from '../config/label-occlusion'
+import { ENTRANCE_DURATIONS } from '../config/entrance'
+import {
+  computeAncillaryLabelOpacity,
+  computeProvinceLabelOpacity,
+  type EntranceFrame,
+} from '../lib/entrance-state'
 import { computeLabelVisibility } from '../lib/label-occlusion'
 import type { TerrainWorldYSampler } from '../lib/label-occlusion'
 import type { PreparedPlaceLabels } from '../lib/place-labels'
@@ -108,6 +121,14 @@ export interface PlaceLabelsProps {
    * troika 默认完全可见（生命周期处理）。
    */
   readonly terrainQuery?: TerrainWorldYSampler | null
+  /**
+   * 共享入场帧（TASK-013 单一时间源，SPEC §4.3「省名标签按地理顺序错峰，如自西向东」）。注入时
+   * 每帧由本组件单一 useFrame 把「省名标签按自西向东错峰淡入（computeProvinceLabelOpacity）」与
+   * 「省会光点 / 省会名小字随省名阶段整体淡入（computeAncillaryLabelOpacity）」的入场透明度与遮挡 /
+   * 焦点目标**乘法合成**后写入 troika fillOpacity / 光点材质 opacity。未注入时不施加入场透明度
+   * （=1），标签 / 光点加载完成即直接可见。
+   */
+  readonly entranceFrame?: RefObject<EntranceFrame> | null
 }
 
 /**
@@ -116,21 +137,40 @@ export interface PlaceLabelsProps {
  * 球体放在领域层准备的贴地世界坐标（y = h·k + epsilon）。MeshBasicMaterial 不参与光照（恒亮
  * 暖色）、AdditiveBlending 呈发光。depthTest 保持开启使光点被前方山体正确遮挡；
  * depthWrite=false 不影响其他透明层。renderOrder=3 使光点在省界（renderOrder=2）之后绘制。
- * 光点不参与遮挡淡化与 hover 样式（球体各向同性，depthTest 已与地形正确遮挡）。
+ * 光点不参与遮挡淡化与 hover 样式（球体各向同性，depthTest 已与地形正确遮挡）；其透明度只由
+ * 入场整体淡入决定（材质登记到父级数组 ref，父级单一 useFrame 统一写 opacity）。
  */
 function CapitalPoint({
   position,
+  initialOpacity,
+  materialSlot,
+  materialsRef,
 }: {
   readonly position: readonly [number, number, number]
+  /** 挂载期初始透明度（入场接管时 0 = 不可见，未接管时 1；逐帧由父级统一 useFrame 接管）。 */
+  readonly initialOpacity: number
+  /** 本光点材质在父级 materialsRef 数组中的下标（入场淡入时由父级统一寻址写 opacity）。 */
+  readonly materialSlot: number
+  /** 父级维护的省会光点材质数组 ref：本组件挂载时登记、卸载时清空对应槽位。 */
+  readonly materialsRef: RefObject<(THREE.MeshBasicMaterial | null)[]>
 }): ReactNode {
   return (
     <mesh position={[position[0], position[1], position[2]]} renderOrder={3}>
       <sphereGeometry args={[PLACE_LABELS_CONFIG.capitalPointRadiusMeters, 8, 8]} />
+      {/*
+        ref 回调把材质登记到父级 materialsRef[materialSlot]（卸载时以 null 清空槽位），供父级单一
+        useFrame 统一写入场整体淡入 opacity（computeAncillaryLabelOpacity，与省会名小字同包）。
+        opacity 初值使首个绘制帧即与入场阶段一致（不依赖帧订阅时序）。
+      */}
       <meshBasicMaterial
+        ref={(material: THREE.MeshBasicMaterial | null) => {
+          materialsRef.current[materialSlot] = material
+        }}
         color={PLACE_LABELS_CONFIG.capitalPointColorHex}
         blending={THREE.AdditiveBlending}
         transparent
         depthWrite={false}
+        opacity={initialOpacity}
       />
     </mesh>
   )
@@ -145,7 +185,7 @@ function CapitalPoint({
  * ——它只是 PreparedPlaceLabels + 共享 hover 焦点状态的纯渲染边界 + 一个由统一帧循环驱动的
  * 遮挡淡化控制器。
  */
-export function PlaceLabels({ labels, terrainQuery = null }: PlaceLabelsProps): ReactNode {
+export function PlaceLabels({ labels, terrainQuery = null, entranceFrame = null }: PlaceLabelsProps): ReactNode {
   // 唯一焦点源：共享 hover context（ProvinceHoverPicker 写入；省界同源消费）。
   const hoveredAdminId = useHoveredProvince()
 
@@ -154,21 +194,43 @@ export function PlaceLabels({ labels, terrainQuery = null }: PlaceLabelsProps): 
   const textRefs = useRef<(TroikaTextLike | null)[]>([])
   // 各标签的遮挡目标透明度（遮挡判定结果；indeterminate 时保持上一次目标，不抖动）。
   const targetOpacities = useRef<number[]>([])
-  // 各标签当前透明度（指数阻尼的当前值；初始 = 可见，与 troika 默认 fillOpacity=1 一致，
-  // 接管无可见跳变）。
+  // 各标签当前透明度（指数阻尼的当前值；初始 = 入场接管时 0（从不可见淡入）/ 未接管时可见）。
   const currentOpacities = useRef<number[]>([])
   // 帧计数（降频用）：由 R3F 统一帧循环递增，无独立计时器 / Clock。
   const frameCounter = useRef(0)
+  // 省会光点材质引用数组（入场淡入时由本组件单一 useFrame 统一写 opacity；与遮挡文本共用同一
+  // useFrame、同一共享 clock，无第二套计时器）。
+  const capitalMaterialsRef = useRef<(THREE.MeshBasicMaterial | null)[]>([])
+  // hover 呈现的省会名小字 troika 实例引用（至多一个；入场淡入时由同一 useFrame 写 fillOpacity）。
+  const capitalNameRef = useRef<TroikaTextLike | null>(null)
+
+  // 是否激活入场淡入（entranceFrame 注入即激活）。激活时省名标签 / 省会光点 / 省会名小字初始
+  // 透明度为 0（从不可见淡入）；未激活时初始为可见，加载完成即直接可见。
+  const entranceActive = entranceFrame !== null && entranceFrame !== undefined
+  // 挂载期初始透明度（troika fillOpacity prop 与 currentOpacities 同源取值）：入场接管时 0 = 首个
+  // 绘制帧即不可见（不依赖帧订阅时序），未接管时取遮挡配置的可见值（1.0）。
+  const initialOpacity = entranceActive ? 0 : LABEL_OCCLUSION_CONFIG.visibleOpacity
+
+  // 省名标签的「自西向东」错峰排序（TASK-013，SPEC §4.3「按地理顺序错峰，如自西向东」）。
+  // 按世界 x（+X = 东，见 src/lib/projection）升序排省名标签下标：西部（x 小）staggerIndex 小 →
+  // delay 小 → 先淡入。挂载期一次排序、确定性（同 x 时按原序稳定，Array.prototype.sort 为稳定排序）。
+  const staggerInfo = useMemo(() => {
+    const entries = labels.provinceLabels.map((desc, i) => ({ i, x: desc.position[0] }))
+    entries.sort((a, b) => a.x - b.x)
+    const indexToStagger = new Array<number>(labels.provinceLabels.length).fill(0)
+    entries.forEach((entry, rank) => {
+      indexToStagger[entry.i] = rank
+    })
+    return { indexToStagger, provinceCount: entries.length }
+  }, [labels])
 
   // 标签数变化时同步数组长度（k 切换 / 资产重载导致 labels 变化时）；挂载期一次性分配，
-  // 运行循环只读写元素、不重建数组（无分配约束）。新槽位初始化：遮挡目标与当前透明度均为
-  // 可见（不做未判定先暗化）。
+  // 运行循环只读写元素、不重建数组（无分配约束）。新槽位初始化：遮挡目标恒为可见；当前透明度按
+  // 入场接管与否取 0（接管：从不可见淡入）或可见（未接管：直接可见）。
   const labelCount = labels.provinceLabels.length
   if (targetOpacities.current.length !== labelCount) {
     targetOpacities.current = new Array<number>(labelCount).fill(LABEL_OCCLUSION_CONFIG.visibleOpacity)
-    currentOpacities.current = new Array<number>(labelCount).fill(
-      LABEL_OCCLUSION_CONFIG.visibleOpacity,
-    )
+    currentOpacities.current = new Array<number>(labelCount).fill(initialOpacity)
   }
 
   // hover 命中的省会名小字（至多一个；无焦点 / 未匹配时为 null）。挂载期一次查找，随焦点
@@ -183,6 +245,12 @@ export function PlaceLabels({ labels, terrainQuery = null }: PlaceLabelsProps): 
 
   useFrame((state, delta) => {
     const sampler = terrainQuery ?? null
+    // 入场 elapsed（TASK-013 单一时间源）：entranceFrame 注入时取共享入场帧的 elapsed（与海面 /
+    // 省界 / 地形共用同一 R3F clock 派生的入场帧）；未注入时为 0 且 entranceOn=false（入场透明度
+    // 恒 1，等价于不施加入场淡入——回退边界）。
+    const entranceOn = entranceFrame !== null && entranceFrame !== undefined
+    const entranceElapsed = entranceOn ? entranceFrame.current.elapsedSeconds : 0
+
     // 降频：由统一帧循环驱动的确定性帧间隔（帧计数器对 checkFrameInterval 取模），非计时器 /
     // 非随机抽样。每 N 帧判定一次遮挡；未判定帧仍逐帧阻尼透明度（过渡平滑）。
     frameCounter.current += 1
@@ -199,6 +267,23 @@ export function PlaceLabels({ labels, terrainQuery = null }: PlaceLabelsProps): 
     const targets = targetOpacities.current
     const currents = currentOpacities.current
     const provinceLabels = labels.provinceLabels
+
+    // 省会光点 / 省会名小字透明度（TASK-013）：= 入场整体淡入透明度（computeAncillaryLabelOpacity，
+    // 随省名淡入阶段 0→1，非错峰）。光点 / 小字不参与遮挡淡化（球体各向同性，depthTest 已正确遮挡；
+    // 小字 hover 语义即置顶），故透明度只由入场淡入决定；入场完成后恒 1。entranceOn=false 时不写
+    // opacity（材质 / troika 默认 1，回退边界：直接可见）。
+    if (entranceOn) {
+      const ancillaryOpacity = computeAncillaryLabelOpacity(entranceElapsed, ENTRANCE_DURATIONS)
+      for (const material of capitalMaterialsRef.current) {
+        if (material !== null && material !== undefined) {
+          material.opacity = ancillaryOpacity
+        }
+      }
+      const capitalName = capitalNameRef.current
+      if (capitalName !== null) {
+        capitalName.fillOpacity = ancillaryOpacity
+      }
+    }
 
     for (let i = 0; i < labelCount; i++) {
       const handle = refs[i]
@@ -235,7 +320,7 @@ export function PlaceLabels({ labels, terrainQuery = null }: PlaceLabelsProps): 
         }
       }
       // 样式合成优先级（遮挡透明度与 hover 放大必须通过明确优先级合成，不能互相覆盖造成闪烁）：
-      // 最终目标 = 焦点 ? 置顶透明度（1.0，完全可见）: 遮挡目标——「被悬停的省名标签即使位于
+      // 遮挡 / 焦点目标 = 焦点 ? 置顶透明度（1.0，完全可见）: 遮挡目标——「被悬停的省名标签即使位于
       // 山后也保持完全可见（置顶）」，符合 SPEC §4.2「置顶」语义。这是确定性的单一公式，每帧
       // 在阻尼前合成（hoveredAdminId 变化经 useFrame 最新闭包即帧即生效），焦点态与遮挡态不
       // 会互相覆盖造成闪烁。sampler 不可用时遮挡目标取可见（不暗化）。焦点态字号 / 颜色则在
@@ -243,7 +328,21 @@ export function PlaceLabels({ labels, terrainQuery = null }: PlaceLabelsProps): 
       // 「放大置顶」。
       const isFocused = desc.adminId === hoveredAdminId
       const occlusionTarget = sampler !== null ? targets[i] : cfg.visibleOpacity
-      const composedTarget = isFocused ? PROVINCE_HOVER_CONFIG.focusedLabelOpacity : occlusionTarget
+      const styleTarget = isFocused ? PROVINCE_HOVER_CONFIG.focusedLabelOpacity : occlusionTarget
+      // 入场透明度合成（TASK-013）：最终目标 = 入场透明度 × 遮挡 / 焦点目标。省名标签按自西向东
+      // 错峰淡入（staggerInfo 按世界 x 升序 → computeProvinceLabelOpacity）。入场完成后入场透明度
+      // 恒 1，合成退化为纯遮挡 / 焦点目标——与 TASK-010 行为一致（无回归）。焦点置顶 × 入场透明度：
+      // 入场期间相机锁定（SPEC §4.3），hover 虽可发生但焦点标签同样随入场淡入（乘法合成，不冲突）；
+      // 入场后入场透明度=1，焦点置顶正常生效。
+      const entranceOpacity = entranceOn
+        ? computeProvinceLabelOpacity(
+            entranceElapsed,
+            ENTRANCE_DURATIONS,
+            staggerInfo.indexToStagger[i],
+            staggerInfo.provinceCount,
+          )
+        : 1
+      const composedTarget = entranceOpacity * styleTarget
       // 每帧指数阻尼当前透明度 → 合成目标（THREE.MathUtils.damp = lerp(current, target,
       // 1 − exp(−λ·dt))）。过渡帧率无关（dt 来自统一时钟）、状态确定可恢复。阻尼结果赋给
       // troika fillOpacity，其 onBeforeRender 下一帧读入 uniform 即生效（深度测试保持开启，
@@ -276,9 +375,9 @@ export function PlaceLabels({ labels, terrainQuery = null }: PlaceLabelsProps): 
           >
             {/*
               ref 回调按 provinceLabels 下标登记 troika 实例；卸载时 R3F 以 null 回调清空对应槽位
-              （生命周期自动）。fillOpacity 不作为 prop 传入——由上方 useFrame 从第 1 帧起接管
-              （troika 默认 fillOpacity=1.0 覆盖首帧，与可见目标一致，故接管无可见跳变）。font
-              取本地子集路径（装配层已校验覆盖）。
+              （生命周期自动）。fillOpacity 初值 = initialOpacity（入场接管时 0 = 首个绘制帧即不可见，
+              不依赖帧订阅时序）；prop 恒定，React 重渲染不会回写（R3F 仅应用变化项），逐帧值由上方
+              useFrame 接管。font 取本地子集路径（装配层已校验覆盖）。
             */}
             <Text
               ref={(el: TroikaTextLike | null) => {
@@ -287,6 +386,7 @@ export function PlaceLabels({ labels, terrainQuery = null }: PlaceLabelsProps): 
               font={PLACE_LABELS_CONFIG.fontPath}
               fontSize={fontSizeMeters}
               color={colorHex}
+              fillOpacity={initialOpacity}
               anchorX="center"
               anchorY="middle"
             >
@@ -295,13 +395,20 @@ export function PlaceLabels({ labels, terrainQuery = null }: PlaceLabelsProps): 
           </Billboard>
         )
       })}
-      {labels.capitalPoints.map((point) => (
-        <CapitalPoint key={`capital-point-${point.adminId}`} position={point.position} />
+      {labels.capitalPoints.map((point, index) => (
+        <CapitalPoint
+          key={`capital-point-${point.adminId}`}
+          position={point.position}
+          initialOpacity={initialOpacity}
+          materialSlot={index}
+          materialsRef={capitalMaterialsRef}
+        />
       ))}
       {/*
         省会名小字（SPEC §3.7「省会名以小字 / hover 呈现」）：仅焦点存续期间挂载，浮于该省
         省会光点正上方，小字号 / 暖色系（与光点同族），Billboard 始终面向相机。不参与遮挡
-        淡化（hover 语义即置顶）；深度测试保持开启。移出即卸载还原。
+        淡化（hover 语义即置顶）；深度测试保持开启。移出即卸载还原。入场淡入随省会光点同包
+        （computeAncillaryLabelOpacity 整体淡入，由上方 useFrame 逐帧写 fillOpacity）。
       */}
       {focusedCapitalLabel !== null && (
         <Billboard
@@ -313,9 +420,13 @@ export function PlaceLabels({ labels, terrainQuery = null }: PlaceLabelsProps): 
           ]}
         >
           <Text
+            ref={(el: TroikaTextLike | null) => {
+              capitalNameRef.current = el
+            }}
             font={PLACE_LABELS_CONFIG.fontPath}
             fontSize={PLACE_LABELS_CONFIG.capitalLabelFontSizeMeters}
             color={PLACE_LABELS_CONFIG.capitalLabelColorHex}
+            fillOpacity={initialOpacity}
             anchorX="center"
             anchorY="middle"
           >

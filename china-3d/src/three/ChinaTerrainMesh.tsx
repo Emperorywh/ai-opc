@@ -43,11 +43,19 @@
  *   逐米对齐。
  * - PlaneGeometry 的 uv.x=0 落西界、uv.x=1 落东界（与 heightmap u 一致）；uv.y=1 经 −90° X 旋转后
  *   落到世界北（−Z），与 heightmap「v=0 北」相反，故着色器内采样时翻转 v（见 terrain-shaders.ts）。
+ *
+ * 入场升起（TASK-013，SPEC §4.3「地形从平面升起 ≈1.2s」）：
+ * - 注入共享入场帧（entranceFrame）时，本组件 useFrame 每帧把 computeTerrainRise(elapsed)（领域层
+ *   纯函数 + ENTRANCE_DURATIONS 冻结时序）写入材质 uniforms 的 uRise.value——顶点位移 = h·k·uRise
+ *   随之从 0（平面）smoothstep 升至 1（夸张后真实高度），复用 GPU 位移、零额外几何开销（SPEC §7.1）。
+ * - 写入必须经 materialRef.current.uniforms（R3F v9 uniforms 浅拷贝合并陷阱，与 SeaSurface 同解）；
+ *   未注入 entranceFrame 时 uRise 恒取 rise prop（默认 1.0），本组件不私设计时器 / 不读 DOM 状态。
  */
 
-import { useMemo } from 'react'
-import type { ReactNode } from 'react'
+import { useMemo, useRef } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import * as THREE from 'three'
+import { useFrame } from '@react-three/fiber'
 import type { TerrainRenderConfig } from '../config/terrain-config'
 import {
   resolveElevationColorConfig,
@@ -57,6 +65,8 @@ import {
   SCENE_ATMOSPHERE_CONFIG,
   hexToShaderFloat3,
 } from '../config/scene-atmosphere'
+import { ENTRANCE_DURATIONS } from '../config/entrance'
+import { computeTerrainRise, type EntranceFrame } from '../lib/entrance-state'
 import { TERRAIN_FRAGMENT_SHADER, TERRAIN_VERTEX_SHADER } from './terrain-shaders'
 import { TERRAIN_PLANE_LAYOUT } from './terrain-layout'
 import { buildElevationRampTexture } from './elevation-ramp-texture'
@@ -70,10 +80,17 @@ export interface ChinaTerrainMeshProps {
   readonly config: TerrainRenderConfig
   /**
    * 入场升起进度 [0,1]（默认 1.0）。位移量 = h·k·rise；rise=0 时地形为平面。
-   * TASK-013 入场编排将驱动该值做 0→1 插值实现「地形从平面升起」；本 TASK 默认 1.0，
-   * 地形加载完成即直接呈现夸张后真实高度。
+   * 未注入 entranceFrame 时（无入场编排）uRise 恒取本值；注入后本值仅作挂载期初始值之外的
+   * 静态语义保留，逐帧 uRise 由入场状态机接管（见 entranceFrame）。
    */
   readonly rise?: number
+  /**
+   * 共享入场帧（TASK-013 单一时间源，SPEC §4.3）。注入时每帧由本组件 useFrame 把
+   * computeTerrainRise(elapsed) 写入材质 uniforms 的 uRise.value——位移量 = h·k·uRise 随之从 0
+   * （平面）升至 h·k（夸张后真实高度），复用 GPU 位移 uniform、零额外几何开销（SPEC §7.1）。
+   * 未注入时不接管 uRise（保持 rise prop，地形加载完成即直接呈现夸张后真实高度）。
+   */
+  readonly entranceFrame?: RefObject<EntranceFrame> | null
 }
 
 /**
@@ -82,9 +99,12 @@ export interface ChinaTerrainMeshProps {
  * 渲染层只在组件挂载 / props 变化时重建几何与 uniform——分段变化（如生产档↔测试档切换）会重建
  * PlaneGeometry，夸张系数变化只更新 uniform（无需重建几何），二者都走受控的 R3F 声明式路径。
  */
-export function ChinaTerrainMesh({ heightmap, config, rise = 1.0 }: ChinaTerrainMeshProps): ReactNode {
+export function ChinaTerrainMesh({ heightmap, config, rise = 1.0, entranceFrame = null }: ChinaTerrainMeshProps): ReactNode {
   const { texture, meta } = heightmap
   const segments = config.meshSegments
+  // 入场接管判定：注入共享入场帧即由入场状态机驱动 uRise（初始 0 = 平面，逐帧 smoothstep 0→1）；
+  // 未注入时 uRise 恒取 rise prop（默认 1.0，直接呈现真实高度）。
+  const entranceActive = entranceFrame !== null && entranceFrame !== undefined
 
   // 色阶配置：由元数据 minH/maxH 派生，并在挂载期复核与 SPEC §5.1 色阶域一致——不一致即抛
   // elevation-color.domain-mismatch（确定性拒绝，绝不静默偏色）。meta 引用不变时复用同一份。
@@ -116,7 +136,9 @@ export function ChinaTerrainMesh({ heightmap, config, rise = 1.0 }: ChinaTerrain
       uMaxElevationMeters: { value: meta.elevationEncoding.maxValueMeters },
       uElevationRamp: { value: rampTexture },
       uExaggeration: { value: config.exaggeration },
-      uRise: { value: rise },
+      // 入场接管时初始 0（平面），逐帧由 useFrame 经 materialRef 写入 computeTerrainRise(elapsed)；
+      // 未接管时取 rise prop（默认 1.0）。初始 0 使首个绘制帧即为平面，不依赖帧订阅时序。
+      uRise: { value: entranceActive ? 0 : rise },
       uPlaneWorldWidth: { value: TERRAIN_PLANE_LAYOUT.worldWidthX },
       uPlaneWorldHeight: { value: TERRAIN_PLANE_LAYOUT.worldHeightZ },
       // 主光（西北偏高方向光）：方向 / 光色 / 光强来自照明配置。
@@ -133,7 +155,31 @@ export function ChinaTerrainMesh({ heightmap, config, rise = 1.0 }: ChinaTerrain
       uFogColor: { value: new THREE.Vector3(...hexToShaderFloat3(fog.hex)) },
       uFogDensity: { value: fog.enabled ? fog.density : 0 },
     }
-  }, [texture, meta, rampTexture, config.exaggeration, rise])
+  }, [texture, meta, rampTexture, config.exaggeration, rise, entranceActive])
+
+  // 材质实例 ref（R3F v9 uniforms 语义——与 SeaSurface 同一陷阱与同一正确路径）：R3F v9 对
+  // <shaderMaterial uniforms={...}> 做「稳定目标引用」合并（把传入对象逐项拷贝进材质自身的
+  // uniforms，而非替换引用），故每帧的 uRise 写入必须落到**材质自身的 uniforms**
+  // （materialRef.current.uniforms.uRise.value）；改上方 useMemo 持有的初始对象不会到达 GPU
+  // （地形会静默停在初始 rise，参考实现在同版本下即因此静默失效——SeaSurface 文件头有完整记录）。
+  const materialRef = useRef<THREE.ShaderMaterial>(null)
+
+  // 入场升起驱动（TASK-013，SPEC §4.3）：注入共享入场帧时，每帧由 R3F 统一帧循环把
+  // computeTerrainRise(elapsed) 写入材质 uniforms 的 uRise.value——位移量 = h·k·uRise 随之从 0
+  // （平面）升至 h·k（夸张后真实高度）。复用 GPU 位移 uniform、不建第二套几何（SPEC §7.1「入场动画
+  // 通过一个 uniform uRise（0→1）插值位移量实现，零额外几何开销」）。useFrame 闭包每帧由 R3F 刷新
+  // 为最新渲染的 entranceFrame / uniforms 引用，memo 重建（k 切换 / 资产重载）后仍指向最新对象。
+  // entranceFrame 未注入时本回调直接 return（uRise 保持 rise prop，回退边界）。每帧只写一个标量到
+  // 既有 uniform 对象——零对象分配（SPEC §7.4）。
+  useFrame(() => {
+    if (entranceFrame === null || entranceFrame === undefined) return
+    const material = materialRef.current
+    if (material === null) return
+    material.uniforms.uRise.value = computeTerrainRise(
+      entranceFrame.current.elapsedSeconds,
+      ENTRANCE_DURATIONS,
+    )
+  })
 
   return (
     <mesh
@@ -145,6 +191,7 @@ export function ChinaTerrainMesh({ heightmap, config, rise = 1.0 }: ChinaTerrain
       {/* 米制宽高 = 主图世界包围盒跨度；分段 = 配置值（生产默认 2048²，GPU 位移，CPU 不逐顶点写位置）。 */}
       <planeGeometry args={[TERRAIN_PLANE_LAYOUT.worldWidthX, TERRAIN_PLANE_LAYOUT.worldHeightZ, segments, segments]} />
       <shaderMaterial
+        ref={materialRef}
         vertexShader={TERRAIN_VERTEX_SHADER}
         fragmentShader={TERRAIN_FRAGMENT_SHADER}
         uniforms={uniforms}

@@ -281,7 +281,8 @@ describe('SeaSurface 组件装配（验收 1、2、3：透明渲染 / 统一时�
     expect(source).toContain('SEA_SURFACE_VERTEX_SHADER')
     expect(source).toContain('SEA_SURFACE_FRAGMENT_SHADER')
     expect(source).toContain("from '../config/sea-surface'")
-    expect(source).toContain('uOpacity: { value: opacity }')
+    // 基线透明度初值：入场接管时 0（TASK-013 淡入起点），未接管时为配置基线值——基线仍唯一来自配置层。
+    expect(source).toContain('uOpacity: { value: entranceActive ? 0 : opacity }')
     expect(source).not.toContain('#0a3340')
     expect(source).not.toContain('0.55')
   })
@@ -373,11 +374,11 @@ describe('波动数值仿真（验收 1、4：时间驱动流动且细微，不�
 })
 
 describe('App 总装（验收 4：海面挂载进 3D 画布）', () => {
-  it('App 在 Canvas 内、地形之后挂载 <SeaSurface />（同一画布，透明通道后绘）', () => {
+  it('App 在 Canvas 内、地形之后挂载 <SeaSurface />（同一画布，透明通道后绘；TASK-013 起注入共享入场帧）', () => {
     const source = readFileSync(resolve(srcRoot, 'App.tsx'), 'utf-8')
     expect(source).toContain("from './three/SeaSurface'")
     const terrainIndex = source.indexOf('<ChinaTerrainMesh')
-    const seaIndex = source.indexOf('<SeaSurface />')
+    const seaIndex = source.indexOf('<SeaSurface entranceFrame={entranceFrameRef} />')
     const canvasCloseIndex = source.indexOf('</Canvas>')
     expect(terrainIndex).toBeGreaterThan(-1)
     expect(seaIndex).toBeGreaterThan(terrainIndex)

@@ -432,7 +432,9 @@ describe('App 总装（验收 1、2：Canvas camera 取自约束契约，无第�
     expect(source).toContain("from './three/SceneAtmosphere'")
     expect(source).toContain("from './three/MapOrbitControls'")
     const atmosphereIndex = source.indexOf('<SceneAtmosphere />')
-    const controlsIndex = source.indexOf('<MapOrbitControls enabled />')
+    // 交互启停是受控 prop：TASK-013 起由入场状态机以单一布尔 interactionEnabled 显式驱动
+    // （动画期间锁定、interactive 释放），不存在恒启用的第二套开关。
+    const controlsIndex = source.indexOf('<MapOrbitControls enabled={interactionEnabled} />')
     const canvasCloseIndex = source.indexOf('</Canvas>')
     expect(atmosphereIndex).toBeGreaterThan(-1)
     expect(controlsIndex).toBeGreaterThan(-1)
