@@ -2,8 +2,9 @@
  * 大屏页面骨架（SPEC §3.4 / §11）。
  *
  * 当前装配：全视口深蓝黑容器 + 标题区 + 3D 地形画布（TASK-006 GPU 位移地形 + TASK-007 动态海面
- * + TASK-008 场景氛围与受约束相机 + TASK-009 贴地省界与 hover 拾取）。海拔色阶图例、合规角标、
- * 标签、附图、入场编排等由后续任务按 SPEC §11 目录结构挂载（TASK-016 做最终总装）。
+ * + TASK-008 场景氛围与受约束相机 + TASK-009 贴地省界与 hover 拾取 + TASK-011 十段线与南海岛礁
+ * 政治要素）。海拔色阶图例、合规角标、南海附图、入场编排等由后续任务按 SPEC §11 目录结构挂载
+ * （TASK-016 做最终总装）。
  *
  * 标题区文案来自页面静态文案唯一事实源（src/lib/static-copy.ts），字体子集覆盖校验以同一事实源
  * 断言所需汉字无缺失（SPEC §3.7）。
@@ -40,6 +41,16 @@
  * 阻尼降低、视角转开后恢复。TerrainSceneLayers 统一构造共享 ElevationProvider（heightmap.meta
  * + pixels，与 GPU 位移同一份高程事实源，零额外取数 / 解码 / 内存），省界层与标签层共用
  * 同一实例——全页面只包装一份。
+ *
+ * 政治要素（TASK-011，SPEC §5.3 / §6 红线）：政治边界补充契约（TASK-004 共享事实源）与其余资产
+ * 并行取数；PoliticalFeaturesLayer 在契约就绪时由同一份共享 ElevationProvider 调领域纯函数
+ * preparePoliticalFeatures 完成「红线完整性断言（恰好十段含台湾东侧段 + 钓鱼岛 / 赤尾屿 / 曾母暗沙
+ * 等点名岛礁均在）→ 统一投影 → 弧长 densify → 海平面贴合 y=max(h·k, seaLevel)+epsilon」，交
+ * PoliticalFeatures 渲染——十段线按段独立成线（暖琥珀 additive 发光虚线，与省界浅青白实线视觉
+ * 明确区分，不被半透明海面吞没），岛礁点位为同色系更亮发光光点，NDC 深度偏移抗 z-fighting。
+ * 契约加载失败与准备期红线断言失败（缺段 / 缺点）均按 SPEC §6 红线显式暴露为整页错误，绝不静默
+ * 渲染一张缺十段线 / 岛礁的地图。本 TASK 不宣称取得审图号，内部展示状态下验收（政治边界补充数据
+ * 为非官方审图数据，见 docs/political-review-record.md）。
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -52,6 +63,7 @@ import {
 import { SCENE_ATMOSPHERE_CONFIG } from './config/scene-atmosphere'
 import { PROVINCE_BORDERS_CONFIG } from './config/province-borders'
 import { PLACE_LABELS_CONFIG } from './config/place-labels'
+import { POLITICAL_FEATURES_CONFIG } from './config/political-features'
 import { ChinaTerrainMesh } from './three/ChinaTerrainMesh'
 import { SeaSurface } from './three/SeaSurface'
 import { SceneAtmosphere } from './three/SceneAtmosphere'
@@ -60,6 +72,7 @@ import { ProvinceHoverProvider } from './three/ProvinceHoverProvider'
 import { ProvinceBorders } from './three/ProvinceBorders'
 import { ProvinceHoverPicker } from './three/ProvinceHoverPicker'
 import { PlaceLabels } from './three/PlaceLabels'
+import { PoliticalFeatures } from './three/PoliticalFeatures'
 import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from './three/camera-constraints'
 import {
   loadHeightmapTexture,
@@ -71,6 +84,9 @@ import { loadProvinceGeometry } from './lib/province-geometry'
 import { prepareProvinceBorders } from './lib/province-borders'
 import { loadPlaceDirectory } from './lib/place-directory'
 import { preparePlaceLabels, collectRenderedPlaceLabelStrings } from './lib/place-labels'
+import { loadPoliticalBoundary } from './lib/political-boundary'
+import { preparePoliticalFeatures } from './lib/political-features'
+import type { PreparedPoliticalFeatures } from './lib/political-features'
 import {
   LabelFontLoadError,
   loadLabelFontManifest,
@@ -81,6 +97,7 @@ import type {
   AdministrativeGeometryContract,
   LabelFontManifestContract,
   PlaceDirectoryContract,
+  PoliticalBoundaryContract,
 } from './geo-contracts'
 
 /** heightmap 加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为平面 fallback）。 */
@@ -110,6 +127,16 @@ type PlaceLabelAssetsState =
   | { readonly phase: 'error'; readonly message: string }
 
 /**
+ * 政治边界补充契约加载状态：加载中 / 就绪 / 失败。
+ * 失败按政治红线（SPEC §6：十段线含台湾东侧段、南海诸岛 / 钓鱼岛 / 赤尾屿点位完整）显式暴露为
+ * 整页错误，绝不静默退化为空契约、不带病渲染一张缺十段线 / 岛礁的地图。
+ */
+type PoliticalBoundaryState =
+  | { readonly phase: 'loading' }
+  | { readonly phase: 'ready'; readonly contract: PoliticalBoundaryContract }
+  | { readonly phase: 'error'; readonly message: string }
+
+/**
  * 模块级 heightmap 加载 Promise（单例）：全页面只取数 / 解码 / 建纹理一次。
  * React StrictMode 的开发期双挂载会让 effect 触发两次——以模块级 Promise 去重，
  * 杜绝 32MB 资产被重复 fetch / 解码、GPU 纹理被建两份。
@@ -128,6 +155,16 @@ let provinceGeometryPromise: Promise<AdministrativeGeometryContract> | null = nu
 function loadProvinceGeometryOnce(): Promise<AdministrativeGeometryContract> {
   provinceGeometryPromise ??= loadProvinceGeometry()
   return provinceGeometryPromise
+}
+
+/**
+ * 模块级政治边界补充契约加载 Promise（单例）：与 heightmap 同一去重语义（StrictMode 双挂载安全），
+ * 全页面只取数 / 校验一次。主图政治要素与后续 2D 南海附图（TASK-012）复用同一份契约（SPEC §5.4）。
+ */
+let politicalBoundaryPromise: Promise<PoliticalBoundaryContract> | null = null
+function loadPoliticalBoundaryOnce(): Promise<PoliticalBoundaryContract> {
+  politicalBoundaryPromise ??= loadPoliticalBoundary()
+  return politicalBoundaryPromise
 }
 
 /** 标签资产就绪产物：地点目录 + 已过结构与覆盖校验的字体清单。 */
@@ -208,6 +245,27 @@ function usePlaceLabelAssets(): PlaceLabelAssetsState {
     loadPlaceLabelAssetsOnce()
       .then((assets) => {
         if (!cancelled) setState({ phase: 'ready', places: assets.places, fontManifest: assets.fontManifest })
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setState({ phase: 'error', message: cause instanceof Error ? cause.message : String(cause) })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return state
+}
+
+/** 加载政治边界补充契约（资产访问层 loadPoliticalBoundary），就绪后返回经契约校验的 contract。 */
+function usePoliticalBoundary(): PoliticalBoundaryState {
+  const [state, setState] = useState<PoliticalBoundaryState>({ phase: 'loading' })
+  useEffect(() => {
+    let cancelled = false
+    loadPoliticalBoundaryOnce()
+      .then((contract) => {
+        if (!cancelled) setState({ phase: 'ready', contract })
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
@@ -320,6 +378,63 @@ function PlaceLabelsLayer({
 }
 
 /**
+ * 十段线 / 岛礁点位准备 + 渲染层（TASK-011，SPEC §5.3 / §6 红线）。
+ *
+ * 依赖两个就绪输入：政治边界补充契约（TASK-004 共享事实源，已过契约校验）与共享
+ * ElevationProvider（与省界层 / 标签层同一实例）。调领域纯函数 preparePoliticalFeatures 完成
+ * 「红线完整性断言（恰好十段含台湾东侧段 + 点名岛礁均在）→ 投影 → 弧长 densify → 海平面贴合
+ * y=max(h·k, seaLevel)+epsilon」，交 PoliticalFeatures 渲染（每段一条暖琥珀发光虚线，与省界
+ * 浅青白实线视觉明确区分；岛礁点位为同色系更亮发光光点；NDC 深度偏移抗 z-fighting）。
+ *
+ * 准备期异常（红线缺段 / 缺点、投影 / 高程查询失败、退化——理论不发生：资产已过 TASK-004 契约 +
+ * 深度校验，且集成测试用生产资产跑通过全量准备）经 onPrepError 上报为整页错误——**不**沿用省界层
+ * 的「console.error + 跳过」：政治要素准备层的红线断言是运行时唯一拦截「结构合法但红线残缺」资产
+ * 的防线，静默跳过会渲染一张看似正常却缺十段线 / 岛礁的地图，正是 SPEC §6 红线禁止的「静默显示
+ * 残缺地图」。
+ *
+ * memo 边界：prepared 依赖 contract + provider + k（配置取 POLITICAL_FEATURES_CONFIG 冻结值）。
+ * k 切换时确定性重算（海平面贴合 y 随 k 变化）——离散切换的一次性开销，非每帧。
+ */
+function PoliticalFeaturesLayer({
+  contract,
+  provider,
+  exaggeration,
+  onPrepError,
+}: {
+  readonly contract: PoliticalBoundaryContract
+  readonly provider: ElevationProvider
+  readonly exaggeration: number
+  readonly onPrepError: (message: string) => void
+}): ReactNode {
+  // 显式判别联合：准备成功携带 features，失败携带 error（供 useEffect 上报与渲染分支收窄）。
+  const prepared = useMemo<
+    | { readonly ok: true; readonly features: PreparedPoliticalFeatures }
+    | { readonly ok: false; readonly error: string }
+  >(() => {
+    try {
+      return {
+        ok: true,
+        features: preparePoliticalFeatures(contract, provider, exaggeration, {
+          densifySpacingMeters: POLITICAL_FEATURES_CONFIG.densifySpacingMeters,
+          terrainEpsilonMeters: POLITICAL_FEATURES_CONFIG.terrainEpsilonMeters,
+          seaLevelYMeters: POLITICAL_FEATURES_CONFIG.seaLevelYMeters,
+        }),
+      }
+    } catch (cause) {
+      return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
+    }
+  }, [contract, provider, exaggeration])
+
+  // 准备失败 → 上报整页错误（SPEC §6 红线，见层注释）；onPrepError 是 App 的稳定 setState。
+  useEffect(() => {
+    if (!prepared.ok) onPrepError(prepared.error)
+  }, [prepared, onPrepError])
+
+  if (!prepared.ok) return null
+  return <PoliticalFeatures features={prepared.features} />
+}
+
+/**
  * Canvas 内的场景内容层：统一构造共享 ElevationProvider 并装配 hover 提供器下的各交互 /
  * 标注层（省界、拾取、标签）。
  *
@@ -332,12 +447,16 @@ function TerrainSceneLayers({
   heightmap,
   geometry,
   labelAssets,
+  political,
   exaggeration,
+  onPoliticalPrepError,
 }: {
   readonly heightmap: HeightmapTextureLoadResult
   readonly geometry: ProvinceGeometryState
   readonly labelAssets: PlaceLabelAssetsState
+  readonly political: PoliticalBoundaryState
   readonly exaggeration: number
+  readonly onPoliticalPrepError: (message: string) => void
 }): ReactNode {
   // 由 heightmap 的 meta + pixels 构造共享 CPU ElevationProvider（与 GPU 位移同一份高程
   // 事实源）；仅依赖 heightmap（pixels / meta 引用稳定）。
@@ -359,6 +478,14 @@ function TerrainSceneLayers({
       )}
       {labelAssets.phase === 'ready' && (
         <PlaceLabelsLayer assets={labelAssets} provider={provider} exaggeration={exaggeration} />
+      )}
+      {political.phase === 'ready' && (
+        <PoliticalFeaturesLayer
+          contract={political.contract}
+          provider={provider}
+          exaggeration={exaggeration}
+          onPrepError={onPoliticalPrepError}
+        />
       )}
     </ProvinceHoverProvider>
   )
@@ -395,6 +522,10 @@ function App() {
   const heightmap = useHeightmap()
   const geometry = useProvinceGeometry()
   const labelAssets = usePlaceLabelAssets()
+  const political = usePoliticalBoundary()
+  // 政治要素准备期错误（红线缺段 / 缺点、投影 / 高程查询失败）：由 PoliticalFeaturesLayer 上报，
+  // 按 SPEC §6 红线显式暴露为整页错误（见 assetErrorMessage）。
+  const [politicalPrepError, setPoliticalPrepError] = useState<string | null>(null)
 
   // 配置非法（如 URL 覆盖越界）：确定性失败，显式暴露，不带病渲染。
   if ('error' in RUNTIME_TERRAIN_CONFIG) {
@@ -411,14 +542,19 @@ function App() {
     )
   }
 
-  // 省界几何 / 标签资产（地点目录 / 字体清单）加载失败均按政治红线（SPEC §6：边界完整、
-  // 台湾 / 港澳标注齐全是事故级问题）显式暴露为整页错误：不渲染一张缺省界或缺标注的地图。
+  // 省界几何 / 标签资产（地点目录 / 字体清单）/ 政治边界契约的加载失败与政治要素准备失败，
+  // 均按政治红线（SPEC §6：边界完整、台湾 / 港澳标注齐全、十段线含台湾东侧段与岛礁点位完整是
+  // 事故级问题）显式暴露为整页错误：不渲染一张缺省界、缺标注或缺十段线 / 岛礁的地图。
   const assetErrorMessage =
     geometry.phase === 'error'
       ? `省界数据加载失败：${geometry.message}`
       : labelAssets.phase === 'error'
         ? `标签数据加载失败：${labelAssets.message}`
-        : null
+        : political.phase === 'error'
+          ? `政治边界数据加载失败：${political.message}`
+          : politicalPrepError !== null
+            ? `政治要素准备失败：${politicalPrepError}`
+            : null
 
   return (
     <main className="screen">
@@ -469,7 +605,9 @@ function App() {
               heightmap={heightmap.heightmap}
               geometry={geometry}
               labelAssets={labelAssets}
+              political={political}
               exaggeration={RUNTIME_TERRAIN_CONFIG.exaggeration}
+              onPoliticalPrepError={setPoliticalPrepError}
             />
           </Canvas>
           )
