@@ -19,16 +19,27 @@
  * 初始位置全部取自 MAP_CAMERA_CONSTRAINTS 与 DEFAULT_CAMERA_POSE（同一事实源，无第二套机位常量）。
  *
  * 省界与 hover（TASK-009，SPEC §3.6 / §4.2）：省级行政区几何与 heightmap 并行取数；
- * ProvinceBordersLayer 在二者均就绪时由 heightmap.meta + pixels 构造共享 CPU ElevationProvider
- * （与 GPU 位移同一份高程事实源，零额外取数 / 解码 / 内存），调领域纯函数 prepareProvinceBorders
- * 完成「弧长 densify → 逐点贴地 y=h·k+epsilon → 按省分组」，交 ProvinceBorders 渲染（浅青白
- * additive 发光、NDC 深度偏移抗 z-fighting、每省一个 draw call 共 34 个）。ProvinceHoverPicker
- * 挂载与地形同包围盒的不可见拾取面，把指针命中经 invertWorld 反查 + findProvinceAtLonLat 裁决为
- * adminId | null，写入 ProvinceHoverProvider 保管的共享焦点状态——省界据此加亮加粗焦点省、
- * 压暗非焦点省、移出还原（无 click 行为）；该状态对 TASK-010 标签模块同源可见。
- * 省界几何加载失败按政治红线（SPEC §6「边界错误是事故级问题」）显式暴露为整页错误，不带病渲染
- * 一张缺省界的地图；准备期异常（理论不发生，资产已过契约 + 深度校验）捕获后 console.error 并
- * 跳过省界层，不崩溃场景其余有效层。
+ * ProvinceBordersLayer 在二者均就绪时由共享 ElevationProvider 调领域纯函数
+ * prepareProvinceBorders 完成「弧长 densify → 逐点贴地 y=h·k+epsilon → 按省分组」，交
+ * ProvinceBorders 渲染（浅青白 additive 发光、NDC 深度偏移抗 z-fighting、每省一个 draw call
+ * 共 34 个）。ProvinceHoverPicker 挂载与地形同包围盒的不可见拾取面，把指针命中经
+ * invertWorld 反查 + findProvinceAtLonLat 裁决为 adminId | null，写入 ProvinceHoverProvider
+ * 保管的共享焦点状态——省界据此加亮加粗焦点省、压暗非焦点省、移出还原（无 click 行为）。
+ * 省界几何加载失败按政治红线（SPEC §6「边界错误是事故级问题」）显式暴露为整页错误，不带病
+ * 渲染一张缺省界的地图；准备期异常（理论不发生，资产已过契约 + 深度校验）捕获后
+ * console.error 并跳过省界层，不崩溃场景其余有效层。
+ *
+ * 标签（TASK-010，SPEC §3.7 / §7.5 / §4.2）：地点目录与字体清单并行取数；字体清单先经结构
+ * 校验、再对「渲染层将绘制的全部字符串」（省名 + 省会名，collectRenderedPlaceLabelStrings
+ * 从同一地点契约提取）做覆盖校验——缺字 / 载入失败按政治红线（台湾 / 港澳标注齐全，SPEC §6）
+ * 显式暴露为整页错误，绝不静默显示空白或回退在线字体。PlaceLabelsLayer 在资产就绪时由同一份
+ * 共享 ElevationProvider 调领域纯函数 preparePlaceLabels 完成「锚点投影 → 贴地 h·k → 浮高」，
+ * 交 PlaceLabels 渲染（34 省名 Billboard + troika Text 始终面向相机、34 省会发光光点贴地、
+ * hover 省标签放大置顶 + 省会名小字呈现）；标签→相机射线遮挡判定由 PlaceLabels 内的统一帧
+ * 循环降频执行（每 6 帧一次，采样器从共享 provider + k 构造），被前方地形遮挡的标签透明度
+ * 阻尼降低、视角转开后恢复。TerrainSceneLayers 统一构造共享 ElevationProvider（heightmap.meta
+ * + pixels，与 GPU 位移同一份高程事实源，零额外取数 / 解码 / 内存），省界层与标签层共用
+ * 同一实例——全页面只包装一份。
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -40,6 +51,7 @@ import {
 } from './config/terrain-config'
 import { SCENE_ATMOSPHERE_CONFIG } from './config/scene-atmosphere'
 import { PROVINCE_BORDERS_CONFIG } from './config/province-borders'
+import { PLACE_LABELS_CONFIG } from './config/place-labels'
 import { ChinaTerrainMesh } from './three/ChinaTerrainMesh'
 import { SeaSurface } from './three/SeaSurface'
 import { SceneAtmosphere } from './three/SceneAtmosphere'
@@ -47,15 +59,29 @@ import { MapOrbitControls } from './three/MapOrbitControls'
 import { ProvinceHoverProvider } from './three/ProvinceHoverProvider'
 import { ProvinceBorders } from './three/ProvinceBorders'
 import { ProvinceHoverPicker } from './three/ProvinceHoverPicker'
+import { PlaceLabels } from './three/PlaceLabels'
 import { DEFAULT_CAMERA_POSE, MAP_CAMERA_CONSTRAINTS } from './three/camera-constraints'
 import {
   loadHeightmapTexture,
   type HeightmapTextureLoadResult,
 } from './three/load-heightmap-texture'
 import { createElevationProvider } from './lib/elevation'
+import type { ElevationProvider } from './lib/elevation'
 import { loadProvinceGeometry } from './lib/province-geometry'
 import { prepareProvinceBorders } from './lib/province-borders'
-import type { AdministrativeGeometryContract } from './geo-contracts'
+import { loadPlaceDirectory } from './lib/place-directory'
+import { preparePlaceLabels, collectRenderedPlaceLabelStrings } from './lib/place-labels'
+import {
+  LabelFontLoadError,
+  loadLabelFontManifest,
+  validateLabelFontCoverage,
+} from './lib/label-font'
+import type { TerrainWorldYSampler } from './lib/label-occlusion'
+import type {
+  AdministrativeGeometryContract,
+  LabelFontManifestContract,
+  PlaceDirectoryContract,
+} from './geo-contracts'
 
 /** heightmap 加载状态：加载中 / 就绪 / 失败（失败绝不静默退化为平面 fallback）。 */
 type HeightmapState =
@@ -67,6 +93,20 @@ type HeightmapState =
 type ProvinceGeometryState =
   | { readonly phase: 'loading' }
   | { readonly phase: 'ready'; readonly contract: AdministrativeGeometryContract }
+  | { readonly phase: 'error'; readonly message: string }
+
+/**
+ * 标签资产（地点目录 + 字体清单）加载状态：加载中 / 就绪 / 失败。
+ * 字体清单在就绪前已过结构校验与「实际渲染字符串」覆盖校验；失败按政治红线（SPEC §6 台湾 /
+ * 港澳标注齐全）显式暴露为整页错误，绝不静默显示空白或回退在线字体。
+ */
+type PlaceLabelAssetsState =
+  | { readonly phase: 'loading' }
+  | {
+      readonly phase: 'ready'
+      readonly places: PlaceDirectoryContract
+      readonly fontManifest: LabelFontManifestContract
+    }
   | { readonly phase: 'error'; readonly message: string }
 
 /**
@@ -88,6 +128,34 @@ let provinceGeometryPromise: Promise<AdministrativeGeometryContract> | null = nu
 function loadProvinceGeometryOnce(): Promise<AdministrativeGeometryContract> {
   provinceGeometryPromise ??= loadProvinceGeometry()
   return provinceGeometryPromise
+}
+
+/** 标签资产就绪产物：地点目录 + 已过结构与覆盖校验的字体清单。 */
+interface PlaceLabelAssets {
+  readonly places: PlaceDirectoryContract
+  readonly fontManifest: LabelFontManifestContract
+}
+
+/**
+ * 模块级标签资产加载 Promise（单例）：地点目录与字体清单并行取数（URL 唯一事实源为
+ * PLACE_LABELS_CONFIG.fontManifestPath），字体清单先过契约结构校验，再对「渲染层将绘制的
+ * 全部字符串」（省名 + 省会名，从同一地点契约确定性提取）做覆盖校验——缺字即抛
+ * LabelFontLoadError（coverage-incomplete），绝不把缺字字体交给 troika 渲染（不静默显示
+ * 空白 / fallback 网络字体）。与 heightmap 同一去重语义（StrictMode 双挂载安全）。
+ */
+let placeLabelAssetsPromise: Promise<PlaceLabelAssets> | null = null
+function loadPlaceLabelAssetsOnce(): Promise<PlaceLabelAssets> {
+  placeLabelAssetsPromise ??= Promise.all([
+    loadPlaceDirectory(),
+    loadLabelFontManifest(PLACE_LABELS_CONFIG.fontManifestPath),
+  ]).then(([places, fontManifest]) => {
+    const coverage = validateLabelFontCoverage(fontManifest, collectRenderedPlaceLabelStrings(places))
+    if (!coverage.ok) {
+      throw new LabelFontLoadError('label-font.coverage-incomplete', coverage.message)
+    }
+    return { places, fontManifest }
+  })
+  return placeLabelAssetsPromise
 }
 
 /** 加载生产 heightmap（资产访问层唯一入口），就绪后返回产物。 */
@@ -132,40 +200,53 @@ function useProvinceGeometry(): ProvinceGeometryState {
   return state
 }
 
+/** 加载标签资产（地点目录 + 字体清单，含覆盖校验），就绪后返回经校验的地点目录与清单。 */
+function usePlaceLabelAssets(): PlaceLabelAssetsState {
+  const [state, setState] = useState<PlaceLabelAssetsState>({ phase: 'loading' })
+  useEffect(() => {
+    let cancelled = false
+    loadPlaceLabelAssetsOnce()
+      .then((assets) => {
+        if (!cancelled) setState({ phase: 'ready', places: assets.places, fontManifest: assets.fontManifest })
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setState({ phase: 'error', message: cause instanceof Error ? cause.message : String(cause) })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return state
+}
+
 /**
  * 省级贴地边界准备 + 渲染层（TASK-009，SPEC §3.6）。
  *
- * 依赖两个就绪输入：heightmap（含 pixels，用于构造共享 ElevationProvider）、province geometry
- * （features）。geometry 未就绪时返回 null（不渲染）；二者齐备时：
- * 1. 由 heightmap.meta + pixels 构造共享 ElevationProvider（createElevationProvider，不介入共享
- *    缓存——本页面持有一份即可；pixels 即取数时已解码的那份，零额外内存； exaggeration 变化时
- *    provider 不变、仅 borders 重算）。
- * 2. 调领域纯函数 prepareProvinceBorders（densify + 贴地 + 按省分组）产出 PreparedProvinceBorders。
- * 3. 交 ProvinceBorders 渲染（浅青白 additive 发光、NDC 深度偏移、每省一个 draw call；hover 焦点
- *    经共享 context 消费）。
+ * 依赖两个就绪输入：province geometry（features）与共享 ElevationProvider（由
+ * TerrainSceneLayers 统一构造，与标签层共用同一实例）。调领域纯函数 prepareProvinceBorders
+ * （densify + 贴地 + 按省分组）产出 PreparedProvinceBorders，交 ProvinceBorders 渲染
+ * （浅青白 additive 发光、NDC 深度偏移、每省一个 draw call；hover 焦点经共享 context 消费）。
  *
- * 准备期异常（无效几何 / 高程查询失败 / 退化——理论不发生：资产已过 TASK-004 契约 + 深度校验，
- * 且集成测试用生产资产 + 生产高程跑通过全量准备）被捕获并 console.error 记录后跳过省界层——
- * 不崩溃场景（地形 / 海面 / 相机 / 氛围继续有效），也绝不产出平地边界（领域层已先行抛错）。
+ * 准备期异常（无效几何 / 高程查询失败 / 退化——理论不发生：资产已过 TASK-004 契约 + 深度
+ * 校验，且集成测试用生产资产 + 生产高程跑通过全量准备）被捕获并 console.error 记录后跳过
+ * 省界层——不崩溃场景（地形 / 海面 / 相机 / 氛围 / 标签继续有效），也绝不产出平地边界
+ * （领域层已先行抛错）。
  *
- * memo 边界：provider 仅依赖 heightmap（pixels / meta 引用稳定）；borders 依赖 features + provider +
- * k + prep 配置（配置取 PROVINCE_BORDERS_CONFIG 冻结值）。k 切换时 borders 确定性重算
- * （y = h·k + epsilon 随 k 变化，必须重算以保持贴地）——离散切换的一次性开销，非每帧。
+ * memo 边界：borders 依赖 features + provider + k + prep 配置（配置取 PROVINCE_BORDERS_CONFIG
+ * 冻结值）。k 切换时 borders 确定性重算（y = h·k + epsilon 随 k 变化，必须重算以保持贴地）
+ * ——离散切换的一次性开销，非每帧。
  */
 function ProvinceBordersLayer({
-  heightmap,
   geometry,
+  provider,
   exaggeration,
 }: {
-  readonly heightmap: HeightmapTextureLoadResult
   readonly geometry: AdministrativeGeometryContract
+  readonly provider: ElevationProvider
   readonly exaggeration: number
 }): ReactNode {
-  // 由 heightmap 的 meta + pixels 构造共享 CPU ElevationProvider（与 GPU 位移同一份高程事实源）。
-  const provider = useMemo(
-    () => createElevationProvider(heightmap.meta, heightmap.pixels),
-    [heightmap],
-  )
   const prepared = useMemo(() => {
     try {
       return prepareProvinceBorders(geometry.features, provider, exaggeration, {
@@ -182,6 +263,105 @@ function ProvinceBordersLayer({
 
   if (prepared === null) return null
   return <ProvinceBorders borders={prepared} />
+}
+
+/**
+ * 省名标签 / 省会光点准备 + 渲染层（TASK-010，SPEC §3.7 / §7.5 / §4.2）。
+ *
+ * 依赖两个就绪输入：标签资产（地点目录 + 已过覆盖校验的字体清单）与共享
+ * ElevationProvider（与省界层同一实例）。调领域纯函数 preparePlaceLabels（锚点投影 + 贴地
+ * h·k + 浮高）产出 PreparedPlaceLabels，交 PlaceLabels 渲染（34 省名 Billboard Text 始终面向
+ * 相机 + 34 省会发光光点贴地 + hover 放大置顶与省会名小字）。
+ *
+ * 遮挡采样器（SPEC §7.5）：从共享 provider + k 构造 TerrainWorldYSampler 闭包——
+ * (x, z) → queryAtWorld 成功则 h·k、失败则 null（查询失败不伪造海拔，遮挡判定据此得
+ * indeterminate 并保持当前透明度）。采样器与标签数据同 memo（provider / k 变化时确定性
+ * 重建），PlaceLabels 内的统一帧循环每 6 帧对每个省名标签做一次「标签→相机」射线判定。
+ *
+ * 准备期异常（理论不发生，与省界层同理）捕获后 console.error 并跳过标签层，不崩溃场景
+ * 其余有效层；地点目录本身的加载 / 契约 / 字体覆盖失败已在加载态机中按红线显式暴露为
+ * 整页错误（不会到达本层）。
+ */
+function PlaceLabelsLayer({
+  assets,
+  provider,
+  exaggeration,
+}: {
+  readonly assets: { readonly places: PlaceDirectoryContract; readonly fontManifest: LabelFontManifestContract }
+  readonly provider: ElevationProvider
+  readonly exaggeration: number
+}): ReactNode {
+  const prepared = useMemo(() => {
+    try {
+      return preparePlaceLabels(assets.places, provider, exaggeration, {
+        provinceLabelHeightOffsetMeters: PLACE_LABELS_CONFIG.provinceLabelHeightOffsetMeters,
+        capitalLabelHeightOffsetMeters: PLACE_LABELS_CONFIG.capitalLabelHeightOffsetMeters,
+        terrainEpsilonMeters: PLACE_LABELS_CONFIG.terrainEpsilonMeters,
+      })
+    } catch (cause) {
+      // 准备失败：console 记录便于排查，跳过标签层（不崩溃场景）；正常合法资产下不触发。
+      // eslint-disable-next-line no-console
+      console.error(`[PlaceLabels] 标签准备失败：${cause instanceof Error ? cause.message : String(cause)}`)
+      return null
+    }
+  }, [assets, provider, exaggeration])
+
+  // 遮挡采样器：共享 provider + k → 世界地形 y（h·k）；查询失败返回 null（不伪造海拔）。
+  const terrainQuery = useMemo<TerrainWorldYSampler>(
+    () => (worldX: number, worldZ: number) => {
+      const query = provider.queryAtWorld(worldX, worldZ)
+      return query.ok ? query.meters * exaggeration : null
+    },
+    [provider, exaggeration],
+  )
+
+  if (prepared === null) return null
+  return <PlaceLabels labels={prepared} terrainQuery={terrainQuery} />
+}
+
+/**
+ * Canvas 内的场景内容层：统一构造共享 ElevationProvider 并装配 hover 提供器下的各交互 /
+ * 标注层（省界、拾取、标签）。
+ *
+ * 共享 provider（SPEC §3.6「CPU 端 heightmap…供边界 densification / 遮挡射线 / 海面以下
+ * 判定共用」）：由 heightmap.meta + pixels 构造唯一一份 CPU ElevationProvider——pixels 即
+ * 取数时已解码的那份（小端主机零拷贝视图），省界层与标签层共用同一实例，零额外取数 /
+ * 解码 / 内存；exaggeration 变化时 provider 不变（仅各层准备结果重算）。
+ */
+function TerrainSceneLayers({
+  heightmap,
+  geometry,
+  labelAssets,
+  exaggeration,
+}: {
+  readonly heightmap: HeightmapTextureLoadResult
+  readonly geometry: ProvinceGeometryState
+  readonly labelAssets: PlaceLabelAssetsState
+  readonly exaggeration: number
+}): ReactNode {
+  // 由 heightmap 的 meta + pixels 构造共享 CPU ElevationProvider（与 GPU 位移同一份高程
+  // 事实源）；仅依赖 heightmap（pixels / meta 引用稳定）。
+  const provider = useMemo(
+    () => createElevationProvider(heightmap.meta, heightmap.pixels),
+    [heightmap],
+  )
+  return (
+    <ProvinceHoverProvider>
+      {geometry.phase === 'ready' && (
+        <>
+          <ProvinceBordersLayer
+            geometry={geometry.contract}
+            provider={provider}
+            exaggeration={exaggeration}
+          />
+          <ProvinceHoverPicker features={geometry.contract.features} />
+        </>
+      )}
+      {labelAssets.phase === 'ready' && (
+        <PlaceLabelsLayer assets={labelAssets} provider={provider} exaggeration={exaggeration} />
+      )}
+    </ProvinceHoverProvider>
+  )
 }
 
 /**
@@ -214,6 +394,7 @@ const RUNTIME_TERRAIN_CONFIG: TerrainRenderConfig | { readonly error: string } =
 function App() {
   const heightmap = useHeightmap()
   const geometry = useProvinceGeometry()
+  const labelAssets = usePlaceLabelAssets()
 
   // 配置非法（如 URL 覆盖越界）：确定性失败，显式暴露，不带病渲染。
   if ('error' in RUNTIME_TERRAIN_CONFIG) {
@@ -230,6 +411,15 @@ function App() {
     )
   }
 
+  // 省界几何 / 标签资产（地点目录 / 字体清单）加载失败均按政治红线（SPEC §6：边界完整、
+  // 台湾 / 港澳标注齐全是事故级问题）显式暴露为整页错误：不渲染一张缺省界或缺标注的地图。
+  const assetErrorMessage =
+    geometry.phase === 'error'
+      ? `省界数据加载失败：${geometry.message}`
+      : labelAssets.phase === 'error'
+        ? `标签数据加载失败：${labelAssets.message}`
+        : null
+
   return (
     <main className="screen">
       <header className="screen-header">
@@ -238,9 +428,8 @@ function App() {
       </header>
       <section className="screen-stage" aria-label="3D 地形画布挂载区">
         {heightmap.phase === 'ready' ? (
-          geometry.phase === 'error' ? (
-            // 省界几何加载失败按政治红线（SPEC §6）显式暴露：不渲染一张缺省界的地图。
-            <p className="screen-status" role="alert">省界数据加载失败：{geometry.message}</p>
+          assetErrorMessage !== null ? (
+            <p className="screen-status" role="alert">{assetErrorMessage}</p>
           ) : (
           <Canvas
             camera={{
@@ -271,22 +460,17 @@ function App() {
             <ChinaTerrainMesh heightmap={heightmap.heightmap} config={RUNTIME_TERRAIN_CONFIG} />
             <SeaSurface />
             {/*
-              省级贴地边界与 hover 拾取（TASK-009，SPEC §3.6 / §4.2）：hover 焦点状态由
-              ProvinceHoverProvider 保管（Canvas 子树内共享，TASK-010 标签模块同源消费）；
-              几何就绪时挂载边界层与唯一拾取点。无 click 行为。
+              省级贴地边界、hover 拾取与省名标签 / 省会光点（TASK-009 / TASK-010，SPEC §3.6 /
+              §3.7 / §4.2 / §7.5）：共享 hover 焦点状态由 ProvinceHoverProvider 保管（Canvas
+              子树内共享，省界与标签同源消费）；共享 ElevationProvider 由场景内容层统一构造，
+              省界层与标签层共用同一实例。无 click 行为。
             */}
-            <ProvinceHoverProvider>
-              {geometry.phase === 'ready' && (
-                <>
-                  <ProvinceBordersLayer
-                    heightmap={heightmap.heightmap}
-                    geometry={geometry.contract}
-                    exaggeration={RUNTIME_TERRAIN_CONFIG.exaggeration}
-                  />
-                  <ProvinceHoverPicker features={geometry.contract.features} />
-                </>
-              )}
-            </ProvinceHoverProvider>
+            <TerrainSceneLayers
+              heightmap={heightmap.heightmap}
+              geometry={geometry}
+              labelAssets={labelAssets}
+              exaggeration={RUNTIME_TERRAIN_CONFIG.exaggeration}
+            />
           </Canvas>
           )
         ) : (

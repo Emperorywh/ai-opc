@@ -11,9 +11,15 @@
  *   计数一致 / fontFile 约束 / disclaimer）逐条确定性失败。
  * - validateLabelFontCoverage：覆盖通过；删除必需字符 → coverage-incomplete 且携带缺失字符；
  *   结构非法清单 → manifest-contract-invalid（不进入覆盖判定）。
+ * - loadLabelFontManifest（TASK-010 运行时清单加载）：成功路径返回经结构校验的清单且对
+ *   「生产地点目录渲染字符串」覆盖校验通过（加载 → 覆盖闭环）；fetch 失败 / HTTP 非 2xx /
+ *   结构非法 → 各自稳定 code 抛 LabelFontLoadError，绝不返回伪造清单。
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   validateLabelFontManifest,
   type LabelFontManifestContract,
@@ -22,12 +28,16 @@ import {
 } from '../src/geo-contracts'
 import { expectValid, expectInvalidContainingCodes } from './_assertions'
 import {
+  LabelFontLoadError,
   collectAllLabelDomainStrings,
   collectRequiredLabelFontStrings,
   extractCharactersFromStrings,
+  loadLabelFontManifest,
   partitionLabelDomainStrings,
   validateLabelFontCoverage,
 } from '../src/lib/label-font'
+import { collectRenderedPlaceLabelStrings } from '../src/lib/place-labels'
+import { PLACE_LABELS_CONFIG } from '../src/config/place-labels'
 import {
   COMPLIANCE_DISCLAIMER,
   SOUTH_CHINA_SEA_INSET_TITLE,
@@ -247,6 +257,92 @@ describe('validateLabelFontCoverage（覆盖校验）', () => {
     if (!outcome.ok) {
       expect(outcome.code).toBe('label-font.manifest-contract-invalid')
       expect(outcome.missingCharacters).toBeUndefined()
+    }
+  })
+})
+
+describe('loadLabelFontManifest（TASK-010 运行时清单加载；fetch 以 vi.stubGlobal 注入 stub，不触网）', () => {
+  /** 构造一个最小 fetch stub 响应。 */
+  function stubResponse(init: { ok: boolean; status?: number; json?: () => Promise<unknown> }): Response {
+    return {
+      ok: init.ok,
+      status: init.status ?? (init.ok ? 200 : 500),
+      json: init.json ?? (async () => ({})),
+    } as unknown as Response
+  }
+
+  /** 生产字体清单载荷（与运行时 fetch 的 JSON 同一份）。 */
+  function loadProductionManifestPayload(): unknown {
+    return JSON.parse(
+      readFileSync(
+        resolve(fileURLToPath(import.meta.url), '..', '..', 'public', 'fonts', 'china-labels-font.manifest.json'),
+        'utf-8'),
+    ) as unknown
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('成功路径：stub fetch 返回生产清单 JSON → 返回经结构校验的 manifest（kind / characters 非空）', async () => {
+    const payload = loadProductionManifestPayload()
+    vi.stubGlobal('fetch', async () => stubResponse({ ok: true, json: async () => payload }))
+    const manifest = await loadLabelFontManifest(PLACE_LABELS_CONFIG.fontManifestPath)
+    expect(manifest.kind).toBe('label-font-manifest')
+    expect(manifest.characters.length).toBeGreaterThan(0)
+    expect(manifest.fontFile).toBe('china-labels-font.subset.ttf')
+  })
+
+  it('成功路径：生产清单对「生产地点目录渲染字符串」覆盖校验通过（加载 → 覆盖闭环）', async () => {
+    // 与 App 装配层同一闭环：loadLabelFontManifest → validateLabelFontCoverage（渲染字符串由
+    // collectRenderedPlaceLabelStrings 从生产地点目录提取）。缺字会在此确定性失败。
+    const payload = loadProductionManifestPayload()
+    vi.stubGlobal('fetch', async () => stubResponse({ ok: true, json: async () => payload }))
+    const manifest = await loadLabelFontManifest(PLACE_LABELS_CONFIG.fontManifestPath)
+    const places = JSON.parse(
+      readFileSync(
+        resolve(fileURLToPath(import.meta.url), '..', '..', 'public', 'geo', 'china-places.json'),
+        'utf-8'),
+    ) as PlaceDirectoryContract
+    const coverage = validateLabelFontCoverage(manifest, collectRenderedPlaceLabelStrings(places))
+    expect(coverage.ok, coverage.ok ? '' : coverage.message).toBe(true)
+  })
+
+  it('fetch 抛错（网络层失败）→ LabelFontLoadError(manifest-fetch-failed)', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('network down')
+    })
+    try {
+      await loadLabelFontManifest(PLACE_LABELS_CONFIG.fontManifestPath)
+      expect.unreachable('网络失败应抛 LabelFontLoadError')
+    } catch (e) {
+      expect(e).toBeInstanceOf(LabelFontLoadError)
+      expect((e as LabelFontLoadError).code).toBe('label-font.manifest-fetch-failed')
+    }
+  })
+
+  it('HTTP 非 2xx → LabelFontLoadError(manifest-fetch-failed)', async () => {
+    vi.stubGlobal('fetch', async () => stubResponse({ ok: false, status: 404 }))
+    try {
+      await loadLabelFontManifest(PLACE_LABELS_CONFIG.fontManifestPath)
+      expect.unreachable('HTTP 404 应抛 LabelFontLoadError')
+    } catch (e) {
+      expect(e).toBeInstanceOf(LabelFontLoadError)
+      expect((e as LabelFontLoadError).code).toBe('label-font.manifest-fetch-failed')
+      expect((e as LabelFontLoadError).message).toContain('404')
+    }
+  })
+
+  it('载荷未通过清单结构契约 → LabelFontLoadError(manifest-contract-invalid)，绝不返回伪造清单', async () => {
+    vi.stubGlobal('fetch', async () =>
+      stubResponse({ ok: true, json: async () => ({ kind: 'wrong-kind', characters: [] }) }),
+    )
+    try {
+      await loadLabelFontManifest(PLACE_LABELS_CONFIG.fontManifestPath)
+      expect.unreachable('结构非法应抛 LabelFontLoadError')
+    } catch (e) {
+      expect(e).toBeInstanceOf(LabelFontLoadError)
+      expect((e as LabelFontLoadError).code).toBe('label-font.manifest-contract-invalid')
     }
   })
 })
